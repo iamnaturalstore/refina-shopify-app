@@ -69,3 +69,6 @@ coverage/
 *.tgz
 *.7z
 *.zip
+
+# old migration folder
+refina-migrate/
