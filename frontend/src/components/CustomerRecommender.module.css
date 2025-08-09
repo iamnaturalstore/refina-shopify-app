@@ -1,0 +1,199 @@
+/* Layout Container */
+.container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 1rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* Heading */
+.heading {
+  text-align: center;
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #d10000;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+/* Subtext */
+.subtext {
+  text-align: center;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Concern Buttons */
+.concernButtons {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.concernButtons button {
+  padding: 0.5rem 1rem;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.concernButtons button:hover {
+  background-color: #ebebeb;
+}
+
+/* Textarea */
+.textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.75rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  resize: vertical;
+}
+
+/* Ask Button */
+.askButton {
+  display: block;
+  margin: 0 auto 2rem auto;
+  background-color: #d10000;
+  color: white;
+  font-weight: bold;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.askButton:disabled {
+  background-color: #999;
+  cursor: not-allowed;
+}
+
+/* AI Response Text */
+.response {
+  background-color: #f9f9f9;
+  padding: 1rem;
+  border-radius: 8px;
+  font-size: 1rem;
+  margin-bottom: 1.5rem;
+  border-left: 4px solid #d10000;
+}
+
+/* Product Grid */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+/* Product Card */
+.card {
+  background-color: #fff;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.image {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+/* Modal Overlay */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+/* Modal */
+.modal {
+  background-color: #fff;
+  padding: 2rem;
+  border-radius: 10px;
+  max-width: 500px;
+  width: 90%;
+  text-align: center;
+}
+
+.modal img {
+  width: 100%;
+  height: auto;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+}
+
+/* Buy Now Button */
+.buyButton {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.75rem 1.5rem;
+  background-color: #d10000;
+  color: white;
+  font-weight: bold;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.buyButton:hover {
+  background-color: #b00000;
+}
+
+.productTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem 0;
+  color: #333;
+}
+
+.productDescription {
+  font-size: 0.95rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.responseBox {
+  background-color: #f9f9f9;
+  padding: 1rem;
+  margin: 1.5rem 0;
+  border-left: 5px solid #d10000;
+  border-radius: 6px;
+}
+
+.responseBox h2 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  color: #d10000;
+}
+
+.responseBox p {
+  font-size: 1rem;
+  line-height: 1.5;
+  color: #333;
+}

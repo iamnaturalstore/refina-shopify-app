@@ -1,0 +1,96 @@
+.
+├── _archive-app
+│   ├── lib
+│   │   └── firebase.server.js
+│   ├── package.json
+│   ├── routes
+│   │   ├── _index.jsx
+│   │   ├── admin-dashboard.jsx
+│   │   └── admin-settings.jsx
+│   ├── shopify.app.toml
+│   └── utils
+│       └── session.server.js
+├── addStoreIdToProducts.js
+├── frontend
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package.json
+│   ├── scripts
+│   │   ├── fixProductImages.js
+│   │   ├── logProductImages.js
+│   │   └── scripts
+│   ├── src
+│   │   ├── app.jsx
+│   │   ├── components
+│   │   │   ├── AdminDashboard.jsx
+│   │   │   ├── AdminDashboardWrapper.jsx
+│   │   │   ├── AdminSettings.jsx
+│   │   │   ├── CustomerRecommender.css
+│   │   │   ├── CustomerRecommender.jsx
+│   │   │   └── CustomerRecommender.module.css
+│   │   ├── firebase.js
+│   │   ├── gemini.js
+│   │   ├── main.jsx
+│   │   └── utils
+│   │       ├── buildGeminiPrompt.js
+│   │       ├── concernMatching.js
+│   │       ├── fallbackProductMatch.js
+│   │       ├── fetchStoreProducts.js
+│   │       ├── fetchStoreSettings.js
+│   │       ├── matchProducts.js
+│   │       ├── normalizeConcern.js
+│   │       ├── planSync.js
+│   │       └── stripHtml.js
+│   └── vite.config.js
+├── lib
+├── package-lock.json
+├── package.json
+├── refina-backend
+│   ├── api
+│   │   ├── billing
+│   │   │   ├── confirm.js
+│   │   │   └── subscribe.js
+│   │   ├── dev-test-set-plan.js
+│   │   ├── legacy-confirm-billing.js
+│   │   └── legacy-upgrade-plan.js
+│   ├── lib
+│   │   └── memory-storage.js
+│   ├── middleware
+│   ├── package.json
+│   ├── routes
+│   │   └── billing.js
+│   ├── scripts
+│   │   ├── cleanupFlatProducts.js
+│   │   ├── deleteAllProducts.js
+│   │   ├── importProductsNested.js
+│   │   ├── importProductsSingleImage.js
+│   │   └── service-account.json
+│   ├── server.js
+│   ├── Shopify
+│   │   └── syncProducts.mjs
+│   └── shopify.js
+├── refina-backup-2025-08-08.zip
+├── refina-frontend-backup-20250806-1832.zip
+├── refina-migrate
+│   ├── migrateProducts.js
+│   ├── package.json
+│   ├── service-account.json
+│   └── yarn.lock
+├── refina-structure.txt
+├── refina-tree-short.txt
+├── refina-tree.txt
+├── remix.config.cjs
+├── scripts
+│   ├── cleanupFlatProducts.js
+│   ├── enrichProductsWithDetails.js
+│   ├── generateConcernMappings.js
+│   ├── mapConcernsAutoInBatches.js
+│   ├── mapConcernsInBatches.js
+│   ├── mapConcernsToProducts.js
+│   ├── migrateProducts.js
+│   └── service-account.json
+├── service-account.json
+├── tsconfig.json
+└── yarn.lock
+
+22 directories, 72 files

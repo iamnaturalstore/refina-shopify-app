@@ -1,0 +1,57 @@
+.
+├── AdminSettings.jsx
+├── app
+│   ├── lib
+│   │   └── firebase.server.js
+│   ├── package.json
+│   ├── routes
+│   │   ├── _index.jsx
+│   │   ├── admin-dashboard.jsx
+│   │   └── admin-settings.jsx
+│   ├── shopify.app.toml
+│   └── utils
+│       └── session.server.js
+├── frontend
+│   ├── eslint.config.js
+│   ├── index.html
+│   ├── package.json
+│   ├── public
+│   │   └── vite.svg
+│   ├── README.md
+│   ├── server.js
+│   ├── src
+│   │   ├── App.css
+│   │   ├── App.jsx
+│   │   ├── assets
+│   │   ├── components
+│   │   ├── firebase.js
+│   │   ├── gemini.js
+│   │   ├── index.css
+│   │   ├── lib
+│   │   ├── main.jsx
+│   │   └── utils
+│   └── vite.config.js
+├── lib
+├── package.json
+├── refina-backend
+│   ├── api
+│   │   ├── billing
+│   │   ├── dev-test-set-plan.js
+│   │   ├── legacy-confirm-billing.js
+│   │   └── legacy-upgrade-plan.js
+│   ├── lib
+│   │   └── memory-storage.js
+│   ├── middleware
+│   ├── package.json
+│   ├── routes
+│   │   └── billing.js
+│   ├── server.js
+│   ├── Shopify
+│   │   └── syncProducts.mjs
+│   └── shopify.js
+├── refina-structure.txt
+├── remix.config.cjs
+├── tsconfig.json
+└── yarn.lock
+
+20 directories, 35 files

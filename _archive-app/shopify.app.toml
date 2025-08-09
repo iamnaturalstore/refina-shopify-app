@@ -1,0 +1,24 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "8b7905126e30769a20c27b4cdd775722"
+name = "refina"
+handle = "refina"
+application_url = "https://refina.ngrok.app/"
+embedded = true
+
+[webhooks]
+api_version = "2025-07"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products"
+
+[auth]
+redirect_urls = [
+  "https://refina.ngrok.app/auth/callback",
+  "https://refina.ngrok.app/auth/shopify/callback",
+  "https://refina.ngrok.app/api/auth/callback"
+]
+
+[pos]
+embedded = false
