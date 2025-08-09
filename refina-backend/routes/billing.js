@@ -2,17 +2,9 @@
 import express from "express";
 import shopify from "../shopify.js";
 import dotenv from "dotenv";
-import admin from "firebase-admin";
+import { getPlan, setPlan } from "../utils/planSync.js";
 
 dotenv.config({ path: "../.env" });
-
-// --- Firebase Admin (keep your pattern) ---
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_KEY)),
-  });
-}
-const db = admin.firestore();
 
 const router = express.Router();
 
@@ -109,7 +101,7 @@ router.get("/start", async (req, res) => {
 });
 
 // --- STEP 2: After confirmation, Shopify redirects back to RETURN_PATH ---
-// This route queries active subscriptions, maps to our plan, and writes Firestore plans/{storeId}
+// This route queries active subscriptions, maps to our plan, and writes plans/{storeId}
 router.get("/thanks", async (req, res) => {
   const session = res.locals.shopify?.session;
   if (!session) {
@@ -166,16 +158,13 @@ router.get("/thanks", async (req, res) => {
 
     if (!subs.length) {
       // nothing active -> free
-      await db.collection("plans").doc(storeId).set(
-        {
-          level: "free",
-          shopDomain: s.shop,
-          chargeId: null,
-          trialEndsAt: null,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+      await setPlan({
+        storeId,
+        shopDomain: s.shop,
+        level: "free",
+        chargeId: null,
+        trialEndsAt: null,
+      });
       return res.redirect(`/admin?plan=free`);
     }
 
@@ -200,16 +189,13 @@ router.get("/thanks", async (req, res) => {
       else level = "free";
     }
 
-    await db.collection("plans").doc(storeId).set(
-      {
-        level,
-        shopDomain: s.shop,
-        chargeId: sub.id,
-        trialEndsAt: sub.trialEndAt ?? null,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    await setPlan({
+      storeId,
+      shopDomain: s.shop,
+      level,
+      chargeId: sub.id,
+      trialEndsAt: sub.trialEndAt ?? null,
+    });
 
     // Back to your admin (adjust if your admin route differs)
     return res.redirect(`/admin?plan=${encodeURIComponent(level)}`);
@@ -226,9 +212,8 @@ router.get("/current", async (_req, res) => {
     if (!session) return res.json({ ok: true, plan: { level: "free" } });
 
     const storeId = toStoreId(session.shop);
-    const snap = await db.collection("plans").doc(storeId).get();
-    const plan = snap.exists ? snap.data() : { level: "free" };
-    return res.json({ ok: true, plan });
+    const plan = await getPlan({ storeId });
+    return res.json({ ok: true, plan: plan ?? { level: "free" } });
   } catch (e) {
     console.error("❌ Billing /current error:", e);
     return res.status(500).json({ ok: false, error: "Failed to fetch plan" });

@@ -1,1 +1,61 @@
+# Node dependencies
 node_modules/
+.pnp/
+.pnp.js
+.pnp.data.json
+
+# Yarn
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
+.yarnrc.yml
+yarn-error.log
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Shopify App credentials & local configs
+.shopify-cli.yml
+.shopify/
+*.ngrok.io
+*.ngrok-free.app
+
+# Build output
+dist/
+build/
+.cache/
+.next/
+out/
+
+# Coverage reports
+coverage/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Firebase Admin private key (never commit!)
+firebase-service-account.json
+*.serviceAccountKey.json
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+*.pid.lock
+
+# VS Code settings
+.vscode/
