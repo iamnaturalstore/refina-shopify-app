@@ -62,3 +62,9 @@ coverage/
 # --- Misc
 *.pid
 *.pid.lock
+
+# Backups/archives
+*.zip
+*.tar.gz
+*.tgz
+*.7z
