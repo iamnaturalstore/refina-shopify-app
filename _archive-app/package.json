@@ -1,8 +1,0 @@
-{
-  "name": "app",
-  "private": true,
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "shopify app dev --store=refina-demo.myshopify.com"
-  }
-}

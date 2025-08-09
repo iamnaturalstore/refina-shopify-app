@@ -25,6 +25,7 @@ pnpm-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*
 
 # Shopify App credentials & local configs
 .shopify-cli.yml
