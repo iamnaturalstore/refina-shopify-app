@@ -72,3 +72,7 @@ coverage/
 
 # old migration folder
 refina-migrate/
+
+# Firebase service account (do not commit)
+refina-backend/secure/
+scripts/service-account.json
