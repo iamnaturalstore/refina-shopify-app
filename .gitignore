@@ -76,3 +76,8 @@ refina-migrate/
 # Firebase service account (do not commit)
 refina-backend/secure/
 scripts/service-account.json
+
+**/node_modules/
+**/.vite/
+**/dist/
+refina-backend/admin-ui-dist/
