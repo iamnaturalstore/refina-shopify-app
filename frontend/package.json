@@ -18,6 +18,7 @@
     "styled-components": "^6.1.19"
   },
   "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.1.0",
     "@vitejs/plugin-react": "^4.0.0",
     "eslint": "^9.32.0",
     "eslint-config-react-app": "^7.0.1",

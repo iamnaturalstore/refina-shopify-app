@@ -1,6 +1,6 @@
 import "dotenv/config";
 import fetch from "node-fetch";
-import admin from "firebase-admin";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 import fs from "fs"; // ✅ load service account from file
 
 // ✅ Environment variables

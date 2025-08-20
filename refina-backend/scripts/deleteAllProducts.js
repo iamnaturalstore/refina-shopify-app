@@ -1,8 +1,7 @@
 import "dotenv/config";
-import admin from "firebase-admin";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 
 // Parse service key from environment variable
-const serviceKey = JSON.parse(process.env.FIREBASE_SERVICE_KEY);
 
 // Initialize Firebase Admin SDK
 if (!admin.apps.length) {

@@ -1,222 +1,356 @@
-// refina-backend/routes/billing.js
+// refina-backend/routes/billing.js - GOLDEN PATH subscription plans working
+"use strict";
+
 import express from "express";
 import shopify from "../shopify.js";
-import dotenv from "dotenv";
-import { getPlan, setPlan } from "../utils/planSync.js";
-
-dotenv.config({ path: "../.env" });
+import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
 
 const router = express.Router();
 
-// --- Config ---
-const BILLING_TEST_MODE = String(process.env.BILLING_TEST_MODE ?? "true") === "true";
-const CURRENCY = process.env.BILLING_CURRENCY || "AUD";
-const RETURN_PATH = process.env.BILLING_RETURN_PATH || "/api/billing/thanks";
+/* --------------------------- Utilities --------------------------- */
 
-// --- App Plans (AUD) ---
-const PLAN_DEFS = {
-  starter: { name: "Refina Starter", amount: 19.99, interval: "EVERY_30_DAYS", trialDays: 0 },
-  growth:  { name: "Refina Growth",  amount: 39.99, interval: "EVERY_30_DAYS", trialDays: 0 },
-  "pro+":  { name: "Refina Pro+",    amount: 79.99, interval: "EVERY_30_DAYS", trialDays: 14 },
-};
-
-// Helper: normalize storeId from shop domain
-function toStoreId(shopDomain) {
-  return shopDomain.replace(".myshopify.com", "");
+function absoluteAppUrl(req) {
+  // Works in dev (ngrok) and prod behind proxies
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host = req.get("x-forwarded-host") || req.get("host");
+  return `${proto}://${host}`;
 }
 
-// --- STEP 1: Start billing (redirect merchant to Shopify confirmation) ---
-// Accepts: GET /start?plan=starter|growth|pro+
-router.get("/start", async (req, res) => {
-  const session = res.locals.shopify?.session;
-  if (!session) {
-    console.warn("⚠️ /billing/start without valid Shopify session");
-    return res.status(401).send("Missing Shopify session. Open from inside Shopify Admin.");
+function normalizePlan(data) {
+  if (!data) return null;
+  const level = String(data.level || "").toLowerCase(); // "free" | "pro" | "premium" | (legacy) "pro+"
+  const status = data.status || "NONE";
+  return { level, status };
+}
+
+/**
+ * Resolve shop/storeId with your existing guard + query fallbacks.
+ * No session loading here (Firestore-only for /plan).
+ * Throws 401 if shop cannot be determined.
+ */
+async function resolveShopContext(req, res) {
+  // 1) Use guard-resolved shop from server.js
+  let shop = (typeof req.shop === "string" && req.shop) ? req.shop : null;
+
+  // 2) Fallbacks: ?shop / ?host (admin.shopify.com/store/<store> or <store>.myshopify.com/admin)
+  const q = req.query || {};
+  if (!shop && typeof q.shop === "string" && q.shop.endsWith(".myshopify.com")) {
+    shop = q.shop;
+  }
+  if (!shop && typeof q.host === "string") {
+    try {
+      const decoded = Buffer.from(q.host, "base64").toString("utf8");
+      const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
+      const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
+      if (m1?.[1]) shop = `${m1[1]}.myshopify.com`;
+      if (!shop && m2?.[1]) shop = `${m2[1]}.myshopify.com`;
+    } catch { /* no-op */ }
   }
 
-  const planKey = (req.query.plan || "").toLowerCase();
-  const def = PLAN_DEFS[planKey];
-  if (!def) {
-    return res.status(400).send("Unknown or missing plan. Use ?plan=starter|growth|pro+");
+  // 3) Cookie fallback (mirrors server.js guard)
+  if (!shop && req.cookies?.storeId) {
+    shop = `${req.cookies.storeId}.myshopify.com`;
   }
 
+  if (!shop) {
+    const err = new Error("Missing shop context");
+    err.status = 401;
+    throw err;
+  }
+
+  const storeId = shop.replace(".myshopify.com", "");
+  return { shop, storeId };
+}
+
+/* ----------------------------- Routes ---------------------------- */
+
+/**
+ * GET /api/billing/plan
+ * Returns { plan: { level, status } }
+ */
+router.get("/plan", async (req, res) => {
   try {
-    const client = new shopify.api.clients.Graphql({ session });
-    const returnUrl = `https://${session.shop}${RETURN_PATH}`;
-
-    const mutation = `
-      mutation appSubscriptionCreate(
-        $name: String!,
-        $returnUrl: URL!,
-        $test: Boolean!,
-        $trialDays: Int!,
-        $lineItems: [AppSubscriptionLineItemInput!]!
-      ) {
-        appSubscriptionCreate(
-          name: $name
-          returnUrl: $returnUrl
-          test: $test
-          trialDays: $trialDays
-          lineItems: $lineItems
-        ) {
-          userErrors { field message }
-          confirmationUrl
-        }
-      }
-    `;
-
-    const variables = {
-      name: def.name,
-      returnUrl,
-      test: BILLING_TEST_MODE,
-      trialDays: def.trialDays,
-      lineItems: [
-        {
-          plan: {
-            appRecurringPricingDetails: {
-              price: { amount: def.amount, currencyCode: CURRENCY },
-              interval: def.interval,
-            },
-          },
-        },
-      ],
-    };
-
-    const resp = await client.request(mutation, variables);
-    const result = resp?.data?.appSubscriptionCreate;
-    if (result?.userErrors?.length) {
-      console.error("appSubscriptionCreate errors", result.userErrors);
-      return res.status(400).send(result.userErrors.map(e => e.message).join(", "));
+    const { storeId } = await resolveShopContext(req, res);
+    let plan = null;
+    const snap = await dbAdmin.collection("plans").doc(storeId).get();
+    plan = snap.exists ? normalizePlan(snap.data()) : { level: "free", status: "NONE" };
+    // Legacy migration: treat stored "pro+" as "premium"
+    if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
+      plan = { ...plan, level: "premium" };
     }
-
-    const confirmationUrl = result?.confirmationUrl;
-    if (!confirmationUrl) return res.status(500).send("No confirmation URL returned from Shopify.");
-
-    // Redirect to Shopify confirmation screen
-    return res.redirect(confirmationUrl);
+    return res.json({ plan });
   } catch (err) {
-    console.error("❌ Billing /start error:", err);
-    return res.status(500).send("Error creating billing session");
+    if (err?.status === 401) {
+      res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
+      return res.send("reauthorize");
+    }
+    console.error("GET /api/billing/plan error", err);
+    return res.status(500).json({ error: "Plan lookup failed" });
   }
 });
 
-// --- STEP 2: After confirmation, Shopify redirects back to RETURN_PATH ---
-// This route queries active subscriptions, maps to our plan, and writes plans/{storeId}
-router.get("/thanks", async (req, res) => {
-  const session = res.locals.shopify?.session;
-  if (!session) {
-    // Fallback for cases where session isn't injected (rare); try loading by shop param
-    const { shop } = req.query;
-    if (!shop) {
-      console.warn("⚠️ /billing/thanks without session or shop");
-      return res.status(401).send("Missing Shopify session.");
-    }
-    try {
-      const found = await shopify.api.session.storage.findByShop(shop);
-      if (!found) return res.status(401).send("Missing Shopify session for shop");
-      res.locals.shopify = { session: found };
-    } catch (e) {
-      console.error("❌ Could not recover session:", e);
-      return res.status(401).send("Missing Shopify session.");
-    }
-  }
-
+/**
+ * POST /api/billing/subscribe
+ * Body: { plan: "pro" | "premium" }  (also accepts legacy: "pro+", "pro plus", "pro_plus")
+ * Returns:
+ *  - 200 { confirmationUrl } on success
+ *  - 409 { error: "ALREADY_ACTIVE", level } if same plan clicked
+ *  - 409 { error: "ALREADY_HAS_ACTIVE", message } if Shopify blocks due to active charge and cancel failed/not allowed
+ *  - 400 { error, errors? } for other userErrors
+ */
+router.post("/subscribe", async (req, res) => {
   try {
-    const { session: s } = res.locals.shopify;
-    const client = new shopify.api.clients.Graphql({ session: s });
+    const { shop } = await resolveShopContext(req, res);
 
-    const query = `
-      query {
+    // Load OFFLINE session
+    const offlineId = shopify.session.getOfflineId(shop);
+    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+    let offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+
+    // Dev fallback: allow admin token if present
+    if (!offlineSession?.accessToken && process.env.SHOPIFY_ADMIN_API_TOKEN && shopify.session?.customAppSession) {
+      offlineSession = shopify.session.customAppSession(shop);
+    }
+    if (!offlineSession?.accessToken) {
+      return res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`)
+        .send("reauthorize");
+    }
+
+    // Accept body OR query; normalize legacy strings to canonical keys
+    const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
+// Normalize legacy spellings: pro%2B -> pro+, pro_plus/pro-plus -> pro plus
+const normalized = raw
+  .replace(/%2b/gi, "+")
+  .replace(/[_-]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const target =
+  /\bpremium\b/.test(normalized)
+    ? "premium"
+    : /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
+    ? "premium" // legacy names map to premium
+    : /^pro\b/.test(normalized)
+    ? "pro"
+    : "";
+
+if (!["pro", "premium"].includes(target)) {
+  return res.status(400).json({ error: "Invalid plan" });
+}
+
+
+    const client = new shopify.clients.Graphql({ session: offlineSession });
+
+    // 1) Determine current active level + current sub id (if any)
+    const currentQ = `
+      query AppInstall {
         currentAppInstallation {
           activeSubscriptions {
             id
             name
             status
-            trialDays
-            trialEndAt
-            createdAt
-            lineItems {
-              plan {
-                pricingDetails {
-                  __typename
-                  ... on AppRecurringPricing {
-                    price { amount currencyCode }
-                    interval
-                  }
-                }
-              }
-            }
           }
         }
       }
     `;
+    const currentResp = await client.request(currentQ);
+    const subs = currentResp?.data?.currentAppInstallation?.activeSubscriptions || [];
 
-    const r = await client.request(query);
-    const subs = r?.data?.currentAppInstallation?.activeSubscriptions || [];
+    let currentLevel = "free";
+    let currentSubId = null;
+    for (const s of subs) {
+      const n = String(s?.name || "").toLowerCase();
+      if (n.includes("premium") || n.includes("pro+") || n.includes("pro plus")) {
+        currentLevel = "premium";
+        currentSubId = s?.id || currentSubId;
+        break;
+      }
+      if (n.includes("pro")) {
+        if (currentLevel !== "premium") {
+          currentLevel = "pro";
+          currentSubId = s?.id || currentSubId;
+        }
+      }
+    }
 
-    const storeId = toStoreId(s.shop);
+    // Block clicks on the already-active plan (lets UI gray-out safely)
+    if (currentLevel === target) {
+      return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
+    }
 
-    if (!subs.length) {
-      // nothing active -> free
-      await setPlan({
-        storeId,
-        shopDomain: s.shop,
-        level: "free",
-        chargeId: null,
-        trialEndsAt: null,
+    // 2) Get shop currency (keeps pricing correct per shop)
+    const shopQ = `query { shop { currencyCode } }`;
+    const shopResp = await client.request(shopQ);
+    let currencyCode = (shopResp?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
+
+    // 3) Plan catalog (prices from your listing)
+    const PLAN = target === "premium"
+      ? { name: "Premium", amount: "29.00" }
+      : { name: "Pro",      amount: "19.00" };
+
+    // --- Build a clean HTTPS returnUrl on your app host, no fragments for GraphQL parsing ---
+    const rawHost = process.env.HOST || absoluteAppUrl(req); // e.g. https://refina.ngrok.app
+    let host = String(rawHost).replace(/\/$/, "");
+    if (host.startsWith("http://")) host = host.replace(/^http:\/\//, "https://");
+    // Use a simple path; your UI can read query params if needed
+    const returnUrl = `${host}/admin-ui/`;
+
+    // 4) Create helper to call appSubscriptionCreate
+    const amt = PLAN.amount; // Decimal scalar as string
+    const cc = currencyCode.replace(/[^A-Z]/g, ""); // sanitize to enum token
+
+    const createMutation = `
+      mutation AppSubscribe {
+        appSubscriptionCreate(
+          name: "${PLAN.name}"
+          returnUrl: "${returnUrl}"
+          test: ${process.env.NODE_ENV !== "production"}
+          lineItems: [{
+            plan: { appRecurringPricingDetails: { price: { amount: "${amt}", currencyCode: ${cc} }, interval: EVERY_30_DAYS } }
+          }]
+        ) {
+          userErrors { field message }
+          confirmationUrl
+          appSubscription { id }
+        }
+      }
+    `;
+
+    const tryCreate = async () => {
+      const resp = await client.request(createMutation);
+      const payload = resp?.data?.appSubscriptionCreate;
+      const errors = payload?.userErrors || [];
+      const confirmationUrl = payload?.confirmationUrl || null;
+      return { errors, confirmationUrl };
+    };
+
+    // First attempt: try to create directly
+    let { errors, confirmationUrl } = await tryCreate();
+    if (!errors.length && confirmationUrl) {
+      return res.json({ confirmationUrl });
+    }
+
+    // If Shopify blocks due to already-active sub, optionally cancel and retry ONCE
+    const msg = (errors || []).map(e => e?.message || "").join("; ");
+    const looksLikeActiveBlock = /already.*active|existing.*active|active recurring/i.test(msg);
+
+    if (looksLikeActiveBlock && currentSubId) {
+      const cancelMutation = `
+        mutation CancelSub($id: ID!) {
+          appSubscriptionCancel(id: $id) {
+            userErrors { field message }
+            appSubscription { id }
+          }
+        }
+      `;
+      const cancelResp = await client.request(cancelMutation, { id: currentSubId });
+      const cancelErrors = cancelResp?.data?.appSubscriptionCancel?.userErrors || [];
+
+      if (cancelErrors.length) {
+        return res.status(409).json({
+          error: "ALREADY_HAS_ACTIVE",
+          message: cancelErrors.map(e => e?.message || "Cancel failed").join("; "),
+        });
+      }
+
+      const retry = await tryCreate();
+      if (!retry.errors.length && retry.confirmationUrl) {
+        return res.json({ confirmationUrl: retry.confirmationUrl });
+      }
+
+      return res.status(400).json({
+        error: "CREATE_AFTER_CANCEL_FAILED",
+        errors: retry.errors,
       });
-      return res.redirect(`/admin?plan=free`);
     }
 
-    // most recent active sub
-    subs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const sub = subs[0];
-
-    // Map by name (preferred) or price fallback
-    const byName =
-      (sub.name?.includes("Refina Pro+") && "pro+") ||
-      (sub.name?.includes("Refina Growth") && "growth") ||
-      (sub.name?.includes("Refina Starter") && "starter") ||
-      null;
-
-    let level = byName;
-    if (!level) {
-      const p = sub.lineItems?.[0]?.plan?.pricingDetails;
-      const amt = p?.price?.amount;
-      if (amt === 79.99) level = "pro+";
-      else if (amt === 39.99) level = "growth";
-      else if (amt === 19.99) level = "starter";
-      else level = "free";
+    if (errors.length) {
+      return res.status(400).json({ error: "Subscription creation failed", errors });
     }
 
-    await setPlan({
-      storeId,
-      shopDomain: s.shop,
-      level,
-      chargeId: sub.id,
-      trialEndsAt: sub.trialEndAt ?? null,
-    });
-
-    // Back to your admin (adjust if your admin route differs)
-    return res.redirect(`/admin?plan=${encodeURIComponent(level)}`);
+    return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
-    console.error("❌ Billing /thanks error:", err);
-    return res.redirect(`/admin?billingError=1`);
+    if (err?.status === 401) {
+      res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
+      return res.send("reauthorize");
+    }
+    console.error("POST /api/billing/subscribe error", err);
+    return res.status(500).json({ error: "Subscribe failed" });
   }
 });
 
-// --- STEP 3: Read current plan (for Admin UI) ---
-router.get("/current", async (_req, res) => {
+/**
+ * POST /api/billing/sync
+ * Upserts plans/{storeId}
+ */
+router.post("/sync", async (req, res) => {
   try {
-    const session = res.locals.shopify?.session;
-    if (!session) return res.json({ ok: true, plan: { level: "free" } });
+    const { shop, storeId } = await resolveShopContext(req, res);
 
-    const storeId = toStoreId(session.shop);
-    const plan = await getPlan({ storeId });
-    return res.json({ ok: true, plan: plan ?? { level: "free" } });
-  } catch (e) {
-    console.error("❌ Billing /current error:", e);
-    return res.status(500).json({ ok: false, error: "Failed to fetch plan" });
+    const offlineId = shopify.session.getOfflineId(shop);
+    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+    let offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+
+    if (!offlineSession?.accessToken && process.env.SHOPIFY_ADMIN_API_TOKEN && shopify.session?.customAppSession) {
+      offlineSession = shopify.session.customAppSession(shop);
+    }
+    if (!offlineSession?.accessToken) {
+      return res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`)
+        .send("reauthorize");
+    }
+
+    const client = new shopify.clients.Graphql({ session: offlineSession });
+    const query = `
+      query AppInstall {
+        currentAppInstallation {
+          activeSubscriptions {
+            id
+            name
+            status
+          }
+        }
+      }
+    `;
+    const result = await client.request(query);
+    const subs = result?.data?.currentAppInstallation?.activeSubscriptions || [];
+
+    let level = "free";
+    let status = "NONE";
+    for (const s of subs) {
+      const n = String(s?.name || "").toLowerCase();
+      const st = s?.status || "UNKNOWN";
+      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
+      if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
+    }
+
+    await dbAdmin.collection("plans").doc(storeId).set(
+      { level, status, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+
+    return res.json({ ok: true, level, status });
+  } catch (err) {
+    if (err?.status === 401) {
+      res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
+      return res.send("reauthorize");
+    }
+    console.error("POST /api/billing/sync error", err);
+    return res.status(500).json({ error: "Sync failed" });
   }
 });
 

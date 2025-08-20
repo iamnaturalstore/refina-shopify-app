@@ -5,7 +5,7 @@ dotenv.config({ path: "../.env" });
 
 import fs from "fs";
 import path from "path";
-import admin from "firebase-admin";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { fileURLToPath } from "url";
 

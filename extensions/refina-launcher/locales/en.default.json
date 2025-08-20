@@ -1,0 +1,12 @@
+{
+  "name": "Refina Launcher",
+  "settings": {
+    "side": "Launcher position",
+    "offset": "Bottom offset (px)",
+    "brand_color": "Brand color (hex)",
+    "show_on_mobile": "Show on mobile",
+    "hide_on_product": "Hide on product pages",
+    "hide_on_cart": "Hide on cart page",
+    "proxy_path": "App proxy path"
+  }
+}

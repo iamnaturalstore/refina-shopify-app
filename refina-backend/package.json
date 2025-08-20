@@ -10,9 +10,15 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@shopify/shopify-api": "^11.14.1",
+    "@shopify/shopify-app-session-storage-memory": "^4.0.20",
+    "@shopify/shopify-app-session-storage-sqlite": "^4.0.20",
+    "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.1",
     "express": "^4.19.2",
-    "firebase-admin": "^13.4.0"
+    "express-rate-limit": "^8.0.1",
+    "firebase-admin": "^13.4.0",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.1"
   }
 }

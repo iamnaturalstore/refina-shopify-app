@@ -1,0 +1,44 @@
+{% comment %}
+  Refina: floating launcher → opens concierge modal (iframe to app proxy).
+{% endcomment %}
+
+<div
+  id="refina-launcher-{{ block.id }}"
+  data-refina-launcher
+  data-initialized="false"
+  data-shop="{{ shop.permanent_domain }}"
+  data-page-type="{{ request.page_type }}"
+  data-side="{{ block.settings.side }}"
+  data-offset="{{ block.settings.offset }}"
+  data-brand-color="{{ block.settings.brand_color | default: '#d10000' }}"
+  data-show-mobile="{{ block.settings.show_on_mobile | default: true }}"
+  data-hide-on-product="{{ block.settings.hide_on_product | default: false }}"
+  data-hide-on-cart="{{ block.settings.hide_on_cart | default: false }}"
+  data-proxy-path="{{ block.settings.proxy_path | default: 'apps/refina' }}"
+  data-z-index="{{ block.settings.z_index | default: 2147483646 }}"
+  data-open-on-load="{{ block.settings.open_on_load | default: false }}"
+></div>
+
+<!-- Use a non-blocking script include -->
+<script src="{{ 'launcher.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "Refina Launcher",
+  "target": "body",
+  "settings": [
+    { "type": "select", "id": "side", "label": "Launcher position",
+      "options": [{ "value": "right", "label": "Right" }, { "value": "left", "label": "Left" }],
+      "default": "right"
+    },
+    { "type": "range", "id": "offset", "label": "Bottom offset (px)", "min": 0, "max": 120, "step": 4, "default": 24 },
+    { "type": "text", "id": "brand_color", "label": "Brand color (hex)", "default": "#d10000" },
+    { "type": "checkbox", "id": "show_on_mobile", "label": "Show on mobile", "default": true },
+    { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
+    { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
+    { "type": "text", "id": "proxy_path", "label": "App proxy path", "default": "apps/refina" },
+    { "type": "range", "id": "z_index", "label": "Z-index (advanced)", "min": 1, "max": 2147483647, "step": 1, "default": 2147483646 },
+    { "type": "checkbox", "id": "open_on_load", "label": "Open on load (debug)", "default": false }
+  ]
+}
+{% endschema %}

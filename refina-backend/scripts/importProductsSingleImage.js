@@ -1,11 +1,10 @@
 import "dotenv/config";
 import fetch from "node-fetch";
-import admin from "firebase-admin";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 
 // ✅ Load correct environment variables
 const SHOP_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_API_TOKEN;
-const SERVICE_KEY = process.env.FIREBASE_SERVICE_KEY;
 
 if (!SHOP_DOMAIN || !ACCESS_TOKEN || !SERVICE_KEY) {
   console.error("❌ Missing environment variables:");
