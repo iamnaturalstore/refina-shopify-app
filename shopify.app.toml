@@ -1,0 +1,22 @@
+client_id = "8b7905126e30769a20c27b4cdd775722"
+name = "refina"
+handle = "refina"
+application_url = "https://refina.ngrok.app/admin-ui"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+dev_store_url = "refina-demo.myshopify.com"
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2024-10"
+
+[access_scopes]
+# Keep minimal; expand later as needed
+scopes = "read_products"
+
+[auth]
+redirect_urls = [
+  "https://refina.ngrok.app/api/auth/callback"
+]

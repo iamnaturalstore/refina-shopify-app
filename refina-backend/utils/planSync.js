@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 /**
  * plans/{storeId}
  * {
- *   level: 'free' | 'starter' | 'growth' | 'pro+' | 'enterprise',
+ *   level: 'free' | 'starter' | 'growth' | 'premium' | 'enterprise',
  *   shopDomain: 'my-shop.myshopify.com',
  *   chargeId: 'gid://shopify/AppSubscription/12345' | null,
  *   trialEndsAt: '2025-08-23T00:00:00.000Z' | null,

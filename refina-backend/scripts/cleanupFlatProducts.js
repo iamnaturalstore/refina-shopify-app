@@ -1,6 +1,6 @@
 // scripts/cleanupFlatProducts.js
 
-import admin from "firebase-admin";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";

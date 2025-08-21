@@ -102,6 +102,7 @@
   padding: 1rem;
   cursor: pointer;
   transition: box-shadow 0.2s ease;
+  position: relative;
 }
 
 .card:hover {
@@ -138,6 +139,8 @@
   max-width: 500px;
   width: 90%;
   text-align: center;
+  max-height: 90vh;
+  overflow: auto;
 }
 
 .modal img {
@@ -145,10 +148,12 @@
   height: auto;
   margin-bottom: 1rem;
   border-radius: 6px;
+  max-height: 50vh;
+  object-fit: contain;
 }
 
 /* Buy Now Button */
-.buyButton {
+.buyNow {
   display: inline-block;
   margin-top: 1rem;
   padding: 0.75rem 1.5rem;
@@ -159,24 +164,22 @@
   border-radius: 8px;
   transition: background-color 0.2s ease;
 }
+.buyNow:hover { background-color: #b00000; }
 
-.buyButton:hover {
-  background-color: #b00000;
-}
-
+/* Product Title/Desc */
 .productTitle {
   font-size: 1.1rem;
   font-weight: 600;
   margin: 0.5rem 0 0.25rem 0;
   color: #333;
 }
-
 .productDescription {
   font-size: 0.95rem;
   color: #666;
   line-height: 1.4;
 }
 
+/* Response box */
 .responseBox {
   background-color: #f9f9f9;
   padding: 1rem;
@@ -184,16 +187,100 @@
   border-left: 5px solid #d10000;
   border-radius: 6px;
 }
-
 .responseBox h2 {
   font-size: 1.25rem;
   font-weight: bold;
   margin-bottom: 0.5rem;
   color: #d10000;
 }
-
 .responseBox p {
   font-size: 1rem;
   line-height: 1.5;
   color: #333;
+}
+
+/* Suggestion chips */
+.chip {
+  padding: 0.5rem 1rem;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.05s ease;
+}
+.chip:hover { background-color: #ebebeb; }
+.chip:active { transform: translateY(1px); }
+
+/* Thinking animation */
+.dots {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 0;
+  animation: revealDots 1.2s steps(3, end) infinite;
+}
+.dots::after { content: '...'; }
+@keyframes revealDots {
+  0% { width: 0 }
+  100% { width: 1.2em }
+}
+
+/* Product badges + price */
+.badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+}
+.badge {
+  font-size: 12px;
+  background: #f1f5f9;
+  border: 1px solid #e5e7eb;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #334155;
+}
+.price {
+  margin-top: 6px;
+  font-weight: 600;
+  color: #222;
+}
+
+/* Short AI reason under each card */
+.teaser {
+  font-size: 0.9rem;
+  color: #475569;
+  margin: 4px 0 6px;
+}
+
+/* “Top pick” ribbon */
+.topPickBadge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+/* Modal extras */
+.modalSubtitle {
+  text-align: left;
+  margin: 0.25rem 0 1rem;
+  color: #475569;
+  font-size: 0.95rem;
+}
+.reasonsList {
+  text-align: left;
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.1rem;
+}
+.reasonsList li {
+  margin: 0.2rem 0;
+  line-height: 1.35;
+  font-size: 0.95rem;
+  text-align: left;
 }

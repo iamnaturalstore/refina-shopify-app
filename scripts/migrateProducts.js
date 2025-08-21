@@ -1,5 +1,5 @@
-import { initializeApp, applicationDefault, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
+import { db } from "../refina-backend/utils/firebaseAdmin.js";
 import { JSDOM } from "jsdom"; // optional HTML cleanup
 import fs from "fs";
 
