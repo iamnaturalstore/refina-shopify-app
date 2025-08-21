@@ -1,27 +1,24 @@
-// frontend/src/components/CustomerRecommender.jsx
+// src/components/CustomerRecommender.jsx — BFF (App Proxy) version
 import React, { useEffect, useRef, useState } from "react";
 import styles from "./CustomerRecommender.module.css";
-import { stripHtml } from "../utils/stripHtml";
 
 // ───────────────────────────
-// Phase 2 helpers (UI + sort)
+// Helpers (kept from your version)
 // ───────────────────────────
 const ROUTINE_ORDER = [
-  "cleanser",
-  "toner",
-  "essence",
-  "serum",
-  "treatment",
-  "moisturiser",
-  "moisturizer",
-  "mask",
-  "sunscreen",
-  "spf",
-  "oil",
+  "cleanser","toner","essence","serum","treatment","moisturiser","moisturizer",
+  "mask","sunscreen","spf","oil",
 ];
 const rankType = (t = "") => {
   const i = ROUTINE_ORDER.findIndex((k) => (t || "").toLowerCase().includes(k));
   return i === -1 ? 999 : i;
+};
+
+// hard limits by plan (client-side guard; server can still send more)
+const MAX_PRODUCTS_BY_PLAN = {
+  free: 3,
+  pro: 6,
+  premium: 8,
 };
 
 function deriveBadges(p, storeSettings) {
@@ -74,223 +71,211 @@ const FALLBACK_SUGGESTIONS = {
     "Retinol night routine",
     "Fragrance-free moisturiser",
   ],
-  Haircare: [
-    "Scalp soothing shampoo",
-    "Heat protectant spray",
-    "Curl defining cream",
-    "Repair mask",
-  ],
-  "Body + Bath": [
-    "KP (BHA) body lotion",
-    "Retinol body treatment",
-    "Mineral body SPF",
-    "Hydrating body wash",
-  ],
+  Haircare: ["Scalp soothing shampoo", "Heat protectant spray", "Curl defining cream", "Repair mask"],
+  "Body + Bath": ["KP (BHA) body lotion", "Retinol body treatment", "Mineral body SPF", "Hydrating body wash"],
   Makeup: ["Blurring primer", "Skin tint", "Cream blush", "Long-wear concealer"],
 };
 
-// ───────────────────────────
+const makeSessionId = () =>
+  `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-function CustomerRecommender({ initialStoreId = null, shop = null }) {
-  const [storeId, setStoreId] = useState(initialStoreId);
+function parseChipToContext(chip) {
+  const s = String(chip || "").toLowerCase();
+  const ctx = {};
+  if (/\boil\b/.test(s)) ctx.prefer = "oil";
+  else if (/\bserum\b/.test(s)) ctx.prefer = "serum";
+  else if (/\bcleanser\b/.test(s)) ctx.prefer = "cleanser";
+  else if (/\btoner\b/.test(s)) ctx.prefer = "toner";
+  else if (/\bmask\b/.test(s)) ctx.prefer = "mask";
+  else if (/\bsunscreen|spf\b/.test(s)) ctx.prefer = "sunscreen";
+  if (/\bsensitive|reactive|irritat/.test(s)) ctx.sensitivity = "sensitive";
+  if (/\bfragrance[-\s]?free|unscented\b/.test(s)) ctx.fragrance = "free";
+  if (/\bscalp\b/.test(s)) ctx.focus = "scalp";
+  if (/\blengths\b/.test(s)) ctx.focus = "lengths";
+  if (/\bcurl|curly\b/.test(s)) ctx.style = "curl";
+  if (/\bfrizz\b/.test(s)) ctx.style = "frizz";
+  if (/\bmatte\b/.test(s)) ctx.finish = "matte";
+  if (/\bdewy|glow/.test(s)) ctx.finish = "dewy";
+  const m = s.match(/\bunder\s*\$?\s*(\d{1,4})/);
+  if (m) ctx.budget = `<$${m[1]}`;
+  return ctx;
+}
+function mergeContext(base, delta) {
+  const out = { ...(base || {}) };
+  Object.entries(delta || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && String(v).trim() !== "") out[k] = v;
+  });
+  return out;
+}
+
+const stripHtml = (html = "") => String(html).replace(/<[^>]+>/g, "").trim();
+
+// Synthesize bullets when AI reasons are missing
+function synthesizeBullets(product, userConcern) {
+  const out = [];
+  const typeLabel = String(product.productType || product.category || "").toLowerCase();
+  if (typeLabel) {
+    out.push(`For ${userConcern}, this ${typeLabel} is a direct fit without extra steps or guesswork.`);
+  }
+  const ingredients = (product.ingredients || []).map((s) => String(s).toLowerCase());
+  const benefitBits = [];
+  for (const rule of ING_BENEFITS) {
+    if (ingredients.some((ing) => rule.re.test(ing))) {
+      benefitBits.push(rule.msg);
+      if (benefitBits.length >= 2) break;
+    }
+  }
+  if (benefitBits.length) out.push(`Key actives: ${benefitBits.join(", ")}.`);
+  if (typeLabel.includes("serum")) {
+    out.push("Use tip: apply 2–3 drops to damp skin, then seal with moisturiser.");
+  } else if (typeLabel.includes("oil")) {
+    out.push("Use tip: press 2–3 drops into skin as last step to lock in moisture.");
+  } else if (typeLabel.includes("moistur")) {
+    out.push("Use tip: apply a blueberry-size amount to face and neck, am/pm.");
+  } else if (typeLabel.includes("sunscreen") || typeLabel.includes("spf")) {
+    out.push("Use tip: two-finger rule for face; apply after moisturiser, before makeup.");
+  } else if (typeLabel.includes("shampoo")) {
+    out.push("Use tip: massage into scalp for 60 seconds before rinsing thoroughly.");
+  }
+  const strongActives = ingredients.some((x) => /(retin|aha|bha|acid)/.test(x));
+  const hay = [typeLabel, (product.tags || []).join(" "), (product.category || "").toLowerCase()].join(" ");
+  const isSupplement =
+    /supplement|capsule|powder|tincture|ingest/i.test(hay) ||
+    /(shilajit|collagen|vitamin)\b/i.test(ingredients.join(" "));
+  if (isSupplement) {
+    out.push("Heads-up: if pregnant, nursing, or on medication, check with your clinician first.");
+  } else if (strongActives) {
+    out.push("Heads-up: start 2–3×/week and wear SPF daily.");
+  }
+  return out.slice(0, 4);
+}
+
+// Determine API base (/apps/<slug>/api)
+const getApiBase = () => {
+  const m = (window.location.pathname || "").match(/\/apps\/([^/]+)/);
+  return m ? `/apps/${m[1]}/api` : "/apps/refina/api";
+};
+
+function CustomerRecommender() {
+  // Bootstrap/store state
+  const [storeId, setStoreId] = useState(null);
+  const [plan, setPlan] = useState("free");
+  const [storeSettings, setStoreSettings] = useState(null);
+  const [commonConcerns, setCommonConcerns] = useState([]);
+
+  // Query state
   const [concern, setConcern] = useState("");
   const [lastQuery, setLastQuery] = useState("");
-  const [commonConcerns, setCommonConcerns] = useState([]);
-  const [responseText, setResponseText] = useState("");
-  const [storeSettings, setStoreSettings] = useState(null);
-  const [plan, setPlan] = useState("free");
-  const [matchedProducts, setMatchedProducts] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Results
+  const [responseText, setResponseText] = useState("");
+  const [matchedProducts, setMatchedProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // AI extras
-  const [aiReasons, setAiReasons] = useState(new Map()); // id(lowercased) -> reason lines (joined)
-  const keyOf = (p) => String(p.id || p.name || "").toLowerCase().trim();
-
-  // Track A session
-  const [sessionContext, setSessionContext] = useState({});
+  // AI extras (server may send reasons/scores later)
+  const [aiReasons, setAiReasons] = useState(new Map());
   const [followUps, setFollowUps] = useState([]);
-  const sessionIdRef = useRef(`sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
-  const turnRef = useRef(0);
 
-  // Bootstrap once
+  // Session tracking
+  const sessionIdRef = useRef(makeSessionId());
+  const turnRef = useRef(0);
+  const [sessionContext, setSessionContext] = useState({});
+
+  // Bootstrap from BFF
   useEffect(() => {
     (async () => {
       try {
-        const resp = await fetch(`/apps/refina/api/bootstrap${window.location.search || ""}`, {
-          credentials: "same-origin",
-        });
-        const json = await resp.json();
-        if (!json?.ok) throw new Error("bootstrap failed");
-        setPlan(json.plan || "free");
-        setStoreSettings(json.storeSettings || {});
-        setCommonConcerns(Array.isArray(json.commonConcerns) ? json.commonConcerns : []);
-        if (!storeId && json.storeId) setStoreId(json.storeId);
+        const resp = await fetch(`${getApiBase()}/bootstrap`, { method: "GET" });
+        const data = await resp.json();
+        if (!data.ok) throw new Error("bootstrap failed");
+        setStoreId(data.storeId);
+        setPlan(String(data.plan || "free").toLowerCase());
+        setStoreSettings(data.storeSettings || {});
+        setCommonConcerns(Array.isArray(data.commonConcerns) ? data.commonConcerns : []);
       } catch (e) {
-        console.error("❌ Bootstrap failed:", e);
+        console.error("bootstrap error:", e);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // concierge-style fallback bullet synthesis (when reasons are thin)
-  function synthesizeBullets(product, userConcern) {
-    const out = [];
-
-    const typeLabel = (product.productType || product.category || "").toString().toLowerCase();
-    if (typeLabel) {
-      out.push(`For ${userConcern}, this ${typeLabel} is a direct fit without extra steps or guesswork.`);
-    }
-
-    const ingredients = (product.ingredients || []).map((s) => String(s).toLowerCase());
-
-    const benefitBits = [];
-    for (const rule of ING_BENEFITS) {
-      if (ingredients.some((ing) => rule.re.test(ing))) {
-        benefitBits.push(rule.msg);
-        if (benefitBits.length >= 2) break;
-      }
-    }
-    if (benefitBits.length) out.push(`Key actives: ${benefitBits.join(", ")}.`);
-
-    if (typeLabel.includes("serum")) {
-      out.push("Use tip: apply 2–3 drops to damp skin, then seal with moisturiser.");
-    } else if (typeLabel.includes("oil")) {
-      out.push("Use tip: press 2–3 drops into skin as last step to lock in moisture.");
-    } else if (typeLabel.includes("moistur")) {
-      out.push("Use tip: apply a blueberry-size amount to face and neck, am/pm.");
-    } else if (typeLabel.includes("sunscreen") || typeLabel.includes("spf")) {
-      out.push("Use tip: two-finger rule for face; apply after moisturiser, before makeup.");
-    } else if (typeLabel.includes("shampoo")) {
-      out.push("Use tip: massage into scalp for 60 seconds before rinsing thoroughly.");
-    }
-
-    const hay = [
-      typeLabel,
-      (product.tags || []).join(" ").toLowerCase(),
-      (product.category || "").toLowerCase(),
-    ].join(" ");
-    const strongActives = ingredients.some((x) => /(retin|aha|bha|acid)/.test(x));
-    const isSupplement =
-      /supplement|capsule|powder|tincture|ingest/i.test(hay) ||
-      /(shilajit|collagen|vitamin)\b/i.test(ingredients.join(" "));
-
-    if (isSupplement) {
-      out.push("Heads-up: if pregnant, nursing, or on medication, check with your clinician first.");
-    } else if (strongActives) {
-      out.push("Heads-up: start 2–3×/week and wear SPF daily.");
-    }
-
-    return out.slice(0, 4);
-  }
-
   const handleRecommend = async (nextConcern = null) => {
-    const resolvedConcern = (nextConcern ?? concern).trim();
-    if (!resolvedConcern) return;
+    const q = (nextConcern ?? concern).trim();
+    if (!q) return;
 
     setLoading(true);
     setResponseText("");
     setMatchedProducts([]);
-    setAiReasons(new Map());
     setFollowUps([]);
-    setLastQuery(resolvedConcern);
+    setLastQuery(q);
 
     try {
       turnRef.current += 1;
-      const body = {
-        concern: resolvedConcern,
-        context: sessionContext,
-        plan,
-        sessionId: sessionIdRef.current,
-        turn: turnRef.current,
-      };
-
-      const resp = await fetch(`/apps/refina/api/recommend${window.location.search || ""}`, {
+      const resp = await fetch(`${getApiBase()}/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          concern: q,
+          context: sessionContext,
+          plan,
+          sessionId: sessionIdRef.current,
+          turn: turnRef.current,
+        }),
       });
-      const json = await resp.json();
+      const data = await resp.json();
 
-      if (!json?.ok) throw new Error(json?.error || "recommend failed");
+      setResponseText(data.explanation || "Here’s where I’d start for that.");
+      const products = Array.isArray(data.products) ? data.products : [];
 
-      setResponseText(json.explanation || "Here are your recommended products.");
-      setFollowUps(Array.isArray(json.followUps) ? json.followUps.slice(0, plan === "premium" ? 3 : 0) : []);
-      const products = Array.isArray(json.products) ? json.products : [];
-      // Sort: (optional) by scores if provided, then routine order
-      const scores = json.scoresById || {};
-      const keyed = (p) => scores[p.id] ?? scores[p.name] ?? 0;
-      setMatchedProducts(
-        [...products].sort((a, b) => {
-          const sb = keyed(b);
-          const sa = keyed(a);
-          if (sb !== sa) return sb - sa;
-          return rankType(a.productType) - rankType(b.productType);
-        })
-      );
-
-      // reasons
-      const reasonsMap = new Map();
-      const rb = json.reasonsById || {};
-      products.forEach((p) => {
-        const id = p.id || p.name;
-        const r =
-          rb[id] ||
-          rb[String(id).toLowerCase()] ||
-          ""; // server might return any key style
-        if (r) reasonsMap.set(String(id).toLowerCase(), String(r));
+      // Sort: (if scoresById provided), then routine order
+      const scoresById = data.scoresById || {};
+      const sorted = [...products].sort((a, b) => {
+        const sa = typeof scoresById[a.id] === "number" ? scoresById[a.id] : 0;
+        const sb = typeof scoresById[b.id] === "number" ? scoresById[b.id] : 0;
+        if (sb !== sa) return sb - sa;
+        return rankType(a.productType) - rankType(b.productType);
       });
-      setAiReasons(reasonsMap);
+
+      // Enforce plan caps client-side (free: 3, etc.)
+      const cap = MAX_PRODUCTS_BY_PLAN[plan] ?? MAX_PRODUCTS_BY_PLAN.free;
+      const limited = sorted.slice(0, cap);
+      setMatchedProducts(limited);
+
+      // reasons map (keep for when server sends real reasons)
+      const reasons = new Map();
+      const r = data.reasonsById || {};
+      limited.forEach((p) => {
+        const key = String(p.id || p.name || "").toLowerCase().trim();
+        const text = r[p.id] || r[p.name] || r[key] || "";
+        if (text) reasons.set(key, String(text));
+      });
+      setAiReasons(reasons);
+
+      setFollowUps(Array.isArray(data.followUps) ? data.followUps.slice(0, 3) : []);
     } catch (e) {
-      console.error("❌ Recommend error:", e);
-      setResponseText("⚠️ Sorry, something went wrong with our smart suggestions.");
-    } finally {
-      setLoading(false);
+      console.error("recommend error:", e);
+      setResponseText("⚠️ Sorry—something glitched on our side.");
     }
-  };
-
-  // Follow-up chip click → update concern + context → re-ask
-  const parseChipToContext = (chip) => {
-    const s = String(chip || "").toLowerCase();
-    const ctx = {};
-    if (/\boil\b/.test(s)) ctx.prefer = "oil";
-    else if (/\bserum\b/.test(s)) ctx.prefer = "serum";
-    else if (/\bcleanser\b/.test(s)) ctx.prefer = "cleanser";
-    else if (/\btoner\b/.test(s)) ctx.prefer = "toner";
-    else if (/\bmask\b/.test(s)) ctx.prefer = "mask";
-    else if (/\bsunscreen|spf\b/.test(s)) ctx.prefer = "sunscreen";
-    if (/\bsensitive|reactive|irritat/.test(s)) ctx.sensitivity = "sensitive";
-    if (/\bfragrance[-\s]?free|unscented\b/.test(s)) ctx.fragrance = "free";
-    if (/\bscalp\b/.test(s)) ctx.focus = "scalp";
-    if (/\bcurl|curly\b/.test(s)) ctx.style = "curl";
-    if (/\bfrizz\b/.test(s)) ctx.style = "frizz";
-    if (/\bmatte\b/.test(s)) ctx.finish = "matte";
-    if (/\bdewy|glow/.test(s)) ctx.finish = "dewy";
-    const m = s.match(/\bunder\s*\$?\s*(\d{1,4})/);
-    if (m) ctx.budget = `<$${m[1]}`;
-    return ctx;
-  };
-
-  const mergeContext = (base, delta) => {
-    const out = { ...(base || {}) };
-    Object.entries(delta || {}).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && String(v).trim() !== "") out[k] = v;
-    });
-    return out;
+    setLoading(false);
   };
 
   const onFollowUpClick = async (chip) => {
-    const delta = parseChipToContext(chip);
-    const merged = mergeContext(sessionContext, delta);
+    const merged = mergeContext(sessionContext, parseChipToContext(chip));
     setSessionContext(merged);
-
     const appended = `${concern} ${chip}`.replace(/\s+/g, " ").trim();
-    setConcern(appended); // UI sync
+    setConcern(appended);
     await handleRecommend(appended);
   };
 
-  // Press Enter to "Ask" (Shift+Enter inserts a newline)
+  const onSuggestionClick = async (text) => {
+    // Default: just fill the box. If store toggles this in future, one-tap ask.
+    const autoAsk = !!storeSettings?.ui?.autoAskOnSuggestion;
+    setConcern(text);
+    if (autoAsk && !loading) {
+      await handleRecommend(text);
+    }
+  };
+
   const onTextKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -298,27 +283,27 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
     }
   };
 
-  // Parse + enrich bullets for the modal
   const getBulletsForProduct = (p) => {
-    const key = keyOf(p);
+    const key = String(p.id || p.name || "").toLowerCase().trim();
     const reason = aiReasons.get(key) || "";
     let bullets = reason
       .split("\n")
       .map((s) => s.replace(/^•\s?/, "").trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .slice(0, 3); // cap to 3 from AI
 
-    if (bullets.length < 2) {
+    if (bullets.length < 3) {
       const synth = synthesizeBullets(p, lastQuery || "your request");
-      bullets = [...bullets, ...synth].slice(0, 4);
+      bullets = [...bullets, ...synth].slice(0, 3); // ensure exactly up to 3
     }
     return bullets;
   };
 
-  // Loading state while bootstrapping
-  if (!storeId && !storeSettings) {
+  // Loading / bootstrap
+  if (!storeId) {
     return (
       <div className={styles.container}>
-        <h1 className={styles.heading}>🛍️ Refina: Your Personal AI Shopping Concierge</h1>
+        <h1 className={styles.heading}>Let’s find your perfect pick</h1>
         <p className={styles.subtext}>Loading your store…</p>
       </div>
     );
@@ -326,20 +311,18 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.heading}>🛍️ Refina: Your Personal AI Shopping Concierge</h1>
-      <p className={styles.subtext}>What do you need help with?</p>
+      <h1 className={styles.heading}>Let’s find your perfect pick</h1>
+      <p className={styles.subtext}>Tell me what you’re after and I’ll fetch the best fits.</p>
 
-      {/* Suggestion chips: prefer store commonConcerns; else category defaults */}
       <div className={styles.concernButtons}>
         {(commonConcerns.length
           ? commonConcerns.slice(0, 6)
-          : (FALLBACK_SUGGESTIONS[storeSettings?.category || "Beauty"] ||
-              FALLBACK_SUGGESTIONS.Beauty)
+          : (FALLBACK_SUGGESTIONS[storeSettings?.category || "Beauty"] || FALLBACK_SUGGESTIONS.Beauty)
         ).map((item) => (
           <button
             key={item}
             className={styles.chip}
-            onClick={() => setConcern(item)}
+            onClick={() => onSuggestionClick(item)}
             aria-label={`Use suggestion: ${item}`}
           >
             {item}
@@ -361,22 +344,15 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
         disabled={loading}
         aria-busy={loading}
       >
-        {loading ? (
-          <>
-            Thinking<span className={styles.dots} aria-hidden="true" />
-          </>
-        ) : (
-          "Ask"
-        )}
+        {loading ? "Thinking…" : "Get picks"}
       </button>
 
       {responseText && (
         <div className={styles.responseBox} aria-live="polite">
-          <h2>💡 Our Recommendation</h2>
+          <h2>Here’s what I’d pick</h2>
           <p>{responseText}</p>
 
-          {/* Track A: Follow-up chips (Premium only) */}
-          {plan === "premium" && followUps.length > 0 && (
+          {followUps.length > 0 && (
             <div className={styles.concernButtons} style={{ marginTop: 10 }}>
               {followUps.map((fu, i) => (
                 <button
@@ -396,14 +372,14 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
       {matchedProducts.length > 0 && (
         <>
           <div className={styles.responseBox}>
-            <h2>🛍️ Product Matches</h2>
-            <p>Here are some product matches based on your concern!</p>
+            <h2>Top matches</h2>
+            <p>Tap a product to see why.</p>
           </div>
+
           <div className={styles.grid} role="list">
             {matchedProducts.map((product, idx) => {
-              const bullets = getBulletsForProduct(product);
               const teaser = (() => {
-                const firstBullet = bullets[0];
+                const firstBullet = getBulletsForProduct(product)[0];
                 const txt = firstBullet || stripHtml(product.description || "");
                 const cut = 140;
                 return txt.length > cut ? `${txt.slice(0, cut)}…` : txt;
@@ -459,13 +435,9 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
       )}
 
       {selectedProduct && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => setSelectedProduct(null)}
-        >
+        <div className={styles.modalOverlay} onClick={() => setSelectedProduct(null)}>
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <h2>{selectedProduct.name}</h2>
-
             <img
               src={selectedProduct.image}
               alt={selectedProduct.name}
@@ -475,11 +447,7 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
               }}
               style={{ marginTop: 12 }}
             />
-
-            <div className={styles.modalSubtitle}>
-              Why it's right for you
-            </div>
-
+            <div className={styles.modalSubtitle}>Why you’ll love it</div>
             {(() => {
               const bullets = getBulletsForProduct(selectedProduct);
               if (bullets.length) {
@@ -493,14 +461,13 @@ function CustomerRecommender({ initialStoreId = null, shop = null }) {
               }
               return <p>{stripHtml(selectedProduct.description || "")}</p>;
             })()}
-
             <a
               href={selectedProduct.link || "#"}
               target="_blank"
               rel="noopener noreferrer"
               className={styles.buyNow}
             >
-              Buy Now
+              Buy now
             </a>
           </div>
         </div>
