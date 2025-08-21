@@ -1,6 +1,7 @@
-// src/components/CustomerRecommender.jsx — BFF (App Proxy) version
+// src/components/CustomerRecommender.jsx — BFF (App Proxy) version with client-side Gemini
 import React, { useEffect, useRef, useState } from "react";
 import styles from "./CustomerRecommender.module.css";
+import { getGeminiResponse } from "../gemini";
 
 // ───────────────────────────
 // Helpers (kept from your version)
@@ -211,7 +212,9 @@ function CustomerRecommender() {
 
     try {
       turnRef.current += 1;
-      const resp = await fetch(`${getApiBase()}/recommend`, {
+
+      // 1) Ask BFF for a candidate pool (cache/fallback/mapping)
+      const recResp = await fetch(`${getApiBase()}/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -222,39 +225,58 @@ function CustomerRecommender() {
           turn: turnRef.current,
         }),
       });
-      const data = await resp.json();
+      const bff = await recResp.json();
+      const candidates = Array.isArray(bff.products) ? bff.products : [];
 
-      setResponseText(data.explanation || "Here’s where I’d start for that.");
-      const products = Array.isArray(data.products) ? data.products : [];
-
-      // Sort: (if scoresById provided), then routine order
-      const scoresById = data.scoresById || {};
-      const sorted = [...products].sort((a, b) => {
-        const sa = typeof scoresById[a.id] === "number" ? scoresById[a.id] : 0;
-        const sb = typeof scoresById[b.id] === "number" ? scoresById[b.id] : 0;
-        if (sb !== sa) return sb - sa;
-        return rankType(a.productType) - rankType(b.productType);
+      // 2) Run Gemini client-side to re-rank and craft copy (bestie + expert)
+      const cap = MAX_PRODUCTS_BY_PLAN[plan] ?? MAX_PRODUCTS_BY_PLAN.free;
+      const gem = await getGeminiResponse({
+        concern: q,
+        category: storeSettings?.category || "Beauty",
+        tone: storeSettings?.aiTone || "bestie+expert",
+        products: candidates,
+        context: sessionContext,
+        maxPicks: cap,
       });
 
-      // Enforce plan caps client-side (free: 3, etc.)
-      const cap = MAX_PRODUCTS_BY_PLAN[plan] ?? MAX_PRODUCTS_BY_PLAN.free;
-      const limited = sorted.slice(0, cap);
-      setMatchedProducts(limited);
+      // 3) Reorder to Gemini picks; append any leftovers if needed
+      const byId = new Map(
+        candidates.map((p) => [String(p.id || p.name || "").toLowerCase().trim(), p])
+      );
 
-      // reasons map (keep for when server sends real reasons)
+      const picked = (gem.productIds || [])
+        .map((id) => byId.get(String(id || "").toLowerCase().trim()))
+        .filter(Boolean);
+
+      // If Gemini returned fewer than cap, pad with remaining candidates (stable sort)
+      const scores = gem.scoresById || {};
+      const leftovers = candidates
+        .filter((p) => !picked.includes(p))
+        .sort((a, b) => {
+          const sa = typeof scores[a.id] === "number" ? scores[a.id] : 0;
+          const sb = typeof scores[b.id] === "number" ? scores[b.id] : 0;
+          if (sb !== sa) return sb - sa;
+          return rankType(a.productType) - rankType(b.productType);
+        });
+
+      const finalList = [...picked, ...leftovers].slice(0, cap);
+      setMatchedProducts(finalList);
+
+      // 4) Copy + chips + reasons
+      setResponseText(gem.explanation || bff.explanation || "Here are the most relevant products for you.");
+      setFollowUps(Array.isArray(gem.followUps) ? gem.followUps.slice(0, 3) : []);
+
       const reasons = new Map();
-      const r = data.reasonsById || {};
-      limited.forEach((p) => {
+      const r = gem.reasonsById || {};
+      finalList.forEach((p) => {
         const key = String(p.id || p.name || "").toLowerCase().trim();
         const text = r[p.id] || r[p.name] || r[key] || "";
         if (text) reasons.set(key, String(text));
       });
       setAiReasons(reasons);
-
-      setFollowUps(Array.isArray(data.followUps) ? data.followUps.slice(0, 3) : []);
     } catch (e) {
       console.error("recommend error:", e);
-      setResponseText("⚠️ Sorry—something glitched on our side.");
+      setResponseText("⚠️ Sorry, something went wrong with our smart suggestions.");
     }
     setLoading(false);
   };
@@ -268,7 +290,6 @@ function CustomerRecommender() {
   };
 
   const onSuggestionClick = async (text) => {
-    // Default: just fill the box. If store toggles this in future, one-tap ask.
     const autoAsk = !!storeSettings?.ui?.autoAskOnSuggestion;
     setConcern(text);
     if (autoAsk && !loading) {
@@ -289,21 +310,21 @@ function CustomerRecommender() {
     let bullets = reason
       .split("\n")
       .map((s) => s.replace(/^•\s?/, "").trim())
-      .filter(Boolean)
-      .slice(0, 3); // cap to 3 from AI
+      .filter(Boolean);
 
+    // Ensure exactly 3 bullets: top up with synth, then cap to 3
     if (bullets.length < 3) {
       const synth = synthesizeBullets(p, lastQuery || "your request");
-      bullets = [...bullets, ...synth].slice(0, 3); // ensure exactly up to 3
+      bullets = [...bullets, ...synth];
     }
-    return bullets;
+    return bullets.slice(0, 3);
   };
 
   // Loading / bootstrap
   if (!storeId) {
     return (
       <div className={styles.container}>
-        <h1 className={styles.heading}>Let’s find your perfect pick</h1>
+        <h1 className={styles.heading}>🛍️ Refina: Your Personal AI Shopping Concierge</h1>
         <p className={styles.subtext}>Loading your store…</p>
       </div>
     );
@@ -344,7 +365,7 @@ function CustomerRecommender() {
         disabled={loading}
         aria-busy={loading}
       >
-        {loading ? "Thinking…" : "Get picks"}
+        {loading ? <>Thinking<span className={styles.dots} aria-hidden="true" /></> : "Get picks"}
       </button>
 
       {responseText && (
@@ -373,7 +394,10 @@ function CustomerRecommender() {
         <>
           <div className={styles.responseBox}>
             <h2>Top matches</h2>
-            <p>Tap a product to see why.</p>
+            <p>
+              Tap a product to see why.
+              {plan === "free" ? " (showing up to 3 on the free plan)" : ""}
+            </p>
           </div>
 
           <div className={styles.grid} role="list">
@@ -447,7 +471,7 @@ function CustomerRecommender() {
               }}
               style={{ marginTop: 12 }}
             />
-            <div className={styles.modalSubtitle}>Why you’ll love it</div>
+            <div className={styles.modalSubtitle}>Why it’s our pick</div>
             {(() => {
               const bullets = getBulletsForProduct(selectedProduct);
               if (bullets.length) {
@@ -467,7 +491,7 @@ function CustomerRecommender() {
               rel="noopener noreferrer"
               className={styles.buyNow}
             >
-              Buy now
+              Buy Now
             </a>
           </div>
         </div>
