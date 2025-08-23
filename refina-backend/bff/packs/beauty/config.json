@@ -1,0 +1,12 @@
+{
+  "chips": ["eczema", "acne", "rosacea", "sensitive skin", "dry skin", "oily skin", "sleep"],
+  "synonyms": [
+    { "from": "eczema", "alts": ["dermatitis", "flare", "itchy patches"] },
+    { "from": "sleep", "alts": ["insomnia", "restless", "calm night"] }
+  ],
+  "boosts": [
+    { "field": "productType", "value": "cleanser", "weight": 1.0 },
+    { "field": "productType", "value": "serum", "weight": 0.9 },
+    { "field": "tags", "value": "fragrance-free", "weight": 0.6 }
+  ]
+}
