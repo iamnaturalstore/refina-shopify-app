@@ -1,39 +1,27 @@
-// refina-backend/bff/server.js — PROD ONLY
+// refina-backend/bff/server.js — PROD ONLY (Express v5 safe)
 import express from "express";
 import cors from "cors";
-import proxy from "http-proxy-middleware";
-const { createProxyMiddleware } = proxy;
-
-import { fileURLToPath } from "url";
-import path from "path";
-import fs from "fs";
+import { createProxyMiddleware } from "http-proxy-middleware"; // ✅ proper ESM import
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
-// ── Config ───────────────────────────────────────────────────
+/* ── Config ───────────────────────────────────────────────── */
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
 const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
 
+// Netlify assets origin (built concierge bundle)
 const ASSETS_BASE_URL = String(
   process.env.ASSETS_BASE_URL || "https://refina.netlify.app"
 ).replace(/\/+$/, "");
 
+// Public origin of THIS backend (for logs/health only)
 const PUBLIC_BACKEND_ORIGIN = String(
   process.env.PUBLIC_BACKEND_ORIGIN ||
   process.env.APP_PUBLIC_URL ||
   "https://refina-shopify-app.onrender.com"
 ).replace(/\/+$/, "");
 
-// Resolve paths relative to this file
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Built embedded admin bundle directory:
-// repo: refina-backend/admin-ui-dist (sibling of bff/)
-const ADMIN_DIST_DIR = process.env.ADMIN_DIST_DIR ||
-  path.resolve(__dirname, "..", "admin-ui-dist");
-
-// ── Tiny in-memory TTL cache ─────────────────────────────────
+/* ── Tiny in-memory TTL cache ─────────────────────────────── */
 const cache = new Map();
 const cacheGet = (k) => {
   const v = cache.get(k);
@@ -43,7 +31,7 @@ const cacheGet = (k) => {
 };
 const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.now() + ttl });
 
-// ── Helpers ──────────────────────────────────────────────────
+/* ── Helpers ──────────────────────────────────────────────── */
 function normalizeConcern(s) {
   return String(s || "").toLowerCase().normalize("NFKC")
     .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
@@ -119,35 +107,35 @@ async function getSettings(storeId) {
   return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] };
 }
 
-// ── App ──────────────────────────────────────────────────────
+/* ── App ──────────────────────────────────────────────────── */
 const app = express();
+const PROXY_MOUNT = "/proxy/refina";
+
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
-// Shared CSP builder
-const SHOPIFY_ANCESTORS = "https://*.myshopify.com https://admin.shopify.com";
-const buildCsp = () => [
-  "default-src 'self' https: data: blob:",
-  `frame-ancestors ${SHOPIFY_ANCESTORS}`,
-  "connect-src 'self' https: wss:",
-  "img-src 'self' https: data: blob:",
-  "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
-].join("; ");
-
-// (A) Normalize to trailing slash: /proxy/refina → /proxy/refina/
-app.get("/proxy/refina", (req, res) => {
+// (A) Normalize to trailing slash so relative assets resolve correctly
+app.get(PROXY_MOUNT, (req, res) => {
   const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-  res.redirect(302, `/proxy/refina/${qs}`);
+  res.redirect(302, `${PROXY_MOUNT}/${qs}`);
 });
 
-// (B) HTML shell at /proxy/refina/  (Shopify forwards /apps/refina → here via our redirect)
-app.get("/proxy/refina/", (_req, res) => {
-  res.setHeader("Content-Security-Policy", buildCsp());
+// (B) HTML shell at /proxy/refina/
+app.get(`${PROXY_MOUNT}/`, (_req, res) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self' https: data: blob:",
+      "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
+      "connect-src 'self' https: wss:",
+      "img-src 'self' https: data: blob:",
+      "style-src 'self' 'unsafe-inline' https:",
+      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
+    ].join("; ")
+  );
   res.setHeader("Cache-Control", "no-store");
 
-  // Use relative file names (directory base is guaranteed by trailing slash)
   res.type("html").send(`<!doctype html>
 <html lang="en">
 <head>
@@ -164,56 +152,26 @@ app.get("/proxy/refina/", (_req, res) => {
 </html>`);
 });
 
-// (C) Asset proxy ONLY for subpaths, e.g. /proxy/refina/concierge.js
+// (C) Asset proxy for /proxy/refina/*  →  ASSETS_BASE_URL/*
 app.use(
-  "/proxy/refina/",
+  `${PROXY_MOUNT}/`,
   createProxyMiddleware({
     target: ASSETS_BASE_URL,
     changeOrigin: true,
     ws: false,
-    pathRewrite: (path) => path.replace(/^\/proxy\/refina\/?/, ""), // → /concierge.js
+    pathRewrite: (path) => path.replace(/^\/proxy\/refina\/?/, "/"), // keep leading slash for Netlify
     logLevel: "warn",
   })
 );
 
-// (D) Embedded admin (App URL) — serve built bundle from admin-ui-dist
-function setEmbeddedHeaders(res) {
-  res.setHeader("Content-Security-Policy", buildCsp());
-  res.setHeader("Cache-Control", "no-store");
-}
-const adminIndex = path.join(ADMIN_DIST_DIR, "index.html");
-
-// Serve /embedded (root) — index.html or a stub if missing
+// (D) Minimal admin stub so App URL always 200
 app.get("/embedded", (_req, res) => {
-  setEmbeddedHeaders(res);
-  if (fs.existsSync(adminIndex)) {
-    res.sendFile(adminIndex);
-  } else {
-    res
-      .type("html")
-      .send(`<!doctype html><html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
-<body><h1>Refina Admin</h1><p>Embedded UI bundle not found yet.</p></body></html>`);
-  }
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
+<body><h1>Refina Admin</h1><p>Embedded UI coming soon.</p></body></html>`);
 });
 
-// Serve static assets under /embedded (e.g., /embedded/assets/*)
-app.use(
-  "/embedded",
-  (req, res, next) => { setEmbeddedHeaders(res); next(); },
-  express.static(ADMIN_DIST_DIR, { index: false, fallthrough: true })
-);
-
-// SPA fallback for deep links under /embedded/*
-app.get("/embedded/*", (_req, res) => {
-  setEmbeddedHeaders(res);
-  if (fs.existsSync(adminIndex)) {
-    res.sendFile(adminIndex);
-  } else {
-    res.status(404).type("text/plain").send("Admin UI not built yet");
-  }
-});
-
-// ── Health ───────────────────────────────────────────────────
+// Health
 app.get("/v1/health", (_req, res) => {
   res.json({
     ok: true,
@@ -225,7 +183,7 @@ app.get("/v1/health", (_req, res) => {
   });
 });
 
-// ── Concerns ─────────────────────────────────────────────────
+// Concerns
 app.get("/v1/concerns", async (req, res) => {
   try {
     const storeId = String(req.query.storeId || "").trim();
@@ -244,7 +202,7 @@ app.get("/v1/concerns", async (req, res) => {
   }
 });
 
-// ── Recommend ────────────────────────────────────────────────
+// Recommend
 app.post("/v1/recommend", async (req, res) => {
   const t0 = Date.now();
   try {
@@ -322,12 +280,12 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 
-// ── Listen ───────────────────────────────────────────────────
+// Listen
 app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
-  console.log(`HTML shell:        GET  /proxy/refina/`);
-  console.log(`Asset proxy:       GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
-  console.log(`Admin (embedded):  GET  /embedded  (serving ${ADMIN_DIST_DIR})`);
+  console.log(`HTML shell:        GET  ${PROXY_MOUNT}/`);
+  console.log(`Asset proxy:       GET  ${PROXY_MOUNT}/*  →  ${ASSETS_BASE_URL}/*`);
+  console.log(`Admin (stub):      GET  /embedded`);
   console.log(`Health:            GET  /v1/health`);
   console.log(`Public origin:         ${PUBLIC_BACKEND_ORIGIN}`);
 });
