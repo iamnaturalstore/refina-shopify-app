@@ -114,8 +114,14 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
-// 1) HTML shell at /proxy/refina  (Shopify forwards /apps/refina → here)
-app.get("/proxy/refina", (_req, res) => {
+// (A) Normalize to trailing slash: /proxy/refina → /proxy/refina/
+app.get("/proxy/refina", (req, res) => {
+  const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+  res.redirect(302, `/proxy/refina/${qs}`);
+});
+
+// (B) HTML shell at /proxy/refina/  (Shopify forwards /apps/refina → here via our redirect)
+app.get("/proxy/refina/", (_req, res) => {
   // CSP safe for Shopify storefront iframe; tighten later with nonces/SRI if needed.
   res.setHeader(
     "Content-Security-Policy",
@@ -130,8 +136,7 @@ app.get("/proxy/refina", (_req, res) => {
   );
   res.setHeader("Cache-Control", "no-store");
 
-  // IMPORTANT: use *relative* paths so it works both via Shopify (/apps/refina)
-  // and directly on Render (/proxy/refina).
+  // Use relative file names (directory base is guaranteed by trailing slash)
   res.type("html").send(`<!doctype html>
 <html lang="en">
 <head>
@@ -148,7 +153,7 @@ app.get("/proxy/refina", (_req, res) => {
 </html>`);
 });
 
-// 2) Asset proxy ONLY for subpaths, e.g. /proxy/refina/concierge.js
+// (C) Asset proxy ONLY for subpaths, e.g. /proxy/refina/concierge.js
 app.use(
   "/proxy/refina/",
   createProxyMiddleware({
@@ -159,6 +164,13 @@ app.use(
     logLevel: "warn",
   })
 );
+
+// (D) Minimal admin stub so App URL always 200
+app.get("/embedded", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
+<body><h1>Refina Admin</h1><p>Embedded UI coming soon.</p></body></html>`);
+});
 
 // ── Health ───────────────────────────────────────────────────
 app.get("/v1/health", (_req, res) => {
@@ -272,8 +284,9 @@ app.post("/v1/recommend", async (req, res) => {
 // ── Listen ───────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
-  console.log(`HTML shell:        GET  /proxy/refina`);
+  console.log(`HTML shell:        GET  /proxy/refina/`);
   console.log(`Asset proxy:       GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
+  console.log(`Admin (stub):      GET  /embedded`);
   console.log(`Health:            GET  /v1/health`);
   console.log(`Public origin:         ${PUBLIC_BACKEND_ORIGIN}`);
 });

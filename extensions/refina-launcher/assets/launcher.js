@@ -1,10 +1,15 @@
+/* Refina theme launcher (prod-only) — single IIFE, no HMR, opens App Proxy iframe */
 (() => {
-  const q = (s, r=document) => r.querySelector(s);
-  const qa = (s, r=document) => Array.from(r.querySelectorAll(s));
+  const q = (s, r = document) => r.querySelector(s);
+  const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-  function initAll(){ qa('[data-refina-launcher]').forEach(initOne); }
+  // prevent double-initialization if this asset is included twice
+  if (window.__REFINA_LAUNCHER_LOADED__) return;
+  window.__REFINA_LAUNCHER_LOADED__ = true;
 
-  function initOne(root){
+  function initAll() { qa('[data-refina-launcher]').forEach(initOne); }
+
+  function initOne(root) {
     if (!root || root.dataset.initialized === 'true') return;
 
     const side = root.dataset.side === 'left' ? 'left' : 'right';
@@ -19,6 +24,7 @@
     const zIndex = parseInt(root.dataset.zIndex || '2147483646', 10);
     const openOnLoad = root.dataset.openOnLoad === 'true';
 
+    // basic guards
     if (!shopDomain) { root.dataset.initialized = 'true'; return; }
     if ((hideOnProduct && pageType === 'product') || (hideOnCart && pageType === 'cart')) {
       root.dataset.initialized = 'true'; return;
@@ -27,6 +33,7 @@
     const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
     if (!showMobile && isMobile()) { root.dataset.initialized = 'true'; return; }
 
+    // lazy insert CSS once
     if (!q('#refina-launcher-style')) {
       const style = document.createElement('style');
       style.id = 'refina-launcher-style';
@@ -51,52 +58,54 @@
     const btn = document.createElement('button');
     btn.className = 'refina-launcher-btn';
     btn.type = 'button';
-    btn.setAttribute('aria-label','Open shopping concierge');
+    btn.setAttribute('aria-label', 'Open shopping concierge');
     btn.innerHTML = `<span>Refina</span>`;
     document.body.appendChild(btn);
 
     const applyPos = () => {
-      btn.style.bottom = `calc(${offset}px + var(--refina-safe-bottom))`; btn.style[side] = '16px';
+      btn.style.bottom = `calc(${offset}px + var(--refina-safe-bottom))`;
+      btn.style[side] = '16px';
       btn.style.display = (!showMobile && isMobile()) ? 'none' : 'inline-flex';
     };
     applyPos(); window.addEventListener('resize', applyPos);
 
-    let overlay=null, lastFocus=null;
+    let overlay = null, lastFocus = null;
 
     function buildIframeUrl() {
+      // shop → (App Proxy /apps/refina) → backend /concierge
       const base = new URL(`https://${shopDomain}/${proxyPath}`);
       base.searchParams.set('source', 'launcher');
-      // Optional dev toggle: set localStorage.refinaDev = "1" to append &dev=1
+      // Optional dev toggle retained (no effect in prod)
       try { if (localStorage.getItem('refinaDev') === '1') base.searchParams.set('dev', '1'); } catch {}
       return base.toString();
     }
 
-    function openModal(){
+    function openModal() {
       if (overlay) return;
       lastFocus = document.activeElement;
 
       overlay = document.createElement('div');
       overlay.className = 'refina-modal-overlay';
-      overlay.setAttribute('role','dialog'); overlay.setAttribute('aria-modal','true');
+      overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
 
       const modal = document.createElement('div'); modal.className = 'refina-modal';
 
       const close = document.createElement('button');
-      close.className = 'refina-modal-close'; close.type='button';
-      close.textContent='Close ✕'; close.setAttribute('aria-label','Close concierge');
+      close.className = 'refina-modal-close'; close.type = 'button';
+      close.textContent = 'Close ✕'; close.setAttribute('aria-label', 'Close concierge');
       close.addEventListener('click', closeModal);
 
       const iframe = document.createElement('iframe');
       iframe.src = buildIframeUrl();
+      iframe.title = 'Refina concierge';
 
       overlay.addEventListener('click', e => { if (e.target === overlay) closeModal(); });
-      // Note: ESC won't fire here when focus is inside the iframe; rely on Close + overlay.
 
       modal.appendChild(close); modal.appendChild(iframe);
       overlay.appendChild(modal); document.body.appendChild(overlay);
       setTimeout(() => close.focus(), 0);
 
-      // Light focus trap between Close and iframe
+      // light focus trap between Close and iframe
       overlay.addEventListener('keydown', (e) => {
         if (e.key !== 'Tab') return;
         const focusables = [close, iframe];
@@ -106,10 +115,10 @@
       });
     }
 
-    function closeModal(){
+    function closeModal() {
       if (!overlay) return;
-      overlay.remove(); overlay=null;
-      if (lastFocus && typeof lastFocus.focus==='function') lastFocus.focus(); else btn.focus();
+      overlay.remove(); overlay = null;
+      if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus(); else btn.focus();
     }
 
     btn.addEventListener('click', openModal);
