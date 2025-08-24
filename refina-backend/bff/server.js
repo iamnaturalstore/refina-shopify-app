@@ -1,4 +1,4 @@
-// refina-backend/bff/server.js — PROD ONLY, Express v5-safe
+// refina-backend/bff/server.js — PROD ONLY
 import express from "express";
 import cors from "cors";
 import proxy from "http-proxy-middleware";
@@ -6,25 +6,20 @@ const { createProxyMiddleware } = proxy;
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
-// ─────────────────────────────────────────────────────────────
+// ── Config ───────────────────────────────────────────────────
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
 const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
 
-// Where your built assets live (Netlify)
-const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.netlify.app").replace(/\/+$/, "");
-
-// Public origin of THIS backend (for logs/health only)
-const PUBLIC_BACKEND_ORIGIN = String(
-  process.env.PUBLIC_BACKEND_ORIGIN ||
-  process.env.RENDER_EXTERNAL_URL ||
-  process.env.RENDER_URL ||
-  `http://localhost:${PORT}`
+// Netlify assets origin (built concierge bundle)
+const ASSETS_BASE_URL = String(
+  process.env.ASSETS_BASE_URL || "https://refina.netlify.app"
 ).replace(/\/+$/, "");
 
-// Shopify App Proxy mount (prefix `apps`, subpath `refina`)
-const PROXY_BASE = "/proxy/refina";
+const PUBLIC_BACKEND_ORIGIN = String(
+  process.env.PUBLIC_BACKEND_ORIGIN || process.env.APP_PUBLIC_URL || "https://refina-shopify-app.onrender.com"
+).replace(/\/+$/, "");
 
-// ─────────────────────────────────────────────────────────────
+// ── Tiny in-memory TTL cache ─────────────────────────────────
 const cache = new Map();
 const cacheGet = (k) => {
   const v = cache.get(k);
@@ -34,7 +29,7 @@ const cacheGet = (k) => {
 };
 const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.now() + ttl });
 
-// Helpers
+// ── Helpers ──────────────────────────────────────────────────
 function normalizeConcern(s) {
   return String(s || "").toLowerCase().normalize("NFKC")
     .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
@@ -110,47 +105,52 @@ async function getSettings(storeId) {
   return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] };
 }
 
-// ─────────────────────────────────────────────────────────────
+// ── App ──────────────────────────────────────────────────────
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
-// ── HTML entry for the Shopify App Proxy base path ───────────
-// Shopper hits: https://{shop}.myshopify.com/apps/refina
-// Shopify forwards to: GET https://<render>/proxy/refina
-// We return HTML that loads assets via *relative* URLs, but with a <base>
-// so they resolve to /apps/refina/* even when the URL has no trailing slash.
-app.get(PROXY_BASE, (_req, res) => {
-  res
-    .type("html")
-    .set("Cache-Control", "no-store")
-    .send(`<!doctype html>
+// 1) HTML shell at /proxy/refina  (Shopify forwards /apps/refina → here)
+app.get("/proxy/refina", (_req, res) => {
+  // minimal CSP that works in Shopify storefront iframe; tighten later if needed.
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:",
+      "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
+      "connect-src 'self' https: wss:",
+      "img-src 'self' https: data: blob:",
+      "style-src 'self' 'unsafe-inline' https:",
+      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
+    ].join("; ")
+  );
+
+  // IMPORTANT: use *relative* asset paths so it works both via Shopify (/apps/refina)
+  // and directly on Render (/proxy/refina)
+  res.type("html").send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Refina Concierge</title>
-  <base href="/apps/refina/">
-  <link rel="preload" as="script" href="concierge.js" />
-  <link rel="stylesheet" href="concierge.css" />
+  <link rel="preload" as="script" href="./concierge.js"/>
+  <link rel="stylesheet" href="./concierge.css"/>
 </head>
 <body>
   <div id="refina-root"></div>
-  <script type="module" src="concierge.js" defer></script>
+  <script type="module" src="./concierge.js" defer></script>
 </body>
 </html>`);
 });
 
-// ── Assets proxy (AFTER the HTML handler) ─────────────────────
-// /proxy/refina/<path> → ASSETS_BASE_URL/<path>
-const stripProxyPrefix = (path) => path.replace(/^\/proxy\/refina/, "");
+// 2) Asset proxy ONLY for subpaths, e.g. /proxy/refina/concierge.js
 app.use(
-  PROXY_BASE,
+  "/proxy/refina/",
   createProxyMiddleware({
     target: ASSETS_BASE_URL,
     changeOrigin: true,
     ws: false,
-    pathRewrite: stripProxyPrefix,
+    pathRewrite: (path) => path.replace(/^\/proxy\/refina\/?/, ""), // → /concierge.js
     logLevel: "warn",
   })
 );
@@ -162,8 +162,7 @@ app.get("/v1/health", (_req, res) => {
     now: new Date().toISOString(),
     cacheSize: cache.size,
     version: "bff-esm-prod",
-    proxyAssetsFrom: ASSETS_BASE_URL,
-    proxyMount: PROXY_BASE,
+    proxy: `prod → ${ASSETS_BASE_URL}`,
     origin: PUBLIC_BACKEND_ORIGIN,
   });
 });
@@ -265,10 +264,10 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
+// ── Listen ───────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`Refina BFF (ESM) running on :${PORT}`);
-  console.log(`Assets proxied from: ${ASSETS_BASE_URL}`);
-  console.log(`App Proxy mount: ${PROXY_BASE}`);
-  console.log(`Public backend origin: ${PUBLIC_BACKEND_ORIGIN}`);
+  console.log(`Refina BFF running on :${PORT}`);
+  console.log(`HTML shell:        GET  /proxy/refina`);
+  console.log(`Asset proxy:       GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
+  console.log(`Health:            GET  /v1/health`);
 });
