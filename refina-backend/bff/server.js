@@ -15,8 +15,11 @@ const ASSETS_BASE_URL = String(
   process.env.ASSETS_BASE_URL || "https://refina.netlify.app"
 ).replace(/\/+$/, "");
 
+// Public origin of THIS backend (for logs/health)
 const PUBLIC_BACKEND_ORIGIN = String(
-  process.env.PUBLIC_BACKEND_ORIGIN || process.env.APP_PUBLIC_URL || "https://refina-shopify-app.onrender.com"
+  process.env.PUBLIC_BACKEND_ORIGIN ||
+  process.env.APP_PUBLIC_URL ||
+  "https://refina-shopify-app.onrender.com"
 ).replace(/\/+$/, "");
 
 // ── Tiny in-memory TTL cache ─────────────────────────────────
@@ -107,16 +110,17 @@ async function getSettings(storeId) {
 
 // ── App ──────────────────────────────────────────────────────
 const app = express();
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
 // 1) HTML shell at /proxy/refina  (Shopify forwards /apps/refina → here)
 app.get("/proxy/refina", (_req, res) => {
-  // minimal CSP that works in Shopify storefront iframe; tighten later if needed.
+  // CSP safe for Shopify storefront iframe; tighten later with nonces/SRI if needed.
   res.setHeader(
     "Content-Security-Policy",
     [
-      "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:",
+      "default-src 'self' https: data: blob:",
       "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
       "connect-src 'self' https: wss:",
       "img-src 'self' https: data: blob:",
@@ -124,21 +128,22 @@ app.get("/proxy/refina", (_req, res) => {
       "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
     ].join("; ")
   );
+  res.setHeader("Cache-Control", "no-store");
 
-  // IMPORTANT: use *relative* asset paths so it works both via Shopify (/apps/refina)
-  // and directly on Render (/proxy/refina)
+  // IMPORTANT: use *relative* paths so it works both via Shopify (/apps/refina)
+  // and directly on Render (/proxy/refina).
   res.type("html").send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Refina Concierge</title>
-  <link rel="preload" as="script" href="./concierge.js"/>
-  <link rel="stylesheet" href="./concierge.css"/>
+  <link rel="preload" as="script" href="concierge.js"/>
+  <link rel="stylesheet" href="concierge.css"/>
 </head>
 <body>
   <div id="refina-root"></div>
-  <script type="module" src="./concierge.js" defer></script>
+  <script type="module" src="concierge.js" defer></script>
 </body>
 </html>`);
 });
@@ -270,4 +275,5 @@ app.listen(PORT, () => {
   console.log(`HTML shell:        GET  /proxy/refina`);
   console.log(`Asset proxy:       GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
   console.log(`Health:            GET  /v1/health`);
+  console.log(`Public origin:         ${PUBLIC_BACKEND_ORIGIN}`);
 });
