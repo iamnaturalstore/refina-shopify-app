@@ -1,73 +1,294 @@
-// refina-backend/utils/prefilter.js
+// refina-backend/server.js  (ESM, PROD-ONLY, Express v5-safe)
+import express from "express";
+import cors from "cors";
+import crypto from "crypto"; // (ok if unused)
+import proxy from "http-proxy-middleware";           // CJS in ESM
+const { createProxyMiddleware } = proxy;
 
-/**
- * Load normalized catalog into a Map keyed by lower-id.
- * Path: normalizedProducts/{storeId}/items/*
- * Each item should already be in the "display shape" (id, name, description, tags, productType, category, ...)
- */
-export async function loadNormalizedCatalog(dbAdmin, storeId) {
-  const snap = await dbAdmin.collection(`normalizedProducts/${storeId}/items`).get();
-  const map = new Map();
-  for (const d of snap.docs) {
-    const p = d.data() || {};
-    const k = String(p.id || p.name || p.handle || d.id || "").toLowerCase().trim();
-    if (k) map.set(k, p);
-  }
-  return map;
+import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
+
+// ─────────────────────────────────────────────────────────────
+// Config (PROD ONLY)
+// ─────────────────────────────────────────────────────────────
+const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
+const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
+const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.netlify.app").replace(/\/+$/, "");
+
+// simple in-memory TTL cache
+const cache = new Map();
+const cacheGet = (k) => {
+  const v = cache.get(k);
+  if (!v) return null;
+  if (Date.now() > v.exp) { cache.delete(k); return null; }
+  return v.val;
+};
+const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.now() + ttl });
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+function normalizeConcern(s) {
+  return String(s || "").toLowerCase().normalize("NFKC")
+    .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
 }
-
-/**
- * Prefilter shortlist:
- * - quick keyword hit on name/tags/type/category/description
- * - light heuristics: bump exact word hits, preferred types
- * - cap to `limit` (default 200)
- */
-export function prefilterShortlist(concern, normMap, storeSettings = {}, limit = 200) {
-  const q = String(concern || "").toLowerCase();
-  const tokens = q.split(/\s+/g).filter(Boolean);
-
-  const items = [];
-  for (const [, p] of normMap.entries()) {
-    const hay = [
-      p.name,
-      p.description,
-      (p.tags || []).join(" "),
-      p.productType,
-      p.category,
-      (p.ingredients || []).join(" "),
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    let s = 0;
-    for (const t of tokens) {
-      const re = new RegExp(`\\b${escapeReg(t)}\\b`, "g");
-      const m = hay.match(re);
-      if (m) s += m.length * 3;
+function stripHtml(s) { return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); }
+function tokenize(s) {
+  return String(s || "").toLowerCase().normalize("NFKC")
+    .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+}
+function rankProducts(products, concern) {
+  const terms = tokenize(concern);
+  const w = { title: 3.0, tags: 2.2, keywords: 2.0, description: 1.6, productType: 1.0 };
+  const scored = [];
+  for (const p of products) {
+    if (!p) continue;
+    const titleText = p.title || p.name || "";
+    const desc = stripHtml(p.description || "").slice(0, 800);
+    const hay = {
+      title: tokenize(titleText),
+      tags: (Array.isArray(p.tags) ? p.tags : []).flatMap(tokenize),
+      keywords: (Array.isArray(p.keywords) ? p.keywords : []).flatMap(tokenize),
+      description: tokenize(desc),
+      productType: tokenize(p.productType || ""),
+    };
+    let score = 0;
+    for (const t of terms) {
+      if (hay.title.includes(t)) score += w.title;
+      if (hay.tags.includes(t)) score += w.tags;
+      if (hay.keywords.includes(t)) score += w.keywords;
+      if (hay.description.includes(t)) score += w.description;
+      if (hay.productType.includes(t)) score += w.productType;
     }
-    if (/\bserum\b/i.test(p.productType || "")) s += 1;
-    if (/\bcleanser\b/i.test(p.productType || "")) s += 1;
-    if (/\bsunscreen|spf\b/i.test(p.productType || "")) s += 2;
-
-    if (s > 0) {
-      items.push({ p, s });
-    }
+    if (p.handle && (p.image || (Array.isArray(p.images) && p.images[0]?.src))) score += 0.3;
+    if (score > 0) scored.push({ ...p, _score: score });
   }
-
-  return items
-    .sort((a, b) => b.s - a.s)
-    .slice(0, limit)
-    .map(({ p }) => ({
-      id: p.id || p.name,
-      name: p.name,
-      description: p.description || "",
-      tags: Array.isArray(p.tags) ? p.tags : [],
-      productType: p.productType || "",
-      category: p.category || "",
-      ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
-    }));
+  scored.sort((a, b) => b._score - a._score || (a.title || a.name || "").localeCompare(b.title || b.name || ""));
+  return scored;
+}
+function shapeCopy({ products, concern, tone, category }) {
+  const first = products[0] || {};
+  const name = first.title || first.name || "this pick";
+  const middleWord = /beauty|skin|hair|cosmetic/i.test(category) ? "ingredients" : "features";
+  const why = /bestie/i.test(String(tone || "")) ?
+    `I picked ${name} because it lines up beautifully with “${concern}”. It’s a solid, low-fuss match from this store.` :
+    `Recommended: ${name}. It aligns strongly with “${concern}” based on the store’s catalogue signals.`;
+  const rationale = `Relevance is based on product ${middleWord}, tags, and related keywords that map to “${concern}”.`;
+  const extras = first.description
+    ? `Tip: check the product page for usage guidance and added benefits noted in the description.`
+    : `Tip: start low and adjust as needed; always follow usage directions on the product page.`;
+  return { why, rationale, extras };
+}
+async function getSettings(storeId) {
+  const ref = db.doc(`storeSettings/${storeId}`);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    const seed = {
+      tone: (process.env.BFF_DEFAULT_TONE || "expert").toLowerCase(),
+      category: process.env.BFF_DEFAULT_CATEGORY || "Generic",
+      enabledPacks: (process.env.BFF_ENABLED_PACKS || "").split(",").map(s => s.trim()).filter(Boolean),
+      domain: "", createdAt: nowTs(), settingsVersion: 1,
+    };
+    await setDocSafe(ref, seed);
+    return seed;
+  }
+  const data = snap.data() || {};
+  const s = String(data.tone || "").toLowerCase();
+  const tone =
+    /bestie|friendly|warm|helpful/.test(s) ? "bestie" :
+    /expert|pro|concise|direct/.test(s) ? "expert" :
+    (process.env.BFF_DEFAULT_TONE || "expert");
+  return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] };
 }
 
-function escapeReg(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// ─────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────
+const app = express();
+app.use(express.json({ limit: "1mb" }));
+app.use(cors());
+
+// ── PROD assets proxy (no wildcards, no dev) ─────────────────
+// /proxy/refina/<anything> → ASSETS_BASE_URL/<same>
+const stripProxyPrefix = (path) => path.replace(/^\/proxy\/refina/, "");
+app.use(
+  "/proxy/refina",
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: stripProxyPrefix,
+    logLevel: "warn",
+  })
+);
+
+// ── Stable launcher that resolves hashed entry from Netlify ──
+app.get("/launcher.js", async (_req, res) => {
+  try {
+    // Try typical manifest locations
+    const candidates = [
+      `${ASSETS_BASE_URL}/manifest.json`,
+      `${ASSETS_BASE_URL}/assets/manifest.json`,
+    ];
+    let manifest = null;
+    for (const u of candidates) {
+      const r = await fetch(u);
+      if (r.ok) { manifest = await r.json(); break; }
+    }
+
+    // choose first isEntry if present; else parse index.html
+    let file = null, css = [];
+    if (manifest) {
+      const entries = Object.values(manifest).filter(e => e && e.isEntry && e.file);
+      if (entries.length) { file = entries[0].file; css = entries[0].css || []; }
+    } else {
+      const r = await fetch(`${ASSETS_BASE_URL}/index.html`);
+      if (r.ok) {
+        const html = await r.text();
+        const m = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/i);
+        if (m) file = m[1].replace(/^\//, "");
+        css = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/gi)]
+          .map(x => x[1].replace(/^\//, ""));
+      }
+    }
+
+    if (!file) {
+      res.type("application/javascript").status(500)
+        .send(`console.error("Refina launcher: could not resolve prod entry from ${ASSETS_BASE_URL}");`);
+      return;
+    }
+
+    const base = "/proxy/refina";
+    const entryUrl = `${base}/${file.replace(/^\/+/, "")}`;
+    const cssUrls = css.map(href => `${base}/${href.replace(/^\/+/, "")}`);
+
+    res.type("application/javascript").send(`
+      (function(){
+        const css = ${JSON.stringify(cssUrls)};
+        for (const href of css) {
+          var l = document.createElement("link");
+          l.rel = "stylesheet"; l.href = href;
+          document.head.appendChild(l);
+        }
+        var s = document.createElement("script");
+        s.type = "module";
+        s.src = ${JSON.stringify(entryUrl)};
+        document.head.appendChild(s);
+      })();
+    `);
+  } catch (e) {
+    res.type("application/javascript").status(500)
+      .send('console.error("Refina launcher error:", ' + JSON.stringify(String(e && e.message || e)) + ');');
+  }
+});
+
+// ── Health ───────────────────────────────────────────────────
+app.get("/v1/health", (_req, res) => {
+  res.json({ ok: true, now: new Date().toISOString(), cacheSize: cache.size, version: "bff-esm-prod", proxy: `prod → ${ASSETS_BASE_URL}` });
+});
+
+// ── Concerns ─────────────────────────────────────────────────
+app.get("/v1/concerns", async (req, res) => {
+  try {
+    const storeId = String(req.query.storeId || "").trim();
+    if (!storeId) return res.status(400).json({ error: "storeId required" });
+
+    const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`));
+    let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
+
+    if (!chips.length) {
+      const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get();
+      chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean);
+    }
+
+    res.json({ storeId, chips });
+  } catch (e) {
+    console.error("GET /v1/concerns error", e);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// ── Recommend ────────────────────────────────────────────────
+app.post("/v1/recommend", async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const { storeId: rawStoreId, concern: rawConcern, plan: rawPlan } = req.body || {};
+    const storeId = String(rawStoreId || "").trim();
+    const concernInput = String(rawConcern || "").trim();
+    const plan = String(rawPlan || "free").toLowerCase();
+    if (!storeId || !concernInput) return res.status(400).json({ error: "storeId and concern required" });
+
+    const normalizedConcern = normalizeConcern(concernInput);
+    const settings = await getSettings(storeId);
+    const { category, tone, domain } = settings;
+
+    const cacheKey = ["rec", storeId, normalizedConcern, plan, tone].join("|");
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } });
+
+    const snaps = await db.collection("products").where("storeId", "==", storeId).limit(1500).get();
+    const allProducts = [];
+    snaps.forEach(d => allProducts.push({ id: d.id, ...d.data() }));
+
+    const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
+    const mapping = await getDocSafe(mappingRef);
+    let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
+
+    let source = "mapping";
+    if (!productIds.length) {
+      const ranked = rankProducts(allProducts, normalizedConcern);
+      productIds = ranked.slice(0, 8).map(p => p.id);
+      source = "fallback";
+    }
+
+    const used = productIds.slice(0, plan === "free" ? 3 : 8);
+
+    const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const hydrate = used.map((id) => {
+      const p = allProducts.find((x) => x.id === id) || {};
+      const handle = String(p.handle || "").replace(/^\/+|\/+$/g, "");
+      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
+      return {
+        id: p.id,
+        title: p.title || p.name || "",
+        name: p.title || p.name || "",
+        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ""),
+        description: p.description || "",
+        productType: p.productType || "",
+        tags: p.tags || [],
+        url: productUrl,
+        price: p.price ?? null,
+      };
+    });
+
+    const copy = shapeCopy({
+      products: allProducts.filter(p => used.includes(p.id)),
+      concern: normalizedConcern,
+      tone,
+      category,
+    });
+
+    const payload = {
+      productIds: used,
+      products: hydrate,
+      copy,
+      meta: { source, cache: "miss", tone },
+    };
+
+    cacheSet(cacheKey, payload);
+    res.json(payload);
+  } catch (e) {
+    console.error("POST /v1/recommend error", e);
+    res.status(500).json({ error: "internal_error" });
+  } finally {
+    const ms = Date.now() - t0;
+    if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Listen
+// ─────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`Refina BFF (ESM) running on :${PORT}`);
+  console.log(`Concierge proxy: prod → ${ASSETS_BASE_URL}`);
+});

@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "refina-backend"
+    "refina-backend",
+    "frontend",
+    "admin-ui"
   ],
   "scripts": {
     "dev": "concurrently \"yarn workspace refina-backend start\" \"vite build --watch\"",
@@ -47,6 +49,7 @@
     "express": "^5.1.0",
     "firebase": "^12.0.0",
     "firebase-admin": "^13.4.0",
+    "http-proxy-middleware": "^2",
     "isbot": "^5.1.0",
     "node-fetch": "3",
     "prisma": "^6.2.1",
