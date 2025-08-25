@@ -129,6 +129,32 @@ async function getPlan(storeId) {
   }
 }
 
+// Fetch products for a store, preferring subcollection products/{storeId}/items
+async function fetchProducts(storeId, limit = 1500) {
+  // Try subcollection first
+  try {
+    const subSnap = await db.collection(`products/${storeId}/items`).limit(limit).get();
+    if (!subSnap.empty) {
+      const out = [];
+      subSnap.forEach(d => out.push({ id: d.id, ...d.data(), storeId }));
+      return out;
+    }
+  } catch (e) {
+    console.warn(`[BFF] subcollection fetch failed for ${storeId}:`, e?.message || e);
+  }
+
+  // Fallback to flat collection (back-compat)
+  try {
+    const flatSnap = await db.collection("products").where("storeId", "==", storeId).limit(limit).get();
+    const out = [];
+    flatSnap.forEach(d => out.push({ id: d.id, ...d.data() }));
+    return out;
+  } catch (e) {
+    console.error(`[BFF] flat collection fetch failed for ${storeId}:`, e?.message || e);
+    return [];
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Shopify App Proxy verification (for /proxy/refina/v1/*)
 // ─────────────────────────────────────────────────────────────
@@ -247,35 +273,10 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } });
 
-    const snaps = await db.collection("products").where("storeId", "==", storeId).limit(1500).get();
-    const allProducts = [];
-    snaps.forEach(d => allProducts.push({ id: d.id, ...d.data() }));
-
-    // Fetch products for a store, preferring subcollection products/{storeId}/items
-async function fetchProducts(storeId, limit = 1500) {
-  // Try subcollection first
-  try {
-    const subSnap = await db.collection(`products/${storeId}/items`).limit(limit).get();
-    if (!subSnap.empty) {
-      const out = [];
-      subSnap.forEach(d => out.push({ id: d.id, ...d.data(), storeId }));
-      return out;
+    const allProducts = await fetchProducts(storeId);
+    if (!allProducts.length) {
+      console.warn(`[BFF] No products found for storeId=${storeId}`);
     }
-  } catch (e) {
-    console.warn(`[BFF] subcollection fetch failed for ${storeId}:`, e?.message || e);
-  }
-
-  // Fallback to flat collection (back-compat)
-  try {
-    const flatSnap = await db.collection("products").where("storeId", "==", storeId).limit(limit).get();
-    const out = [];
-    flatSnap.forEach(d => out.push({ id: d.id, ...d.data() }));
-    return out;
-  } catch (e) {
-    console.error(`[BFF] flat collection fetch failed for ${storeId}:`, e?.message || e);
-    return [];
-  }
-}
 
     const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
     const mapping = await getDocSafe(mappingRef);
