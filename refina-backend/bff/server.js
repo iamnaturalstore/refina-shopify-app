@@ -147,7 +147,7 @@ app.get("/proxy/refina", (_req, res) => {
   <link rel="preload" as="script" href="/apps/refina/concierge.js"/>
 </head>
 <body>
-  <div id="refina-root"></div>
+  <div id="root"></div>
   <script type="module" src="/apps/refina/concierge.js" defer></script>
 </body>
 </html>`);
