@@ -115,37 +115,43 @@ async function getSettings(storeId) {
   return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] };
 }
 
+// Server-authoritative plan (ignore client on App Proxy routes)
+async function getPlan(storeId) {
+  try {
+    const snap = await db.doc(`plans/${storeId}`).get();
+    const data = snap.exists ? (snap.data() || {}) : {};
+    const raw = String(data.plan || data.tier || data.name || "free").toLowerCase().trim();
+    if (/\bpremium\b/.test(raw) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(raw)) return "premium";
+    if (/^pro\b/.test(raw)) return "pro";
+    return "free";
+  } catch {
+    return "free";
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Shopify App Proxy verification (for /proxy/refina/v1/*)
 // ─────────────────────────────────────────────────────────────
 function verifyAppProxy(req) {
   if (!SHOPIFY_APP_SECRET) return { ok: false, reason: "missing_secret" };
 
-  // App Proxy uses `signature` (hex HMAC-SHA256 of concatenated, sorted key=value pairs)
-  const provided = String(req.query.signature || "").trim().toLowerCase();
-  if (!provided) return { ok: false, reason: "missing_signature" };
+  // Build raw query string excluding 'signature', sorted by key; concat as k=v (no separators)
+  const signature = String(req.query.signature || "");
+  const entries = Object.entries(req.query)
+    .filter(([k]) => k !== "signature")
+    .sort(([a], [b]) => a.localeCompare(b));
+  const message = entries.map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`).join("");
 
-  // Build the message from ALL query params except `signature`, sorted by key, concatenated with no separators.
-  // Each pair is "key=value"; if a key has multiple values, join them with commas (stable across frameworks).
-  const params = {};
-  for (const [k, v] of Object.entries(req.query)) {
-    if (k === "signature") continue;
-    params[k] = Array.isArray(v) ? v.join(",") : String(v);
-  }
-  const message = Object.keys(params)
-    .sort((a, b) => a.localeCompare(b))
-    .map((k) => `${k}=${params[k]}`)
-    .join("");
+  const expected = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(message).digest("hex");
+  const provided = signature;
 
-  const expected = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(message, "utf8").digest("hex");
-
-  // timing-safe compare; guard against unequal lengths which would throw
+  // timing-safe compare (hex)
   const ok =
     expected.length === provided.length &&
-    crypto.timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(provided, "utf8"));
+    crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
 
   const shop = String(req.query.shop || req.headers["x-shopify-shop-domain"] || "").toLowerCase();
-  return ok ? { ok: true, shop } : { ok: false, reason: "bad_signature", shop };
+  return ok ? { ok: true, shop } : { ok: false, reason: ok ? "unknown" : "bad_signature", shop };
 }
 
 function requireAppProxy(req, res, next) {
@@ -204,43 +210,8 @@ app.get("/proxy/refina", (_req, res) => {
 </html>`);
 });
 
-// (B) Asset proxy for subpaths only (mount with trailing slash; no wildcard patterns)
-app.use(
-  "/proxy/refina/",
-  createProxyMiddleware({
-    target: ASSETS_BASE_URL,
-    changeOrigin: true,
-    ws: false,
-    pathRewrite: (path) => {
-      // /proxy/refina/concierge.js  →  /concierge.js
-      const out = path.replace(/^\/proxy\/refina\/?/, "/");
-      return out.startsWith("/") ? out : `/${out}`;
-    },
-    logLevel: "warn",
-  })
-);
-
-// (C) Minimal admin stub so App URL is always 200
-app.get("/embedded", (_req, res) => {
-  res.type("html").send(`<!doctype html>
-<html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
-<body><h1>Refina Admin</h1><p>Embedded UI coming soon.</p></body></html>`);
-});
-
-// (D) Health
-app.get("/v1/health", (_req, res) => {
-  res.json({
-    ok: true,
-    now: new Date().toISOString(),
-    cacheSize: cache.size,
-    version: "bff-esm-prod",
-    proxy: `→ ${ASSETS_BASE_URL}`,
-    origin: PUBLIC_BACKEND_ORIGIN,
-  });
-});
-
-// (E) Data APIs — App Proxy versions (authoritative for storefront)
-//     Frontend calls /apps/refina/v1/* on the shop, which Shopify forwards to /proxy/refina/v1/* here.
+// (B) App Proxy APIs — authoritative for storefront
+// Frontend calls /apps/refina/v1/* on the shop, Shopify forwards to /proxy/refina/v1/* here.
 app.get("/proxy/refina/v1/concerns", requireAppProxy, async (req, res) => {
   try {
     const storeId = req.storeId;
@@ -263,8 +234,10 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
   try {
     const storeId = req.storeId;
     const concernInput = String(req.body?.concern || "").trim();
-    const plan = String(req.body?.plan || "free").toLowerCase();
     if (!concernInput) return res.status(400).json({ error: "concern required" });
+
+    // Enforce plan server-side; ignore client-provided plan
+    const plan = await getPlan(storeId);
 
     const normalizedConcern = normalizeConcern(concernInput);
     const settings = await getSettings(storeId);
@@ -320,7 +293,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
       productIds: used,
       products: hydrate,
       copy,
-      meta: { source, cache: "miss", tone },
+      meta: { source, cache: "miss", tone, plan },
     };
 
     cacheSet(cacheKey, payload);
@@ -332,6 +305,59 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
     const ms = Date.now() - t0;
     if (ms > 500) console.log(`[BFF] /proxy/refina/v1/recommend took ${ms}ms for ${req.storeId}`);
   }
+});
+
+// (C) Narrow asset proxies (AFTER App Proxy APIs; no catch-all)
+app.use(
+  "/proxy/refina/concierge.js",
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: () => "/concierge.js",
+    logLevel: "warn",
+  })
+);
+
+app.use(
+  "/proxy/refina/concierge.css",
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: () => "/concierge.css",
+    logLevel: "warn",
+  })
+);
+
+app.use(
+  "/proxy/refina/chunks",
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: (p) => p.replace(/^\/proxy\/refina\/chunks/, "/chunks"),
+    logLevel: "warn",
+  })
+);
+
+// (D) Minimal admin stub so App URL is always 200
+app.get("/embedded", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
+<body><h1>Refina Admin</h1><p>Embedded UI coming soon.</p></body></html>`);
+});
+
+// (E) Health (legacy direct endpoints are below; storefront should use /proxy/refina/v1/*)
+app.get("/v1/health", (_req, res) => {
+  res.json({
+    ok: true,
+    now: new Date().toISOString(),
+    cacheSize: cache.size,
+    version: "bff-esm-prod",
+    proxyAssets: ASSETS_BASE_URL,
+    origin: PUBLIC_BACKEND_ORIGIN,
+  });
 });
 
 // (Legacy direct endpoints kept for health/local use; storefront should use /proxy/refina/v1/*)
@@ -416,7 +442,7 @@ app.post("/v1/recommend", async (req, res) => {
       productIds: used,
       products: hydrate,
       copy,
-      meta: { source, cache: "miss", tone },
+      meta: { source, cache: "miss", tone, plan },
     };
 
     cacheSet(cacheKey, payload);
@@ -435,10 +461,12 @@ app.post("/v1/recommend", async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
-  console.log(`HTML shell:   GET  /proxy/refina  (loads /apps/refina/concierge.(css|js) via App Proxy)`);
-  console.log(`Asset proxy:  GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
-  console.log(`APIs:         GET  /proxy/refina/v1/concerns  |  POST /proxy/refina/v1/recommend (App Proxy, HMAC)`);
-  console.log(`Admin stub:   GET  /embedded`);
-  console.log(`Health:       GET  /v1/health`);
-  console.log(`Origin:           ${PUBLIC_BACKEND_ORIGIN}`);
+  console.log(`HTML shell:     GET  /proxy/refina  (loads /apps/refina/concierge.(css|js) via App Proxy)`);
+  console.log(`APIs (AppProxy):GET  /proxy/refina/v1/concerns  |  POST /proxy/refina/v1/recommend (HMAC)`);
+  console.log(`Assets (narrow):GET  /proxy/refina/concierge.js  →  ${ASSETS_BASE_URL}/concierge.js`);
+  console.log(`                GET  /proxy/refina/concierge.css  →  ${ASSETS_BASE_URL}/concierge.css`);
+  console.log(`                GET  /proxy/refina/chunks/*       →  ${ASSETS_BASE_URL}/chunks/*`);
+  console.log(`Admin stub:     GET  /embedded`);
+  console.log(`Health:         GET  /v1/health`);
+  console.log(`Origin:             ${PUBLIC_BACKEND_ORIGIN}`);
 });
