@@ -80,3 +80,4 @@ refina-migrate/
 
 # Local Netlify folder
 .netlify
+/frontend/dist-concierge/
