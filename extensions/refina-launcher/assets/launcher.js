@@ -72,7 +72,7 @@
     let overlay = null, lastFocus = null;
 
     function buildIframeUrl() {
-      // shop → (App Proxy /apps/refina) → backend /concierge
+      // shop → (App Proxy /apps/refina) → backend /proxy/refina
       const base = new URL(`https://${shopDomain}/${proxyPath}`);
       base.searchParams.set('source', 'launcher');
       // Optional dev toggle retained (no effect in prod)

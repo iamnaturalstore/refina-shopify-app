@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import proxy from "http-proxy-middleware"; // CJS interop in ESM
 const { createProxyMiddleware } = proxy;
+import crypto from "crypto";
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
@@ -22,6 +23,9 @@ const PUBLIC_BACKEND_ORIGIN = String(
   process.env.APP_PUBLIC_URL ||
   "https://refina-shopify-app.onrender.com"
 ).replace(/\/+$/, "");
+
+// Shopify App Proxy secret (used to verify /proxy/refina/v1/*)
+const SHOPIFY_APP_SECRET = String(process.env.SHOPIFY_APP_SECRET || process.env.SHOPIFY_API_SECRET || "");
 
 // ─────────────────────────────────────────────────────────────
 // Tiny in-memory TTL cache
@@ -112,6 +116,45 @@ async function getSettings(storeId) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Shopify App Proxy verification (for /proxy/refina/v1/*)
+// ─────────────────────────────────────────────────────────────
+function verifyAppProxy(req) {
+  if (!SHOPIFY_APP_SECRET) return { ok: false, reason: "missing_secret" };
+
+  // Accept either ?hmac (hex) or ?signature (hex) params
+  const provided = (req.query.hmac || req.query.signature || "").toString().toLowerCase();
+  if (!provided) return { ok: false, reason: "missing_signature" };
+
+  // Build sorted query string excluding hmac/signature
+  const entries = Object.entries(req.query)
+    .filter(([k]) => k !== "hmac" && k !== "signature")
+    .map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : String(v)])
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const qs = entries.map(([k, v]) => `${k}=${v}`).join("&");
+  const digest = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(qs, "utf8").digest("hex");
+
+  const ok = crypto.timingSafeEqual(Buffer.from(digest, "utf8"), Buffer.from(provided, "utf8"));
+  const shop = String(req.query.shop || req.headers["x-shopify-shop-domain"] || "").toLowerCase();
+
+  return ok ? { ok: true, shop } : { ok: false, reason: "bad_signature", shop };
+}
+
+function requireAppProxy(req, res, next) {
+  const v = verifyAppProxy(req);
+  if (!v.ok) {
+    const status = v.reason === "missing_secret" ? 500 : 401;
+    return res.status(status).json({ error: "unauthorized", reason: v.reason });
+  }
+  if (!v.shop) return res.status(400).json({ error: "missing_shop" });
+
+  // Canonical storeId = full myshopify domain
+  req.shopDomain = v.shop;
+  req.storeId = v.shop; // used in Firestore paths
+  return next();
+}
+
+// ─────────────────────────────────────────────────────────────
 // App
 // ─────────────────────────────────────────────────────────────
 const app = express();
@@ -188,7 +231,102 @@ app.get("/v1/health", (_req, res) => {
   });
 });
 
-// (E) Data APIs
+// (E) Data APIs — App Proxy versions (authoritative for storefront)
+//     Frontend calls /apps/refina/v1/* on the shop, which Shopify forwards to /proxy/refina/v1/* here.
+app.get("/proxy/refina/v1/concerns", requireAppProxy, async (req, res) => {
+  try {
+    const storeId = req.storeId;
+
+    const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`));
+    let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
+    if (!chips.length) {
+      const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get();
+      chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean);
+    }
+    res.json({ storeId, chips });
+  } catch (e) {
+    console.error("GET /proxy/refina/v1/concerns error", e);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const storeId = req.storeId;
+    const concernInput = String(req.body?.concern || "").trim();
+    const plan = String(req.body?.plan || "free").toLowerCase();
+    if (!concernInput) return res.status(400).json({ error: "concern required" });
+
+    const normalizedConcern = normalizeConcern(concernInput);
+    const settings = await getSettings(storeId);
+    const { category, tone, domain } = settings;
+
+    const cacheKey = ["rec", storeId, normalizedConcern, plan, tone].join("|");
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } });
+
+    const snaps = await db.collection("products").where("storeId", "==", storeId).limit(1500).get();
+    const allProducts = [];
+    snaps.forEach(d => allProducts.push({ id: d.id, ...d.data() }));
+
+    const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
+    const mapping = await getDocSafe(mappingRef);
+    let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
+
+    let source = "mapping";
+    if (!productIds.length) {
+      const ranked = rankProducts(allProducts, normalizedConcern);
+      productIds = ranked.slice(0, 8).map(p => p.id);
+      source = "fallback";
+    }
+
+    const used = productIds.slice(0, plan === "free" ? 3 : 8);
+
+    const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const hydrate = used.map((id) => {
+      const p = allProducts.find((x) => x.id === id) || {};
+      const handle = String(p.handle || "").replace(/^\/+|\/+$/g, "");
+      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
+      return {
+        id: p.id,
+        title: p.title || p.name || "",
+        name: p.title || p.name || "",
+        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ""),
+        description: p.description || "",
+        productType: p.productType || "",
+        tags: p.tags || [],
+        url: productUrl,
+        price: p.price ?? null,
+      };
+    });
+
+    const copy = shapeCopy({
+      products: allProducts.filter(p => used.includes(p.id)),
+      concern: normalizedConcern,
+      tone,
+      category,
+    });
+
+    const payload = {
+      productIds: used,
+      products: hydrate,
+      copy,
+      meta: { source, cache: "miss", tone },
+    };
+
+    cacheSet(cacheKey, payload);
+    res.json(payload);
+  } catch (e) {
+    console.error("POST /proxy/refina/v1/recommend error", e);
+    res.status(500).json({ error: "internal_error" });
+  } finally {
+    const ms = Date.now() - t0;
+    if (ms > 500) console.log(`[BFF] /proxy/refina/v1/recommend took ${ms}ms for ${req.storeId}`);
+  }
+});
+
+// (Legacy direct endpoints kept for health/local use; storefront should use /proxy/refina/v1/*)
 app.get("/v1/concerns", async (req, res) => {
   try {
     const storeId = String(req.query.storeId || "").trim();
@@ -291,6 +429,7 @@ app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
   console.log(`HTML shell:   GET  /proxy/refina  (loads /apps/refina/concierge.(css|js) via App Proxy)`);
   console.log(`Asset proxy:  GET  /proxy/refina/*  →  ${ASSETS_BASE_URL}/*`);
+  console.log(`APIs:         GET  /proxy/refina/v1/concerns  |  POST /proxy/refina/v1/recommend (App Proxy, HMAC)`);
   console.log(`Admin stub:   GET  /embedded`);
   console.log(`Health:       GET  /v1/health`);
   console.log(`Origin:           ${PUBLIC_BACKEND_ORIGIN}`);
