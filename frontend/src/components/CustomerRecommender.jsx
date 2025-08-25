@@ -5,9 +5,6 @@ import styles from "./CustomerRecommender.module.css";
 // All calls are same-origin under the shop: /apps/refina/v1/*
 const API_PREFIX = "/apps/refina/v1";
 
-const qs = new URLSearchParams(window.location.search);
-const PLAN = (qs.get("plan") || "free").toLowerCase();
-
 function CustomerRecommender() {
   // Query + UI state
   const [concern, setConcern] = useState("");
@@ -56,8 +53,8 @@ function CustomerRecommender() {
       const resp = await fetch(`${API_PREFIX}/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // storeId is never sent from the browser; server derives it from the App Proxy context
-        body: JSON.stringify({ concern: q, plan: PLAN }),
+        // storeId/plan are never sent from the browser; server derives them
+        body: JSON.stringify({ concern: q }),
       });
       if (!resp.ok) throw new Error(`recommend ${resp.status}`);
 

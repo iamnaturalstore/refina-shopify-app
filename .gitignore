@@ -1,5 +1,6 @@
 # --- Dependencies
 node_modules/
+**/node_modules/
 .pnp/
 .pnp.js
 .pnp.data.json
@@ -21,15 +22,18 @@ pnpm-debug.log*
 *.log
 .cache/
 .vite/
+**/.vite/
 .tmp/
 tmp/
 temp/
 
 # --- Build outputs
 dist/
+**/dist/
 build/
 .next/
 out/
+refina-backend/admin-ui-dist/
 
 # --- Env files (keep examples)
 .env
@@ -55,6 +59,8 @@ firebase-service-account.json
 *.serviceAccountKey.json
 service-account.json
 **/service-account.json
+refina-backend/secure/
+scripts/service-account.json
 
 # --- Coverage
 coverage/
@@ -63,27 +69,14 @@ coverage/
 *.pid
 *.pid.lock
 
-# Backups/archives
+# --- Backups/archives
 *.zip
 *.tar.gz
 *.tgz
 *.7z
-*.zip
 
-# old migration folder
+# --- Old migration folder
 refina-migrate/
 
-# Firebase service account (do not commit)
-refina-backend/secure/
-scripts/service-account.json
-
-**/node_modules/
-**/.vite/
-**/dist/
-refina-backend/admin-ui-dist/
-
-frontend/node_modules/
-frontend/node_modules/.vite/
-
-refina-backend/routes/
-refina-backend/utils/
+# Local Netlify folder
+.netlify
