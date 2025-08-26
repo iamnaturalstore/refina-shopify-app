@@ -88,20 +88,29 @@ export default function Home() {
 
   // fetch: settings
   React.useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        setLoadingSettings(true);
-        const j = await api(`/api/admin/store-settings${storeQS}`);
-        if (on) setSettings(j?.settings || {});
-      } catch (e) {
-        if (on) setErr(prev => prev || `Settings error: ${e?.message || "failed to load"}`);
-      } finally {
-        if (on) setLoadingSettings(false);
+  let on = true;
+  (async () => {
+    try {
+      setLoadingSettings(true);
+      // Build a robust URL: include both storeId (short) and shop (full)
+      const qs = new URLSearchParams();
+      if (storeId) {
+        qs.set("storeId", storeId);
+        qs.set("shop", `${storeId}.myshopify.com`);
       }
-    })();
-    return () => { on = false; };
-  }, [storeQS]);
+      const j = await api(`/api/admin/store-settings${qs.toString() ? `?${qs.toString()}` : ""}`);
+      if (on) setSettings(j?.settings || {});
+    } catch (e) {
+      // Non-blocking: fall back silently so Home doesn’t show a red banner for settings alone
+      console.warn("Home: settings load failed", e?.message || e);
+      if (on) setSettings({});
+    } finally {
+      if (on) setLoadingSettings(false);
+    }
+  })();
+  return () => { on = false; };
+}, [storeId]);
+
 
   // fetch: analytics overview (30d)
   React.useEffect(() => {
