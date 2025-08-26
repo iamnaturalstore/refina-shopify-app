@@ -11,6 +11,8 @@ import billingRouter from "../routes/billing.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
+import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
+
 
 
 
@@ -589,6 +591,8 @@ app.use("/api/billing", billingRouter);        // /api/billing/plan, /subscribe,
 
 // Admin APIs used by Home/Settings/Analytics
 app.use("/api/admin", analyticsRouter);        // /api/admin/analytics/* (overview, logs)
+app.use("/api/admin", adminSettingsRouter);   // /api/admin/store-settings (GET/PUT)
+
 
 
 // ─────────────────────────────────────────────────────────────
