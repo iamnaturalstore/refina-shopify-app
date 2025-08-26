@@ -11,9 +11,6 @@ import billingRouter from "../routes/billing.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
-import * as storeSettingsMod from "../routes/storeSettings.js"; // Home & Settings
-const storeSettingsRouter =
-  storeSettingsMod.default ?? storeSettingsMod.router ?? storeSettingsMod;
 
 
 
@@ -591,7 +588,6 @@ app.post("/v1/recommend", async (req, res) => {
 app.use("/api/billing", billingRouter);        // /api/billing/plan, /subscribe, /sync
 
 // Admin APIs used by Home/Settings/Analytics
-app.use("/api/admin", storeSettingsRouter);    // /api/admin/store-settings (GET/POST + theme/apply)
 app.use("/api/admin", analyticsRouter);        // /api/admin/analytics/* (overview, logs)
 
 
