@@ -11,7 +11,8 @@ import billingRouter from "../routes/billing.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
-import storeSettingsRouter from "../routes/storeSettings.js"; // Home & Settings
+import { router as storeSettingsRouter } from "../routes/storeSettings.js"; // Home & Settings
+
 
 
 
