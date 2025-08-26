@@ -11,6 +11,9 @@ import billingRouter from "../routes/billing.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
+import adminRouter from "../routes/admin.js";   // provides /store-settings, etc.
+
+
 
 
 
@@ -584,9 +587,11 @@ app.post("/v1/recommend", async (req, res) => {
     if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`);
   }
 });
-app.use(billingRouter);
-// Admin Analytics APIs → /api/admin/analytics/*
-app.use("/api/admin", analyticsRouter);
+app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
+// Admin APIs used by Home/Settings/Analytics
+app.use("/api/admin", adminRouter);     // e.g. /api/admin/store-settings
+app.use("/api/admin", analyticsRouter); // e.g. /api/admin/analytics/overview, /logs
+
 
 
 // ─────────────────────────────────────────────────────────────
