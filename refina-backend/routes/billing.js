@@ -70,10 +70,26 @@ async function resolveShopContext(req, res) {
  */
 router.get("/plan", async (req, res) => {
   try {
-    const { storeId } = await resolveShopContext(req, res);
-    let plan = null;
-    const snap = await dbAdmin.collection("plans").doc(storeId).get();
-    plan = snap.exists ? normalizePlan(snap.data()) : { level: "free", status: "NONE" };
+    const { shop, storeId } = await resolveShopContext(req, res);
+
+// Try short ID first (e.g., "refina-demo"), then full domain (e.g., "refina-demo.myshopify.com")
+const plans = dbAdmin.collection("plans");
+const shortSnap = await plans.doc(storeId).get();
+let raw = shortSnap.exists ? shortSnap.data() : null;
+
+if (!raw) {
+  const longSnap = await plans.doc(shop).get(); // full domain
+  raw = longSnap.exists ? longSnap.data() : null;
+}
+
+let plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
+// Legacy migration: treat stored "pro+" as "premium"
+if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
+  plan = { ...plan, level: "premium" };
+}
+
+return res.json({ plan });
+
     // Legacy migration: treat stored "pro+" as "premium"
     if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
       plan = { ...plan, level: "premium" };
@@ -111,9 +127,6 @@ router.post("/subscribe", async (req, res) => {
     let offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
 
     // Dev fallback: allow admin token if present
-    if (!offlineSession?.accessToken && process.env.SHOPIFY_ADMIN_API_TOKEN && shopify.session?.customAppSession) {
-      offlineSession = shopify.session.customAppSession(shop);
-    }
     if (!offlineSession?.accessToken) {
       return res
         .status(401)
@@ -192,7 +205,7 @@ if (!["pro", "premium"].includes(target)) {
     // 3) Plan catalog (prices from your listing)
     const PLAN = target === "premium"
       ? { name: "Premium", amount: "29.00" }
-      : { name: "Pro",      amount: "19.00" };
+      : { name: "Pro",      amount: "9.00" };
 
     // --- Build a clean HTTPS returnUrl on your app host, no fragments for GraphQL parsing ---
     const rawHost = process.env.HOST || absoluteAppUrl(req); // e.g. https://refina.ngrok.app
@@ -300,9 +313,6 @@ router.post("/sync", async (req, res) => {
     const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
     let offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
 
-    if (!offlineSession?.accessToken && process.env.SHOPIFY_ADMIN_API_TOKEN && shopify.session?.customAppSession) {
-      offlineSession = shopify.session.customAppSession(shop);
-    }
     if (!offlineSession?.accessToken) {
       return res
         .status(401)
@@ -335,10 +345,14 @@ router.post("/sync", async (req, res) => {
       if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
     }
 
-    await dbAdmin.collection("plans").doc(storeId).set(
-      { level, status, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
-    );
+    // A3: dual-write (short storeId and full shop domain)
+    const payload = { level, status, updatedAt: FieldValue.serverTimestamp() };
+    const plans = dbAdmin.collection("plans");
+
+    await Promise.all([
+      plans.doc(storeId).set(payload, { merge: true }),
+      plans.doc(shop).set(payload,   { merge: true }),
+    ]);
 
     return res.json({ ok: true, level, status });
   } catch (err) {
@@ -355,3 +369,4 @@ router.post("/sync", async (req, res) => {
 });
 
 export default router;
+

@@ -7,6 +7,8 @@ const { createProxyMiddleware } = proxy;
 import crypto from "crypto";
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
+import billingRouter from "../routes/billing.js";
+
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -97,7 +99,7 @@ async function getSettings(storeId) {
   if (!snap.exists) {
     const seed = {
       tone: (process.env.BFF_DEFAULT_TONE || "expert").toLowerCase(),
-      category: process.env.BFF_DEFAULT_CATEGORY || "Generic",
+      category: (process.env.BFF_DEFAULT_CATEGORY || "Generic"),
       enabledPacks: (process.env.BFF_ENABLED_PACKS || "").split(",").map(s => s.trim()).filter(Boolean),
       domain: "",
       createdAt: nowTs(),
@@ -156,6 +158,32 @@ async function fetchProducts(storeId, limit = 1500) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Per-shop rate limiter for App Proxy APIs (no deps)
+// ─────────────────────────────────────────────────────────────
+const rlBuckets = new Map();
+const RL = { capacity: 60, refillPerSec: 1 }; // 60 req/min
+const REFILL_PER_MS = RL.refillPerSec / 1000;
+
+function rateLimitAppProxy(req, res, next) {
+  // After requireAppProxy, req.storeId is set to <shop>.myshopify.com
+  const key = req.storeId || String(req.query.shop || req.headers["x-shopify-shop-domain"] || req.ip);
+  const now = Date.now();
+  let b = rlBuckets.get(key);
+  if (!b) { b = { tokens: RL.capacity, last: now }; rlBuckets.set(key, b); }
+  const elapsed = now - b.last;
+  b.last = now;
+  b.tokens = Math.min(RL.capacity, b.tokens + elapsed * REFILL_PER_MS);
+
+  if (b.tokens >= 1) {
+    b.tokens -= 1;
+    return next();
+  }
+  const retryAfterSec = Math.ceil((1 - b.tokens) / RL.refillPerSec) || 1;
+  res.setHeader("Retry-After", String(retryAfterSec));
+  return res.status(429).json({ error: "rate_limited", retryAfter: retryAfterSec });
+}
+
+// ─────────────────────────────────────────────────────────────
 // Shopify App Proxy verification (for /proxy/refina/v1/*)
 // ─────────────────────────────────────────────────────────────
 function verifyAppProxy(req) {
@@ -202,6 +230,69 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
+// ─────────────────────────────────────────────────────────────
+// Shopify Webhooks (HMAC verified, raw body)
+// ─────────────────────────────────────────────────────────────
+const rawJson = express.raw({ type: "application/json" });
+
+function verifyWebhookHmac(req, res, next) {
+  if (!SHOPIFY_APP_SECRET) return res.status(500).send("missing_secret");
+  const hmac = String(req.get("x-shopify-hmac-sha256") || "");
+  const body = req.body; // Buffer from express.raw
+
+  try {
+    const digest = crypto.createHmac("sha256", SHOPIFY_APP_SECRET)
+      .update(body)
+      .digest("base64");
+
+    const ok = hmac &&
+      digest.length === hmac.length &&
+      crypto.timingSafeEqual(Buffer.from(digest, "utf8"), Buffer.from(hmac, "utf8"));
+
+    if (!ok) return res.status(401).send("invalid_hmac");
+    return next();
+  } catch (e) {
+    return res.status(400).send("hmac_error");
+  }
+}
+
+// App uninstalled
+app.post("/webhooks/app/uninstalled", rawJson, verifyWebhookHmac, async (req, res) => {
+  const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
+  const topic = String(req.get("x-shopify-topic") || "");
+  try {
+    const payload = JSON.parse(req.body.toString("utf8"));
+    console.log(`[Webhook] ${topic} from ${shop} — ${payload?.id || ""}`);
+  } catch (e) {
+    console.error("app/uninstalled parse error", e);
+  }
+  res.status(200).send("ok");
+});
+
+// GDPR: customers/data_request
+app.post("/webhooks/customers/data_request", rawJson, verifyWebhookHmac, (req, res) => {
+  const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
+  const topic = String(req.get("x-shopify-topic") || "");
+  console.log(`[Webhook] ${topic} from ${shop}`);
+  res.status(200).send("ok");
+});
+
+// GDPR: customers/redact
+app.post("/webhooks/customers/redact", rawJson, verifyWebhookHmac, (req, res) => {
+  const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
+  const topic = String(req.get("x-shopify-topic") || "");
+  console.log(`[Webhook] ${topic} from ${shop}`);
+  res.status(200).send("ok");
+});
+
+// GDPR: shop/redact
+app.post("/webhooks/shop/redact", rawJson, verifyWebhookHmac, (req, res) => {
+  const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
+  const topic = String(req.get("x-shopify-topic") || "");
+  console.log(`[Webhook] ${topic} from ${shop}`);
+  res.status(200).send("ok");
+});
+
 // (A) Shopify App Proxy HTML shell (no wildcards, exact path)
 app.get("/proxy/refina", (_req, res) => {
   // CSP safe for Shopify storefront iframe
@@ -238,7 +329,7 @@ app.get("/proxy/refina", (_req, res) => {
 
 // (B) App Proxy APIs — authoritative for storefront
 // Frontend calls /apps/refina/v1/* on the shop, Shopify forwards to /proxy/refina/v1/* here.
-app.get("/proxy/refina/v1/concerns", requireAppProxy, async (req, res) => {
+app.get("/proxy/refina/v1/concerns", requireAppProxy, rateLimitAppProxy, async (req, res) => {
   try {
     const storeId = req.storeId;
 
@@ -255,7 +346,7 @@ app.get("/proxy/refina/v1/concerns", requireAppProxy, async (req, res) => {
   }
 });
 
-app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
+app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async (req, res) => {
   const t0 = Date.now();
   try {
     const storeId = req.storeId;
@@ -290,6 +381,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, async (req, res) => {
     }
 
     const used = productIds.slice(0, plan === "free" ? 3 : 8);
+    
 
     const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     const hydrate = used.map((id) => {
@@ -480,6 +572,7 @@ app.post("/v1/recommend", async (req, res) => {
     if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`);
   }
 });
+app.use(billingRouter);
 
 // ─────────────────────────────────────────────────────────────
 // Listen
