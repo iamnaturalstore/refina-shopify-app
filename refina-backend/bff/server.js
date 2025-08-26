@@ -460,11 +460,12 @@ app.use(
   })
 );
 
-// (D) Minimal admin stub so App URL is always 200
-app.get("/embedded", (_req, res) => {
-  res.type("html").send(`<!doctype html>
-<html><head><meta charset="utf-8"/><title>Refina Admin</title></head>
-<body><h1>Refina Admin</h1><p>Embedded UI coming soon.</p></body></html>`);
+// Redirect Embedded entry → /admin-ui/, preserving ?host=&shop=&storeId=
+app.get("/embedded", (req, res) => {
+  const qs = req.originalUrl.includes("?")
+    ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
+    : "";
+  res.redirect(302, `/admin-ui/${qs}`);
 });
 
 // (E) Health (legacy direct endpoints are below; storefront should use /proxy/refina/v1/*)
