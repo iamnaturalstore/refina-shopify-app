@@ -466,30 +466,26 @@ app.use(
 const ADMIN_UI_DIR = path.join(__dirname, "../admin-ui-dist");
 app.use("/admin-ui", express.static(ADMIN_UI_DIR, { index: false }));
 
-// SPA fallback so nested routes like /admin-ui/analytics work
-app.get("/admin-ui/*", (_req, res) => {
+// SPA fallback (Express v5-safe: use RegExp, not "*")
+app.get(/^\/admin-ui(?:\/.*)?$/, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
 });
-
-
 
 // Redirect Embedded entry → /admin-ui/, preserving ?host=&shop=&storeId=
 app.get("/embedded", (req, res) => {
   const qs = req.originalUrl.includes("?")
     ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
     : "";
+  res.set("Cache-Control", "no-store");
   res.redirect(302, `/admin-ui/${qs}`);
 });
+
 
 // (E) Health (legacy direct endpoints are below; storefront should use /proxy/refina/v1/*)
 app.get("/v1/health", (_req, res) => {
   res.json({
     ok: true,
     now: new Date().toISOString(),
-    cacheSize: cache.size,
-    version: "bff-esm-prod",
-    proxyAssets: ASSETS_BASE_URL,
-    origin: PUBLIC_BACKEND_ORIGIN,
   });
 });
 
