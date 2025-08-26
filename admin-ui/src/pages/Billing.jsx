@@ -1,6 +1,4 @@
-// admin-ui/src/pages/Billing.jsx
 import * as React from "react";
-import { api } from "../api/client";
 import {
   Card,
   BlockStack,
@@ -13,37 +11,10 @@ import {
   Divider,
   Banner,
   Icon,
+  ProgressBar,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-
-const PENDING_KEY = "refina:billing:pending";
-
-// ── Plan meta (EDIT here to change prices/blurbs) ────────────────────────
-const PLAN_DETAILS = {
-  pro: {
-    label: "Pro",
-    priceMonthly: "$9/mo",
-    priceAnnualNote: "or $90/yr (~2 mo free)",
-    tooltip: "Pro — Core AI • 1k queries/mo • email support",
-    features: [
-      "Core AI recommendations",
-      "Up to 1k queries / month",
-      "Email support",
-    ],
-  },
-  premium: {
-    label: "Premium",
-    priceMonthly: "$29/mo",
-    priceAnnualNote: "or $290/yr (~2 mo free)",
-    tooltip: "Premium — Advanced AI • styling & analytics • priority support",
-    ribbon: "Best value",
-    features: [
-      "Advanced AI quality",
-      "Styling controls & analytics",
-      "Higher limits + priority support",
-    ],
-  },
-};
+import { api, getStoreIdFromUrl } from "../api/client";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
@@ -62,242 +33,404 @@ function parsePlanResponse(j) {
   const p = j?.plan || j || {};
   return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
 }
+function pct(n, d) {
+  const N = Number(n || 0);
+  const D = Number(d || 0);
+  if (!D) return 0;
+  const p = (100 * N) / D;
+  return isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+}
+function fmt(n) {
+  const x = Number(n || 0);
+  return isFinite(x) ? x.toLocaleString() : "—";
+}
 
-export default function Billing() {
-  const [loading, setLoading] = React.useState(true);
-  const [busy, setBusy] = React.useState(false);
-  const [plan, setPlan] = React.useState(null); // { level, status }
-  const [error, setError] = React.useState("");
-  const [toast, setToast] = React.useState("");
-  const [syncing, setSyncing] = React.useState(false);
-  const pollRef = React.useRef(null);
-  const timeoutRef = React.useRef(null);
+export default function Home() {
+  const storeId = React.useMemo(() => getStoreIdFromUrl(), []);
+  const storeQS = React.useMemo(
+    () => (storeId ? `?storeId=${encodeURIComponent(storeId)}` : ""),
+    [storeId]
+  );
 
-  const proMeta = PLAN_DETAILS.pro;
-  const premiumMeta = PLAN_DETAILS.premium;
+  // state
+  const [err, setErr] = React.useState("");
+  const [plan, setPlan] = React.useState({ level: "free", status: "unknown" });
+  const [settings, setSettings] = React.useState(null);
+  const [overview, setOverview] = React.useState(null);
+  const [logs, setLogs] = React.useState([]);
+  const [health, setHealth] = React.useState({ ok: false, now: "" });
 
-  // Load plan (with fallback path)
-  const loadPlan = React.useCallback(async () => {
-    setError("");
-    setLoading(true);
-    try {
-      const j = await api("/api/billing/plan");
-      setPlan(parsePlanResponse(j));
-    } catch {
+  const [loadingPlan, setLoadingPlan] = React.useState(true);
+  const [loadingSettings, setLoadingSettings] = React.useState(true);
+  const [loadingOverview, setLoadingOverview] = React.useState(true);
+  const [loadingLogs, setLoadingLogs] = React.useState(true);
+  const [checkingHealth, setCheckingHealth] = React.useState(true);
+
+  // fetch: plan
+  React.useEffect(() => {
+    let on = true;
+    (async () => {
       try {
-        const r = await fetch("/billing/plan", { credentials: "include" });
-        if (!r.ok) throw new Error("bad status");
-        const j = await r.json();
-        setPlan(parsePlanResponse(j));
-      } catch {
-        setError("Failed to load current plan.");
-        setPlan(null);
+        setLoadingPlan(true);
+        const q = new URLSearchParams();
+        if (storeId) q.set("storeId", storeId);
+        q.set("ts", String(Date.now()));
+        const j = await api(`/api/billing/plan?${q.toString()}`);
+        if (on) setPlan(parsePlanResponse(j));
+      } catch (e) {
+        if (on) setErr(`Plan error: ${e?.message || "failed to load"}`);
+      } finally {
+        if (on) setLoadingPlan(false);
       }
-    } finally {
-      setLoading(false);
-    }
+    })();
+    return () => { on = false; };
+  }, [storeId]);
+
+  // fetch: settings
+  React.useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        setLoadingSettings(true);
+        const j = await api(`/api/admin/store-settings${storeQS}`);
+        if (on) setSettings(j?.settings || {});
+      } catch (e) {
+        if (on) setErr(prev => prev || `Settings error: ${e?.message || "failed to load"}`);
+      } finally {
+        if (on) setLoadingSettings(false);
+      }
+    })();
+    return () => { on = false; };
+  }, [storeQS]);
+
+  // fetch: analytics overview (30d)
+  React.useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        setLoadingOverview(true);
+        const over = await api(`/api/admin/analytics/overview?days=30${storeQS ? `&${storeQS.slice(1)}` : ""}`);
+        if (on) setOverview(over || {});
+      } catch (e) {
+        if (on) setErr(prev => prev || `Analytics error: ${e?.message || "failed to load"}`);
+      } finally {
+        if (on) setLoadingOverview(false);
+      }
+    })();
+    return () => { on = false; };
+  }, [storeQS]);
+
+  // fetch: recent logs (limit 5)
+  React.useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        setLoadingLogs(true);
+        const j = await api(`/api/admin/analytics/logs?limit=5${storeQS ? `&${storeQS.slice(1)}` : ""}`);
+        const items = Array.isArray(j?.logs) ? j.logs : (Array.isArray(j) ? j : []);
+        if (on) setLogs(items.slice(0, 5));
+      } catch {
+        // silently ignore
+      } finally {
+        if (on) setLoadingLogs(false);
+      }
+    })();
+    return () => { on = false; };
+  }, [storeQS]);
+
+  // health
+  React.useEffect(() => {
+    let on = true;
+    (async () => {
+      try {
+        setCheckingHealth(true);
+        const r = await fetch("/v1/health", { credentials: "include" });
+        const j = r.ok ? await r.json() : {};
+        if (on) setHealth({ ok: !!j?.ok, now: j?.now || "" });
+      } catch {
+        if (on) setHealth({ ok: false, now: "" });
+      } finally {
+        if (on) setCheckingHealth(false);
+      }
+    })();
+    return () => { on = false; };
   }, []);
 
-  React.useEffect(() => {
-    loadPlan();
-    const onVis = () => { if (document.visibilityState === "visible") loadPlan(); };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [loadPlan]);
+  // derived
+  const level = normalizeLevel(plan?.level);
+  const levelLabel = labelFromLevel(level);
+  const badgeTone = level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
 
-  // Auto-refresh after returning from checkout
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+  // overview shape tolerance
+  const totals = overview?.totals || overview || {};
+  const interactions = Number(
+    totals.interactions ?? totals.queries ?? totals.sessions ?? totals.requests ?? 0
+  );
+  const productClicks = Number(
+    totals.productClicks ?? totals.clicks ?? totals.cta ?? 0
+  );
+  // usage (fallback based on plan)
+  const usage = overview?.usage || {};
+  const used = Number(usage.used ?? usage.monthUsed ?? 0);
+  const limit =
+    usage.limit ??
+    (level === "free" ? 0 : level === "pro" ? 1000 : level === "premium" ? 10000 : 0);
 
-  React.useEffect(() => {
-    const wantRaw = localStorage.getItem(PENDING_KEY);
-    if (!wantRaw) return;
-    const want = normalizeLevel(wantRaw);
-    const have = plan ? normalizeLevel(plan.level) : null;
+  const ctr = interactions ? (100 * (productClicks || 0)) / interactions : 0;
 
-    if (have && have === want) {
-      localStorage.removeItem(PENDING_KEY);
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      setSyncing(false);
-      showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
-      return;
-    }
-    if (!syncing) {
-      setSyncing(true);
-      pollRef.current = setInterval(loadPlan, 3000);
-      timeoutRef.current = setTimeout(() => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setSyncing(false);
-      }, 60000);
-    }
-  }, [plan, syncing, loadPlan]);
+  // checklist derived
+  const hasTone = Boolean(settings?.tone);
+  const hasCategory = Boolean(settings?.category);
+  const hasDomain = Boolean(settings?.domain);
+  const checklistDone = [hasTone, hasCategory, hasDomain].filter(Boolean).length;
 
-  React.useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
-  async function subscribe(which /* "pro" | "premium" */) {
-    try {
-      setBusy(true); setError("");
-      const j = await api("/api/billing/subscribe", { method: "POST", body: { plan: which } });
-      const url = j?.confirmationUrl || j?.url || j?.confirmation_url || j?.redirectUrl;
-      if (!url) throw new Error("No confirmation URL returned");
-      try { localStorage.setItem(PENDING_KEY, which); } catch {}
-      try { window.top.location.href = url; } catch { window.location.href = url; }
-    } catch (e) {
-      setError(e?.message || "Upgrade failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  // Derived UI state
-  const currentLevel = plan ? normalizeLevel(plan.level) : null;
-  const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
-  const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
-  const isPro = currentLevel === "pro";
-  const isPremium = currentLevel === "premium";
-
-  // Tile helper
-  function PlanTile({ id, meta, current, onChoose }) {
-    const isCurrent = current === id;
-    return (
-      <Card>
-        <BlockStack gap="300">
-          <InlineStack align="space-between" blockAlign="center">
-            <InlineStack gap="200" blockAlign="center">
-              <Text as="h3" variant="headingLg">{meta.label}</Text>
-              {isCurrent && <Badge tone="success">Current</Badge>}
-              {!isCurrent && meta.ribbon && <Badge tone="attention">{meta.ribbon}</Badge>}
-            </InlineStack>
-            <BlockStack gap="050" align="end">
-              <Tooltip content={meta.tooltip}>
-                <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
-              </Tooltip>
-              {meta.priceAnnualNote && (
-                <Text as="span" tone="subdued" variant="bodySm">
-                  {meta.priceAnnualNote}
-                </Text>
-              )}
-            </BlockStack>
-          </InlineStack>
-
-          <BlockStack gap="150">
-            {meta.features.map((f, i) => (
-              <InlineStack key={i} gap="150" blockAlign="center">
-                <Icon source={CheckIcon} tone="success" />
-                <Text as="span" tone="subdued">{f}</Text>
-              </InlineStack>
-            ))}
-          </BlockStack>
-
-          <Divider />
-
-          <InlineStack>
-            <Button
-              variant="primary"
-              disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id)}
-            >
-              {isCurrent ? `Current: ${meta.label}` : busy ? "Opening…" : `Choose ${meta.label}`}
-            </Button>
-          </InlineStack>
-        </BlockStack>
-      </Card>
-    );
-  }
+  // links
+  const qsParam = storeId ? `?storeId=${encodeURIComponent(storeId)}` : "";
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
+      {/* header */}
       <Card>
-        <BlockStack gap="400">
-          {/* Header */}
+        <Box padding="400">
           <InlineStack align="space-between" blockAlign="center">
-            <Text as="h2" variant="headingMd">Billing</Text>
-            {!loading ? (
-              <Tooltip
-                content={
-                  currentLevel === "pro"
-                    ? proMeta.tooltip
-                    : currentLevel === "premium"
-                    ? premiumMeta.tooltip
-                    : ""
-                }
-              >
-                <Badge tone={isPro || isPremium ? "success" : "subdued"}>
-                  {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
-                </Badge>
+            <Text as="h2" variant="headingMd">Welcome to Refina</Text>
+            <InlineStack gap="200" blockAlign="center">
+              <Tooltip content={levelLabel}>
+                <Badge tone={badgeTone}>{levelLabel}</Badge>
               </Tooltip>
-            ) : (
-              <Text as="span" tone="subdued">Loading…</Text>
-            )}
+              {plan?.status && (
+                <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>
+              )}
+              <Button url={`#/billing${qsParam}`}>Manage billing</Button>
+            </InlineStack>
           </InlineStack>
-
-          <InlineStack align="space-between" blockAlign="center">
-            <BlockStack gap="100">
-              <Text as="p" variant="bodyMd" fontWeight="semibold">
-                {loading ? "Loading…" : `You’re on ${currentLabel || "—"}`}
-              </Text>
-              <Text as="p" tone="subdued">
-                After approving a charge, click “Refresh” or wait for the billing webhook to update your plan.
-              </Text>
-            </BlockStack>
-            <Button onClick={loadPlan} disabled={loading || busy}>
-              {busy ? "Refreshing…" : "Refresh"}
-            </Button>
+        </Box>
+        <Divider />
+        <Box padding="400">
+          <InlineStack gap="300">
+            <Button variant="primary" url={`#/analytics${qsParam}`}>View analytics</Button>
+            <Button url={`#/settings${qsParam}`}>Settings</Button>
+            <Button url={`#/billing${qsParam}`}>Billing</Button>
           </InlineStack>
-
-          {error && (
-            <Banner tone="critical" title="Billing error">
-              <p>{error}</p>
-            </Banner>
-          )}
-
-          {/* Side-by-side tiles */}
-          <InlineStack gap="400" wrap>
-            <Box minWidth="320px" maxWidth="520px" width="100%">
-              <PlanTile id="pro" meta={proMeta} current={currentLevel} onChoose={subscribe} />
-            </Box>
-            <Box minWidth="320px" maxWidth="520px" width="100%">
-              <PlanTile id="premium" meta={premiumMeta} current={currentLevel} onChoose={subscribe} />
-            </Box>
-          </InlineStack>
-
-          <Divider />
-
-          {/* Sync status + toast */}
-          {syncing && !toast && (
-            <Text tone="subdued" as="p" variant="bodySm">
-              Syncing billing status…
-            </Text>
-          )}
-        </BlockStack>
+        </Box>
       </Card>
 
-      {/* Helper note for future you / merchants */}
-      <Box paddingBlockStart="200">
-        <Text tone="subdued" as="p" variant="bodySm">
-          Edit pricing & blurbs in <code>PLAN_DETAILS</code> inside this file.
-        </Text>
-      </Box>
-
-      {/* Simple toast */}
-      {toast && (
-        <Box
-          position="fixed"
-          insetInlineEnd="400"
-          insetBlockEnd="400"
-          padding="300"
-          borderRadius="200"
-          background="bg-inverse"
-          style={{ color: "#fff", zIndex: 9999, boxShadow: "0 8px 24px rgba(0,0,0,.2)" }}
-        >
-          <Text as="span" tone="inverse">{toast}</Text>
+      {/* errors */}
+      {err && (
+        <Box paddingBlockStart="400">
+          <Banner tone="critical" title="Something went wrong">
+            <p>{err}</p>
+          </Banner>
         </Box>
       )}
+
+      {/* month at a glance */}
+      <Box paddingBlockStart="400">
+        <Card>
+          <Box padding="400">
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingSm">Your month at a glance</Text>
+                <Text as="span" tone="subdued" variant="bodySm">
+                  {loadingOverview ? "Loading…" : "Last 30 days"}
+                </Text>
+              </InlineStack>
+
+              {/* usage meter */}
+              <BlockStack gap="150">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="span" tone="subdued">Smart queries</Text>
+                  <Text as="span" tone="subdued">
+                    {level === "free"
+                      ? "Locked on Free"
+                      : `${fmt(used)} / ${fmt(limit)}${limit ? "" : ""}`}
+                  </Text>
+                </InlineStack>
+                <ProgressBar progress={level === "free" ? 0 : pct(used, limit)} size="small" />
+                {level === "free" && (
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={CheckIcon} tone="success" />
+                    <Text as="span" tone="subdued">
+                      Upgrade to Pro to unlock AI-powered recommendations & analytics
+                    </Text>
+                  </InlineStack>
+                )}
+              </BlockStack>
+
+              {/* impact tiles */}
+              <InlineStack gap="400" wrap>
+                <Box minWidth="220px" maxWidth="340px" width="100%">
+                  <Card>
+                    <Box padding="300">
+                      <BlockStack gap="050">
+                        <Text as="span" tone="subdued" variant="bodySm">Customer interactions</Text>
+                        <Text as="h4" variant="headingLg">
+                          {loadingOverview ? "—" : fmt(interactions)}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Card>
+                </Box>
+                <Box minWidth="220px" maxWidth="340px" width="100%">
+                  <Card>
+                    <Box padding="300">
+                      <BlockStack gap="050">
+                        <Text as="span" tone="subdued" variant="bodySm">Product clicks</Text>
+                        <Text as="h4" variant="headingLg">
+                          {loadingOverview ? "—" : fmt(productClicks)}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Card>
+                </Box>
+                <Box minWidth="220px" maxWidth="340px" width="100%">
+                  <Card>
+                    <Box padding="300">
+                      <BlockStack gap="050">
+                        <Text as="span" tone="subdued" variant="bodySm">CTR</Text>
+                        <Text as="h4" variant="headingLg">
+                          {loadingOverview ? "—" : `${ctr ? ctr.toFixed(1) : "0.0"}%`}
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </Card>
+                </Box>
+              </InlineStack>
+            </BlockStack>
+          </Box>
+        </Card>
+      </Box>
+
+      {/* unlock more with your plan */}
+      <Box paddingBlockStart="400">
+        <Card>
+          <Box padding="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text as="h3" variant="headingSm">Unlock more with your plan</Text>
+                <Text as="p" tone="subdued">
+                  {level === "free"
+                    ? "Pro unlocks AI recommendations, analytics, and styling controls."
+                    : level === "pro"
+                    ? "Premium unlocks higher limits and advanced analytics."
+                    : "You’re on Premium — thanks for supporting Refina!"}
+                </Text>
+              </BlockStack>
+              {level === "premium" ? (
+                <Badge tone="success">Premium</Badge>
+              ) : (
+                <Button variant="primary" url={`#/billing${qsParam}`}>
+                  {level === "free" ? "Upgrade to Pro" : "Upgrade to Premium"}
+                </Button>
+              )}
+            </InlineStack>
+          </Box>
+        </Card>
+      </Box>
+
+      {/* onboarding checklist + recent activity */}
+      <Box paddingBlockStart="400">
+        <InlineStack gap="400" wrap>
+          {/* checklist */}
+          <Box minWidth="320px" maxWidth="520px" width="100%">
+            <Card>
+              <Box padding="400">
+                <BlockStack gap="300">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="h3" variant="headingSm">Recommended next steps</Text>
+                    <Badge tone={checklistDone === 3 ? "success" : "attention"}>
+                      {checklistDone}/3
+                    </Badge>
+                  </InlineStack>
+
+                  <InlineStack gap="150" blockAlign="center">
+                    <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
+                    <Text as="span">
+                      Set your <strong>tone</strong> in{" "}
+                      <a href={`#/settings${qsParam}`}>Settings</a>
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack gap="150" blockAlign="center">
+                    <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
+                    <Text as="span">
+                      Choose your <strong>category</strong> in{" "}
+                      <a href={`#/settings${qsParam}`}>Settings</a>
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack gap="150" blockAlign="center">
+                    <Icon source={CheckIcon} tone={hasDomain ? "success" : "subdued"} />
+                    <Text as="span">
+                      Connect your <strong>domain</strong> in{" "}
+                      <a href={`#/settings${qsParam}`}>Settings</a>
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
+              </Box>
+            </Card>
+          </Box>
+
+          {/* recent activity */}
+          <Box minWidth="320px" maxWidth="520px" width="100%">
+            <Card>
+              <Box padding="400">
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingSm">Recent activity</Text>
+                  {loadingLogs ? (
+                    <Text tone="subdued">Loading…</Text>
+                  ) : logs.length ? (
+                    <BlockStack gap="200">
+                      {logs.map((row, i) => {
+                        const concern = row?.concern || row?.query || row?.question || "Customer asked…";
+                        const productTitle =
+                          row?.topProduct?.title ||
+                          row?.productTitle ||
+                          (Array.isArray(row?.products) ? row.products[0]?.title : "") ||
+                          "";
+                        const when =
+                          row?.createdAt ||
+                          row?.ts ||
+                          row?.timestamp ||
+                          "";
+                        return (
+                          <Box key={i} paddingBlock="150" borderBlockEndWidth={i < logs.length - 1 ? "025" : "0"}>
+                            <Text as="p"><strong>{concern}</strong></Text>
+                            <Text as="p" tone="subdued">
+                              {productTitle ? `→ ${productTitle}` : " "}
+                              {when ? ` • ${new Date(when).toLocaleString()}` : ""}
+                            </Text>
+                          </Box>
+                        );
+                      })}
+                      <Button url={`#/analytics${qsParam}`} plain>See full log</Button>
+                    </BlockStack>
+                  ) : (
+                    <Text tone="subdued">No activity yet — check back after some traffic.</Text>
+                  )}
+                </BlockStack>
+              </Box>
+            </Card>
+          </Box>
+        </InlineStack>
+      </Box>
+
+      {/* health */}
+      <Box paddingBlockStart="400" paddingBlockEnd="200">
+        <Card>
+          <Box padding="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="h3" variant="headingSm">System health</Text>
+              <Badge tone={health.ok ? "success" : "critical"}>
+                {checkingHealth ? "Checking…" : health.ok ? "OK" : "Issue"}
+              </Badge>
+            </InlineStack>
+            <Text as="p" tone="subdued">
+              {health.ok ? `Last check: ${health.now || "—"}` : "If issues persist, open Settings or contact support."}
+            </Text>
+          </Box>
+        </Card>
+      </Box>
     </Box>
   );
 }
