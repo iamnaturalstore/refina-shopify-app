@@ -8,6 +8,8 @@ import crypto from "crypto";
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 import billingRouter from "../routes/billing.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
 
 // ─────────────────────────────────────────────────────────────
@@ -15,6 +17,7 @@ import billingRouter from "../routes/billing.js";
 // ─────────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
 const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Where your built assets live (Netlify root hosting concierge.(js|css))
 const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.netlify.app").replace(/\/+$/, "");
@@ -459,6 +462,16 @@ app.use(
     logLevel: "warn",
   })
 );
+// Serve the built Admin UI at /admin-ui/*
+const ADMIN_UI_DIR = path.join(__dirname, "../admin-ui-dist");
+app.use("/admin-ui", express.static(ADMIN_UI_DIR, { index: false }));
+
+// SPA fallback so nested routes like /admin-ui/analytics work
+app.get("/admin-ui/*", (_req, res) => {
+  res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
+});
+
+
 
 // Redirect Embedded entry → /admin-ui/, preserving ?host=&shop=&storeId=
 app.get("/embedded", (req, res) => {
