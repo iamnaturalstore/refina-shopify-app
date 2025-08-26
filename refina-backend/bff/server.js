@@ -10,6 +10,8 @@ import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 import billingRouter from "../routes/billing.js";
 import path from "path";
 import { fileURLToPath } from "url";
+import analyticsRouter from "../routes/analytics.js";
+
 
 
 // ─────────────────────────────────────────────────────────────
@@ -583,6 +585,9 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 app.use(billingRouter);
+// Admin Analytics APIs → /api/admin/analytics/*
+app.use("/api/admin", analyticsRouter);
+
 
 // ─────────────────────────────────────────────────────────────
 // Listen
