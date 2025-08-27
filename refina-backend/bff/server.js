@@ -237,6 +237,89 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
+// ───────────────────────── BEGIN Refina settings v1 ─────────────────────────
+// Minimal, production-safe defaults with ETag + Cache-Control.
+// Shopify storefront should call:  GET /apps/refina/v1/settings  (App Proxy)
+// which Shopify forwards to:       GET /proxy/refina/v1/settings  (this route)
+
+const RF_DEFAULT_THEME = {
+  presetId: "minimal",
+  version: 1,
+  tokens: {
+    "--rf-color-primary": "#1a73e8",
+    "--rf-color-text": "#111111",
+    "--rf-radius": "12px",
+    "--rf-shadow": "0 8px 28px rgba(0,0,0,0.12)",
+    "--rf-spacing": "12px",
+    "--rf-font-family": "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    "--rf-density": "1",
+  },
+};
+
+function rfStableStringify(x) {
+  try {
+    // stable key order for deterministic ETag
+    const seen = new WeakSet();
+    const sortKeys = (obj) => {
+      if (obj && typeof obj === "object") {
+        if (seen.has(obj)) return obj;
+        seen.add(obj);
+        if (Array.isArray(obj)) return obj.map(sortKeys);
+        const out = {};
+        for (const k of Object.keys(obj).sort()) out[k] = sortKeys(obj[k]);
+        return out;
+      }
+      return obj;
+    };
+    return JSON.stringify(sortKeys(x));
+  } catch {
+    return JSON.stringify(x);
+  }
+}
+
+function rfMakeEtag(obj) {
+  try {
+    const s = rfStableStringify(obj);
+    // lightweight 32-bit hash → hex
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return `"rf-${(h >>> 0).toString(16)}"`;
+  } catch {
+    return `"rf-${Date.now().toString(16)}"`;
+  }
+}
+
+app.get("/proxy/refina/v1/settings", async (req, res) => {
+  try {
+    const shop = String(req.query.shop || "").toLowerCase();
+    const payload = {
+      shop,
+      ...RF_DEFAULT_THEME,
+      valid: true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const etag = rfMakeEtag(payload);
+    if (req.headers["if-none-match"] === etag) {
+      res.set("ETag", etag);
+      res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
+      return res.status(304).end();
+    }
+
+    res.set("ETag", etag);
+    res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
+    res.type("application/json").status(200).send(rfStableStringify(payload));
+  } catch (err) {
+    const fallback = { ...RF_DEFAULT_THEME, valid: false, error: "theme_fetch_failed" };
+    const etag = rfMakeEtag(fallback);
+    res.set("ETag", etag);
+    res.set("Cache-Control", "public, max-age=60");
+    res.type("application/json").status(200).send(rfStableStringify(fallback));
+  }
+});
+// ────────────────────────── END Refina settings v1 ──────────────────────────
+
+
 // ─────────────────────────────────────────────────────────────
 // Shopify Webhooks (HMAC verified, raw body)
 // ─────────────────────────────────────────────────────────────
