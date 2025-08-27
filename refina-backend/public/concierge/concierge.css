@@ -1,0 +1,24 @@
+:root, .rf-root {
+  --rf-color-primary: #1a73e8;
+  --rf-color-text: #111;
+  --rf-radius: 12px;
+  --rf-shadow: 0 8px 28px rgba(0,0,0,0.12);
+  --rf-spacing: 12px;
+  --rf-font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  --rf-density: 1;
+}
+
+/* Debug outline – remove later */
+.rf-root { outline: 3px solid var(--rf-color-primary); outline-offset: 2px; }
+
+/* Generic mappings */
+.rf-root, .rf-root * { font-family: var(--rf-font-family); color: var(--rf-color-text); }
+.rf-root .rf-button, .rf-root button {
+  border-radius: var(--rf-radius);
+  box-shadow: var(--rf-shadow);
+}
+.rf-root .rf-card {
+  border-radius: var(--rf-radius);
+  box-shadow: var(--rf-shadow);
+  padding: calc(var(--rf-spacing) * var(--rf-density));
+}
