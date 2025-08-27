@@ -714,6 +714,20 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 
+// Canonicalize shop/storeId to <shop>.myshopify.com for Admin routes
+function canonicalizeShopParam(req, _res, next) {
+  const raw = String(req.query.storeId || req.query.shop || "").toLowerCase().trim();
+  if (raw) {
+    const full = raw.endsWith(".myshopify.com") ? raw : `${raw}.myshopify.com`;
+    req.query.shop = full;
+    req.query.storeId = full;
+  }
+  next();
+}
+
+// mount routers with this guard first:
+app.use("/api/admin", canonicalizeShopParam);
+
 // Billing APIs used by Home + Billing page
 app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
 
