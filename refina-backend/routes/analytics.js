@@ -3,7 +3,7 @@ import { Router } from "express";
 import { dbAdmin } from "../firebaseAdmin.js"; // shared Firebase Admin (single init)
 
 /** ──────────────────────────────────────────────────────────────────────────
- * Helpers
+ * Helpers (validation, canonicalization, stable JSON for ETag)
  * ────────────────────────────────────────────────────────────────────────── */
 
 function assertString(v, name) {
@@ -45,6 +45,29 @@ function normalizeTimestamp(data) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Stable JSON (sorted keys) for deterministic ETag */
+function stableJson(obj) {
+  const seen = new WeakSet();
+  const walk = (v) => {
+    if (v && typeof v === "object") {
+      if (seen.has(v)) return v;
+      seen.add(v);
+      if (Array.isArray(v)) return v.map(walk);
+      const out = {};
+      for (const k of Object.keys(v).sort()) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(walk(obj));
+}
+function makeEtag(obj) {
+  const s = stableJson(obj);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return `"anx-${(h >>> 0).toString(16)}"`; // short, deterministic
+}
+
 /** ──────────────────────────────────────────────────────────────────────────
  * Router
  * ────────────────────────────────────────────────────────────────────────── */
@@ -55,13 +78,15 @@ const router = Router();
  * GET /api/admin/analytics/overview?storeId=xxx|shop=xxx&days=30
  * - Order-only fetch (createdAt → timestamp fallback), filter in memory.
  * - Avoids Firestore where(Date) vs string mismatches.
+ * - Adds ETag + short-lived private caching for Admin UX.
  */
 router.get("/analytics/overview", async (req, res, next) => {
   try {
     const storeDomain = resolveStoreDomain(req.query);
     assertString(storeDomain, "storeId or shop");
 
-    const daysNum = Math.max(1, parseInt(req.query.days, 10) || 30);
+    const daysRaw = parseInt(req.query.days, 10);
+    const daysNum = Math.max(1, Math.min(90, Number.isFinite(daysRaw) ? daysRaw : 30));
     const since = new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
     const LIMIT = 2000;
 
@@ -107,8 +132,8 @@ router.get("/analytics/overview", async (req, res, next) => {
       const productIds = Array.isArray(data.productIds)
         ? data.productIds
         : Array.isArray(data.products)
-          ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
-          : [];
+        ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
+        : [];
 
       for (const pid of productIds) {
         const key = String(pid);
@@ -120,7 +145,7 @@ router.get("/analytics/overview", async (req, res, next) => {
       .map(([label, count]) => ({
         label,
         count,
-        share: total ? Math.round((count / total) * 100) : 0,
+        share: total ? Math.round((count / total) * 100) : 0
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
@@ -130,7 +155,7 @@ router.get("/analytics/overview", async (req, res, next) => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    res.json({
+    const payload = {
       storeId: storeDomain,
       rangeDays: daysNum,
       totalEvents: total,
@@ -139,8 +164,20 @@ router.get("/analytics/overview", async (req, res, next) => {
       planCounts,
       topConcerns,
       topProducts,
-      generatedAt: new Date().toISOString(),
-    });
+      generatedAt: new Date().toISOString()
+    };
+
+    // Caching: short-lived, private; ETag for cheap revalidate
+    const etag = makeEtag(payload);
+    res.set("ETag", etag);
+    res.set("Cache-Control", "private, max-age=60, stale-while-revalidate=30");
+    res.set("X-Refina-Store", storeDomain);
+
+    if (req.headers["if-none-match"] === etag) {
+      return res.status(304).end();
+    }
+
+    res.type("application/json").status(200).send(stableJson(payload));
   } catch (err) {
     next(err);
   }
@@ -150,6 +187,7 @@ router.get("/analytics/overview", async (req, res, next) => {
  * GET /api/admin/analytics/logs?storeId=xxx|shop=xxx&limit=50&after=ISO
  * - Order-only fetch + optional in-memory `after` filter.
  * - Response shape preserved.
+ * - No-store cache (may include sensitive text snippets).
  */
 router.get("/analytics/logs", async (req, res, next) => {
   try {
@@ -186,8 +224,8 @@ router.get("/analytics/logs", async (req, res, next) => {
       const productIds = Array.isArray(data.productIds)
         ? data.productIds
         : Array.isArray(data.products)
-          ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
-          : [];
+        ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
+        : [];
 
       // Normalize plan for output rows, too
       const _rawPlan = (data.plan || data.tier || "").toString().toLowerCase().trim();
@@ -204,14 +242,34 @@ router.get("/analytics/logs", async (req, res, next) => {
         concern: (data.concern || data.input || data.query || "").toString(),
         plan: _normPlan,
         productIds,
-        summary: (data.explanation || data.answer || "").toString().slice(0, 160),
+        summary: (data.explanation || data.answer || "").toString().slice(0, 160)
       };
     });
 
-    res.json({ storeId: storeDomain, count: rows.length, rows });
+    res.set("Cache-Control", "no-store");
+    res.set("X-Refina-Store", storeDomain);
+    res.status(200).json({ storeId: storeDomain, count: rows.length, rows });
   } catch (err) {
     next(err);
   }
+});
+
+/** Router-scoped error handler to preserve status codes and avoid leaking internals */
+router.use((err, _req, res, _next) => {
+  const status = Number(err.status) || 500;
+  const code =
+    status === 400
+      ? "bad_request"
+      : status === 401
+      ? "unauthorized"
+      : status === 404
+      ? "not_found"
+      : "internal_error";
+  if (status >= 500) {
+    // Minimal server-side log; no payload echo
+    console.error("[analytics] error:", err?.message || err);
+  }
+  res.status(status).json({ error: code, message: err?.message || "Unexpected error" });
 });
 
 export default router;

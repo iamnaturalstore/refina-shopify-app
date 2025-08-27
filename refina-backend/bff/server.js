@@ -13,9 +13,6 @@ import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 
-
-
-
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
@@ -29,8 +26,8 @@ const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.ne
 // Public origin of THIS backend (for logs/health only)
 const PUBLIC_BACKEND_ORIGIN = String(
   process.env.PUBLIC_BACKEND_ORIGIN ||
-  process.env.APP_PUBLIC_URL ||
-  "https://refina-shopify-app.onrender.com"
+    process.env.APP_PUBLIC_URL ||
+    "https://refina-shopify-app.onrender.com"
 ).replace(/\/+$/, "");
 
 // Shopify App Proxy secret (used to verify /proxy/refina/v1/*)
@@ -43,20 +40,38 @@ const cache = new Map();
 const cacheGet = (k) => {
   const v = cache.get(k);
   if (!v) return null;
-  if (Date.now() > v.exp) { cache.delete(k); return null; }
+  if (Date.now() > v.exp) {
+    cache.delete(k);
+    return null;
+  }
   return v.val;
 };
 const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.now() + ttl });
 
 // ─────────────────────────────────────────────────────────────
 function normalizeConcern(s) {
-  return String(s || "").toLowerCase().normalize("NFKC")
-    .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
-function stripHtml(s) { return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); }
+function stripHtml(s) {
+  return String(s || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 function tokenize(s) {
-  return String(s || "").toLowerCase().normalize("NFKC")
-    .replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
 }
 function rankProducts(products, concern) {
   const terms = tokenize(concern);
@@ -71,7 +86,7 @@ function rankProducts(products, concern) {
       tags: (Array.isArray(p.tags) ? p.tags : []).flatMap(tokenize),
       keywords: (Array.isArray(p.keywords) ? p.keywords : []).flatMap(tokenize),
       description: tokenize(desc),
-      productType: tokenize(p.productType || ""),
+      productType: tokenize(p.productType || "")
     };
     let score = 0;
     for (const t of terms) {
@@ -84,16 +99,19 @@ function rankProducts(products, concern) {
     if (p.handle && (p.image || (Array.isArray(p.images) && p.images[0]?.src))) score += 0.3;
     if (score > 0) scored.push({ ...p, _score: score });
   }
-  scored.sort((a, b) => b._score - a._score || (a.title || a.name || "").localeCompare(b.title || b.name || ""));
+  scored.sort(
+    (a, b) =>
+      b._score - a._score || (a.title || a.name || "").localeCompare(b.title || b.name || "")
+  );
   return scored;
 }
 function shapeCopy({ products, concern, tone, category }) {
   const first = products[0] || {};
   const name = first.title || first.name || "this pick";
   const middleWord = /beauty|skin|hair|cosmetic/i.test(category) ? "ingredients" : "features";
-  const why = /bestie/i.test(String(tone || "")) ?
-    `I picked ${name} because it lines up beautifully with “${concern}”. It’s a solid, low-fuss match from this store.` :
-    `Recommended: ${name}. It aligns strongly with “${concern}” based on the store’s catalogue signals.`;
+  const why = /bestie/i.test(String(tone || ""))
+    ? `I picked ${name} because it lines up beautifully with “${concern}”. It’s a solid, low-fuss match from this store.`
+    : `Recommended: ${name}. It aligns strongly with “${concern}” based on the store’s catalogue signals.`;
   const rationale = `Relevance is based on product ${middleWord}, tags, and related keywords that map to “${concern}”.`;
   const extras = first.description
     ? `Tip: check the product page for usage guidance and added benefits noted in the description.`
@@ -107,10 +125,13 @@ async function getSettings(storeId) {
     const seed = {
       tone: (process.env.BFF_DEFAULT_TONE || "expert").toLowerCase(),
       category: (process.env.BFF_DEFAULT_CATEGORY || "Generic"),
-      enabledPacks: (process.env.BFF_ENABLED_PACKS || "").split(",").map(s => s.trim()).filter(Boolean),
+      enabledPacks: (process.env.BFF_ENABLED_PACKS || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
       domain: "",
       createdAt: nowTs(),
-      settingsVersion: 1,
+      settingsVersion: 1
     };
     await setDocSafe(ref, seed);
     return seed;
@@ -118,17 +139,24 @@ async function getSettings(storeId) {
   const data = snap.data() || {};
   const s = String(data.tone || "").toLowerCase();
   const tone =
-    /bestie|friendly|warm|helpful/.test(s) ? "bestie" :
-    /expert|pro|concise|direct/.test(s) ? "expert" :
-    (process.env.BFF_DEFAULT_TONE || "expert");
-  return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] };
+    /bestie|friendly|warm|helpful/.test(s)
+      ? "bestie"
+      : /expert|pro|concise|direct/.test(s)
+      ? "expert"
+      : process.env.BFF_DEFAULT_TONE || "expert";
+  return {
+    tone,
+    category: data.category || "Generic",
+    domain: data.domain || "",
+    enabledPacks: data.enabledPacks || []
+  };
 }
 
 // Server-authoritative plan (ignore client on App Proxy routes)
 async function getPlan(storeId) {
   try {
     const snap = await db.doc(`plans/${storeId}`).get();
-    const data = snap.exists ? (snap.data() || {}) : {};
+    const data = snap.exists ? snap.data() || {} : {};
     const raw = String(data.plan || data.tier || data.name || "free").toLowerCase().trim();
     if (/\bpremium\b/.test(raw) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(raw)) return "premium";
     if (/^pro\b/.test(raw)) return "pro";
@@ -140,12 +168,11 @@ async function getPlan(storeId) {
 
 // Fetch products for a store, preferring subcollection products/{storeId}/items
 async function fetchProducts(storeId, limit = 1500) {
-  // Try subcollection first
   try {
     const subSnap = await db.collection(`products/${storeId}/items`).limit(limit).get();
     if (!subSnap.empty) {
       const out = [];
-      subSnap.forEach(d => out.push({ id: d.id, ...d.data(), storeId }));
+      subSnap.forEach((d) => out.push({ id: d.id, ...d.data(), storeId }));
       return out;
     }
   } catch (e) {
@@ -154,9 +181,13 @@ async function fetchProducts(storeId, limit = 1500) {
 
   // Fallback to flat collection (back-compat)
   try {
-    const flatSnap = await db.collection("products").where("storeId", "==", storeId).limit(limit).get();
+    const flatSnap = await db
+      .collection("products")
+      .where("storeId", "==", storeId)
+      .limit(limit)
+      .get();
     const out = [];
-    flatSnap.forEach(d => out.push({ id: d.id, ...d.data() }));
+    flatSnap.forEach((d) => out.push({ id: d.id, ...d.data() }));
     return out;
   } catch (e) {
     console.error(`[BFF] flat collection fetch failed for ${storeId}:`, e?.message || e);
@@ -173,10 +204,14 @@ const REFILL_PER_MS = RL.refillPerSec / 1000;
 
 function rateLimitAppProxy(req, res, next) {
   // After requireAppProxy, req.storeId is set to <shop>.myshopify.com
-  const key = req.storeId || String(req.query.shop || req.headers["x-shopify-shop-domain"] || req.ip);
+  const key =
+    req.storeId || String(req.query.shop || req.headers["x-shopify-shop-domain"] || req.ip);
   const now = Date.now();
   let b = rlBuckets.get(key);
-  if (!b) { b = { tokens: RL.capacity, last: now }; rlBuckets.set(key, b); }
+  if (!b) {
+    b = { tokens: RL.capacity, last: now };
+    rlBuckets.set(key, b);
+  }
   const elapsed = now - b.last;
   b.last = now;
   b.tokens = Math.min(RL.capacity, b.tokens + elapsed * REFILL_PER_MS);
@@ -201,7 +236,9 @@ function verifyAppProxy(req) {
   const entries = Object.entries(req.query)
     .filter(([k]) => k !== "signature")
     .sort(([a], [b]) => a.localeCompare(b));
-  const message = entries.map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`).join("");
+  const message = entries
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : v}`)
+    .join("");
 
   const expected = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(message).digest("hex");
   const provided = signature;
@@ -251,9 +288,10 @@ const RF_DEFAULT_THEME = {
     "--rf-radius": "12px",
     "--rf-shadow": "0 8px 28px rgba(0,0,0,0.12)",
     "--rf-spacing": "12px",
-    "--rf-font-family": "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
-    "--rf-density": "1",
-  },
+    "--rf-font-family":
+      "system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    "--rf-density": "1"
+  }
 };
 
 function rfStableStringify(x) {
@@ -289,36 +327,41 @@ function rfMakeEtag(obj) {
   }
 }
 
-app.get("/proxy/refina/v1/settings", async (req, res) => {
-  try {
-    const shop = String(req.query.shop || "").toLowerCase();
-    const payload = {
-      shop,
-      ...RF_DEFAULT_THEME,
-      valid: true,
-      updatedAt: new Date().toISOString(),
-    };
+// ⬇️ SECURITY: protect settings with App Proxy HMAC + add rate limit
+app.get(
+  "/proxy/refina/v1/settings",
+  requireAppProxy,
+  rateLimitAppProxy,
+  async (req, res) => {
+    try {
+      const shop = req.storeId; // canonical <shop>.myshopify.com from App Proxy
+      const payload = {
+        shop,
+        ...RF_DEFAULT_THEME,
+        valid: true,
+        updatedAt: new Date().toISOString()
+      };
 
-    const etag = rfMakeEtag(payload);
-    if (req.headers["if-none-match"] === etag) {
+      const etag = rfMakeEtag(payload);
+      if (req.headers["if-none-match"] === etag) {
+        res.set("ETag", etag);
+        res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
+        return res.status(304).end();
+      }
+
       res.set("ETag", etag);
       res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
-      return res.status(304).end();
+      res.type("application/json").status(200).send(rfStableStringify(payload));
+    } catch (err) {
+      const fallback = { ...RF_DEFAULT_THEME, valid: false, error: "theme_fetch_failed" };
+      const etag = rfMakeEtag(fallback);
+      res.set("ETag", etag);
+      res.set("Cache-Control", "public, max-age=60");
+      res.type("application/json").status(200).send(rfStableStringify(fallback));
     }
-
-    res.set("ETag", etag);
-    res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
-    res.type("application/json").status(200).send(rfStableStringify(payload));
-  } catch (err) {
-    const fallback = { ...RF_DEFAULT_THEME, valid: false, error: "theme_fetch_failed" };
-    const etag = rfMakeEtag(fallback);
-    res.set("ETag", etag);
-    res.set("Cache-Control", "public, max-age=60");
-    res.type("application/json").status(200).send(rfStableStringify(fallback));
   }
-});
+);
 // ────────────────────────── END Refina settings v1 ──────────────────────────
-
 
 // ─────────────────────────────────────────────────────────────
 // Shopify Webhooks (HMAC verified, raw body)
@@ -331,14 +374,11 @@ function verifyWebhookHmac(req, res, next) {
   const body = req.body; // Buffer from express.raw
 
   try {
-    const digest = crypto.createHmac("sha256", SHOPIFY_APP_SECRET)
-      .update(body)
-      .digest("base64");
-
-    const ok = hmac &&
+    const digest = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(body).digest("base64");
+    const ok =
+      hmac &&
       digest.length === hmac.length &&
       crypto.timingSafeEqual(Buffer.from(digest, "utf8"), Buffer.from(hmac, "utf8"));
-
     if (!ok) return res.status(401).send("invalid_hmac");
     return next();
   } catch (e) {
@@ -394,14 +434,16 @@ app.get("/proxy/refina", (_req, res) => {
       "connect-src 'self' https: wss:",
       "img-src 'self' https: data: blob:",
       "style-src 'self' 'unsafe-inline' https:",
-      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
+      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'"
     ].join("; ")
   );
   res.setHeader("Cache-Control", "no-store");
 
   // IMPORTANT: absolute shop paths so the browser requests /apps/refina/... on the shop
   // Shopify forwards those to our Proxy URL /proxy/refina/...
-  res.type("html").send(`<!doctype html>
+  res
+    .type("html")
+    .send(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -427,7 +469,7 @@ app.get("/proxy/refina/v1/concerns", requireAppProxy, rateLimitAppProxy, async (
     let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
     if (!chips.length) {
       const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get();
-      chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean);
+      chips = colSnap.docs.map((d) => d.data()?.text).filter(Boolean);
     }
     res.json({ storeId, chips });
   } catch (e) {
@@ -466,18 +508,18 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
     let source = "mapping";
     if (!productIds.length) {
       const ranked = rankProducts(allProducts, normalizedConcern);
-      productIds = ranked.slice(0, 8).map(p => p.id);
+      productIds = ranked.slice(0, 8).map((p) => p.id);
       source = "fallback";
     }
 
     const used = productIds.slice(0, plan === "free" ? 3 : 8);
-    
 
     const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     const hydrate = used.map((id) => {
       const p = allProducts.find((x) => x.id === id) || {};
       const handle = String(p.handle || "").replace(/^\/+|\/+$/g, "");
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
+      const productUrl =
+        p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
       return {
         id: p.id,
         title: p.title || p.name || "",
@@ -487,22 +529,22 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
         productType: p.productType || "",
         tags: p.tags || [],
         url: productUrl,
-        price: p.price ?? null,
+        price: p.price ?? null
       };
     });
 
     const copy = shapeCopy({
-      products: allProducts.filter(p => used.includes(p.id)),
+      products: allProducts.filter((p) => used.includes(p.id)),
       concern: normalizedConcern,
       tone,
-      category,
+      category
     });
 
     const payload = {
       productIds: used,
       products: hydrate,
       copy,
-      meta: { source, cache: "miss", tone, plan },
+      meta: { source, cache: "miss", tone, plan }
     };
 
     cacheSet(cacheKey, payload);
@@ -524,7 +566,7 @@ app.use(
     changeOrigin: true,
     ws: false,
     pathRewrite: () => "/concierge.js",
-    logLevel: "warn",
+    logLevel: "warn"
   })
 );
 
@@ -535,7 +577,7 @@ app.use(
     changeOrigin: true,
     ws: false,
     pathRewrite: () => "/concierge.css",
-    logLevel: "warn",
+    logLevel: "warn"
   })
 );
 
@@ -546,9 +588,10 @@ app.use(
     changeOrigin: true,
     ws: false,
     pathRewrite: (p) => p.replace(/^\/proxy\/refina\/chunks/, "/chunks"),
-    logLevel: "warn",
+    logLevel: "warn"
   })
 );
+
 // Serve the built Admin UI at /admin-ui/*
 const ADMIN_UI_DIR = path.join(__dirname, "../admin-ui-dist");
 app.use("/admin-ui", express.static(ADMIN_UI_DIR, { index: false }));
@@ -567,12 +610,11 @@ app.get("/embedded", (req, res) => {
   res.redirect(302, `/admin-ui/${qs}`);
 });
 
-
 // (E) Health (legacy direct endpoints are below; storefront should use /proxy/refina/v1/*)
 app.get("/v1/health", (_req, res) => {
   res.json({
     ok: true,
-    now: new Date().toISOString(),
+    now: new Date().toISOString()
   });
 });
 
@@ -586,7 +628,7 @@ app.get("/v1/concerns", async (req, res) => {
     let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
     if (!chips.length) {
       const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get();
-      chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean);
+      chips = colSnap.docs.map((d) => d.data()?.text).filter(Boolean);
     }
     res.json({ storeId, chips });
   } catch (e) {
@@ -602,7 +644,8 @@ app.post("/v1/recommend", async (req, res) => {
     const storeId = String(rawStoreId || "").trim();
     const concernInput = String(rawConcern || "").trim();
     const plan = String(rawPlan || "free").toLowerCase();
-    if (!storeId || !concernInput) return res.status(400).json({ error: "storeId and concern required" });
+    if (!storeId || !concernInput)
+      return res.status(400).json({ error: "storeId and concern required" });
 
     const normalizedConcern = normalizeConcern(concernInput);
     const settings = await getSettings(storeId);
@@ -621,7 +664,7 @@ app.post("/v1/recommend", async (req, res) => {
     let source = "mapping";
     if (!productIds.length) {
       const ranked = rankProducts(allProducts, normalizedConcern);
-      productIds = ranked.slice(0, 8).map(p => p.id);
+      productIds = ranked.slice(0, 8).map((p) => p.id);
       source = "fallback";
     }
 
@@ -631,7 +674,8 @@ app.post("/v1/recommend", async (req, res) => {
     const hydrate = used.map((id) => {
       const p = allProducts.find((x) => x.id === id) || {};
       const handle = String(p.handle || "").replace(/^\/+|\/+$/g, "");
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
+      const productUrl =
+        p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : "");
       return {
         id: p.id,
         title: p.title || p.name || "",
@@ -641,22 +685,22 @@ app.post("/v1/recommend", async (req, res) => {
         productType: p.productType || "",
         tags: p.tags || [],
         url: productUrl,
-        price: p.price ?? null,
+        price: p.price ?? null
       };
     });
 
     const copy = shapeCopy({
-      products: allProducts.filter(p => used.includes(p.id)),
+      products: allProducts.filter((p) => used.includes(p.id)),
       concern: normalizedConcern,
       tone,
-      category,
+      category
     });
 
     const payload = {
       productIds: used,
       products: hydrate,
       copy,
-      meta: { source, cache: "miss", tone, plan },
+      meta: { source, cache: "miss", tone, plan }
     };
 
     cacheSet(cacheKey, payload);
@@ -669,25 +713,34 @@ app.post("/v1/recommend", async (req, res) => {
     if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`);
   }
 });
+
 // Billing APIs used by Home + Billing page
-app.use("/api/billing", billingRouter);        // /api/billing/plan, /subscribe, /sync
+app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
 
 // Admin APIs used by Home/Settings/Analytics
-app.use("/api/admin", analyticsRouter);        // /api/admin/analytics/* (overview, logs)
-app.use("/api/admin", adminSettingsRouter);   // /api/admin/store-settings (GET/PUT)
-
-
+app.use("/api/admin", analyticsRouter); // /api/admin/analytics/* (overview, logs)
+app.use("/api/admin", adminSettingsRouter); // /api/admin/store-settings (GET/PUT)
 
 // ─────────────────────────────────────────────────────────────
 // Listen
 // ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
-  console.log(`HTML shell:     GET  /proxy/refina  (loads /apps/refina/concierge.(css|js) via App Proxy)`);
-  console.log(`APIs (AppProxy):GET  /proxy/refina/v1/concerns  |  POST /proxy/refina/v1/recommend (HMAC)`);
-  console.log(`Assets (narrow):GET  /proxy/refina/concierge.js  →  ${ASSETS_BASE_URL}/concierge.js`);
-  console.log(`                GET  /proxy/refina/concierge.css  →  ${ASSETS_BASE_URL}/concierge.css`);
-  console.log(`                GET  /proxy/refina/chunks/*       →  ${ASSETS_BASE_URL}/chunks/*`);
+  console.log(
+    `HTML shell:     GET  /proxy/refina  (loads /apps/refina/concierge.(css|js) via App Proxy)`
+  );
+  console.log(
+    `APIs (AppProxy):GET  /proxy/refina/v1/concerns  |  POST /proxy/refina/v1/recommend (HMAC)`
+  );
+  console.log(
+    `Assets (narrow):GET  /proxy/refina/concierge.js  →  ${ASSETS_BASE_URL}/concierge.js`
+  );
+  console.log(
+    `                GET  /proxy/refina/concierge.css  →  ${ASSETS_BASE_URL}/concierge.css`
+  );
+  console.log(
+    `                GET  /proxy/refina/chunks/*       →  ${ASSETS_BASE_URL}/chunks/*`
+  );
   console.log(`Admin stub:     GET  /embedded`);
   console.log(`Health:         GET  /v1/health`);
   console.log(`Origin:             ${PUBLIC_BACKEND_ORIGIN}`);
