@@ -8,9 +8,6 @@
 
 import { Router } from "express";
 import { db } from "../bff/lib/firestore.js";
-import mountAnalytics from "./routes/analytics.js";
-mountAnalytics(app);
-
 
 /**
  * Extract and validate full shop domain.
