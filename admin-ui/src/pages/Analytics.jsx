@@ -1,38 +1,94 @@
-// admin-ui/src/pages/Analytics.jsx
-import React, { useEffect, useMemo, useState } from "react";
-import * as P from "@shopify/polaris";
-import { api, getStoreIdFromUrl } from "../api/client.js";
+// refina/admin-ui/src/pages/Analytics.jsx
+import * as React from "react";
+import { Page, Card, BlockStack, InlineStack, Text, Button, Divider, Spinner } from "@shopify/polaris";
+import { adminApi, getShop } from "../api/client.js";
+
+/**
+ * Guardrails:
+ * - Always use full <shop>.myshopify.com (no short IDs)
+ * - Tolerate both old and new Admin API response shapes:
+ *   - Summary: sum.totals.*  OR  sum.totalEvents, topProducts, etc.
+ *   - Events: ev.items[]  OR  ev.rows[]  OR  bare arrays
+ * - No misleading fallbacks: if productClicks is not provided, show 0 (don’t infer).
+ */
+
+function toMyshopifyDomain(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) return "";
+  return s.endsWith(".myshopify.com") ? s : `${s}.myshopify.com`;
+}
+
+function normalizeSummary(sum) {
+  if (!sum || typeof sum !== "object") return { totals: { interactions: 0, productClicks: 0 } };
+  // Prefer explicit totals if present
+  if (sum.totals && typeof sum.totals === "object") {
+    const interactions = Number(sum.totals.interactions ?? sum.totals.queries ?? 0) || 0;
+    const productClicks = Number(sum.totals.productClicks ?? sum.totals.clicks ?? 0) || 0;
+    return { ...sum, totals: { ...sum.totals, interactions, productClicks } };
+  }
+  // Back-compat mapping from new overview shape (don’t guess clicks)
+  const interactions = Number(sum.totalEvents ?? 0) || 0;
+  const productClicks = 0; // do NOT infer from suggestions; avoid flaky fallbacks
+  return { ...sum, totals: { interactions, productClicks } };
+}
+
+function pickArray(ev) {
+  if (!ev) return [];
+  if (Array.isArray(ev)) return ev;
+  if (Array.isArray(ev.items)) return ev.items;
+  if (Array.isArray(ev.rows)) return ev.rows;
+  if (Array.isArray(ev.events)) return ev.events;
+  return [];
+}
+
+function normalizeEvent(e) {
+  const id = e.id || e.eventId || e.tsServer || e.createdAt || Math.random().toString(36).slice(2);
+  const iso =
+    e.tsServerIso ||
+    (typeof e.createdAt === "string" ? e.createdAt : null) ||
+    (typeof e.tsServer === "number" ? new Date(e.tsServer).toISOString() : null) ||
+    null;
+  const type = e.type || e.eventType || "event";
+  return { ...e, id, tsServerIso: iso, type };
+}
 
 export default function Analytics() {
-  const storeId = useMemo(() => getStoreIdFromUrl(), []);
-  const [days] = useState(30);
+  const shop = toMyshopifyDomain(getShop());
 
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState(null);
-  const [overview, setOverview] = useState(null);
-  const [logs, setLogs] = useState([]);
+  const [summary, setSummary] = React.useState(null);
+  const [events, setEvents] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [cursor, setCursor] = React.useState("");
+  const [err, setErr] = React.useState("");
 
-  useEffect(() => {
+  React.useEffect(() => {
     let on = true;
     (async () => {
       try {
+        setErr("");
         setLoading(true);
-        setErr(null);
+        // 30-day window keys (server may ignore; safe to send)
+        const to = new Date();
+        const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const toKey = to.toISOString().slice(0, 10);
+        const fromKey = from.toISOString().slice(0, 10);
 
-        const overUrl = storeId
-          ? `/api/admin/analytics/overview?storeId=${encodeURIComponent(storeId)}&days=${days}`
-          : `/api/admin/analytics/overview?days=${days}`;
-        const logsUrl = storeId
-          ? `/api/admin/analytics/logs?storeId=${encodeURIComponent(storeId)}&limit=50`
-          : `/api/admin/analytics/logs?limit=50`;
-
-        const [o, l] = await Promise.all([api(overUrl), api(logsUrl)]);
+        const [sum, ev] = await Promise.all([
+          adminApi.getAnalyticsSummary({ shop, from: fromKey, to: toKey }),
+          adminApi.getAnalyticsEvents({ shop, limit: 25 }),
+        ]);
         if (!on) return;
-        setOverview(o);
-        setLogs(l?.rows || []);
+
+        setSummary(normalizeSummary(sum));
+
+        const items = pickArray(ev).map(normalizeEvent);
+        setEvents(items);
+
+        const next = ev?.nextCursor ?? ev?.cursor ?? "";
+        setCursor(typeof next === "string" ? next : "");
       } catch (e) {
-        if (!on) return;
-        setErr(e?.message || "Failed to load analytics");
+        if (on) setErr(e?.message || "Failed to load analytics");
       } finally {
         if (on) setLoading(false);
       }
@@ -40,141 +96,73 @@ export default function Analytics() {
     return () => {
       on = false;
     };
-  }, [storeId, days]);
+  }, [shop]);
 
-  const planCounts = overview?.planCounts || { free: 0, pro: 0, "premium+": 0, unknown: 0 };
-  const topConcerns = overview?.topConcerns || [];
-  const maxCount = topConcerns.reduce((m, x) => Math.max(m, x.count), 0);
+  async function loadMore() {
+    try {
+      setLoadingMore(true);
+      const ev = await adminApi.getAnalyticsEvents({ shop, limit: 25, cursor });
+      const items = pickArray(ev).map(normalizeEvent);
+      setEvents((prev) => prev.concat(items));
+      const next = ev?.nextCursor ?? ev?.cursor ?? "";
+      setCursor(typeof next === "string" ? next : "");
+    } catch (e) {
+      setErr(e?.message || "Failed to load more events");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
-  const rows = logs.map((r) => [
-    r.createdAt ? new Date(r.createdAt).toLocaleString() : "—",
-    "—",
-    r.concern || "—",
-    (r.productIds && r.productIds[0]) || "—",
-  ]);
+  const totals = summary?.totals || { interactions: 0, productClicks: 0 };
 
   return (
-    <P.Page title="Analytics">
-      <P.BlockStack gap="400">
-        <P.Text as="p" tone="subdued">
-          Last {days} days • Store: {storeId || "—"}
-        </P.Text>
+    <Page title="Analytics">
+      <Card>
+        <BlockStack gap="300">
+          {err && <Text tone="critical">{err}</Text>}
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="h3" variant="headingSm">Last 30 days</Text>
+            {loading && <Spinner size="small" />}
+          </InlineStack>
+          <Divider />
+          <InlineStack gap="400" wrap>
+            <Card>
+              <BlockStack padding="300" gap="050">
+                <Text tone="subdued">Interactions</Text>
+                <Text variant="headingLg" as="h4">{totals.interactions}</Text>
+              </BlockStack>
+            </Card>
+            <Card>
+              <BlockStack padding="300" gap="050">
+                <Text tone="subdued">Product clicks</Text>
+                <Text variant="headingLg" as="h4">{totals.productClicks}</Text>
+              </BlockStack>
+            </Card>
+          </InlineStack>
+        </BlockStack>
+      </Card>
 
-        {err && (
-          <P.Banner tone="critical" title="Failed to load analytics">
-            <p>{err}</p>
-          </P.Banner>
-        )}
-
-        {loading ? (
-          <P.Card>
-            <P.Box padding="400" align="center" inlineAlign="center">
-              <P.Spinner accessibilityLabel="Loading analytics" size="large" />
-            </P.Box>
-          </P.Card>
-        ) : (
-          <>
-            {/* KPI cards */}
-            <P.InlineGrid columns={{ xs: 1, md: 4 }} gap="300">
-              <P.Card>
-                <P.Box padding="400">
-                  <P.Text as="h3" variant="headingSm">
-                    Total events
-                  </P.Text>
-                  <P.Text as="p" variant="headingLg">
-                    {overview?.totalEvents ?? "—"}
-                  </P.Text>
-                </P.Box>
-              </P.Card>
-
-              <P.Card>
-                <P.Box padding="400">
-                  <P.Text as="h3" variant="headingSm">
-                    Unique concerns
-                  </P.Text>
-                  <P.Text as="p" variant="headingLg">
-                    {overview?.uniqueConcerns ?? "—"}
-                  </P.Text>
-                </P.Box>
-              </P.Card>
-
-              <P.Card>
-                <P.Box padding="400">
-                  <P.Text as="h3" variant="headingSm">
-                    Unique products suggested
-                  </P.Text>
-                  <P.Text as="p" variant="headingLg">
-                    {overview?.uniqueProductsSuggested ?? "—"}
-                  </P.Text>
-                </P.Box>
-              </P.Card>
-
-              <P.Card>
-                <P.Box padding="400">
-                  <P.Text as="h3" variant="headingSm">
-                    Plan mix
-                  </P.Text>
-                  <P.InlineStack gap="200">
-                    <P.Badge>Free {planCounts.free || 0}</P.Badge>
-                    <P.Badge tone="attention">Pro {planCounts.pro || 0}</P.Badge>
-                    <P.Badge tone="success">Premium+ {planCounts["premium"] || 0}</P.Badge>
-                  </P.InlineStack>
-                </P.Box>
-              </P.Card>
-            </P.InlineGrid>
-
-            {/* Top concerns chart */}
-            <P.Card>
-              <P.Box padding="400">
-                <P.Text as="h3" variant="headingMd">
-                  Top concerns
-                </P.Text>
-                <P.BlockStack gap="300">
-                  {topConcerns.length === 0 && (
-                    <P.Text as="p" tone="subdued">
-                      No data yet.
-                    </P.Text>
-                  )}
-                  {topConcerns.map((c) => (
-                    <div key={c.label}>
-                      <P.InlineStack align="space-between">
-                        <P.Text as="p">{c.label}</P.Text>
-                        <P.Text as="p" tone="subdued">
-                          {c.count}
-                        </P.Text>
-                      </P.InlineStack>
-                      <P.ProgressBar
-                        progress={maxCount ? Math.round((c.count / maxCount) * 100) : 0}
-                        size="medium"
-                      />
-                    </div>
-                  ))}
-                </P.BlockStack>
-              </P.Box>
-            </P.Card>
-
-            {/* Recent activity table */}
-            <P.Card>
-              <P.Box padding="400">
-                <P.Text as="h3" variant="headingMd">
-                  Recent activity
-                </P.Text>
-                {rows.length === 0 ? (
-                  <P.Text as="p" tone="subdued">
-                    No rows yet.
-                  </P.Text>
-                ) : (
-                  <P.DataTable
-                    columnContentTypes={["text", "text", "text", "text"]}
-                    headings={["Time", "Type", "Concern", "Product"]}
-                    rows={rows}
-                  />
-                )}
-              </P.Box>
-            </P.Card>
-          </>
-        )}
-      </P.BlockStack>
-    </P.Page>
+      <Card>
+        <BlockStack gap="300" padding="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <Text as="h3" variant="headingSm">Events</Text>
+            {loadingMore && <Spinner size="small" />}
+          </InlineStack>
+          {events.length === 0 ? (
+            <Text tone="subdued">{loading ? "Loading…" : "No events yet"}</Text>
+          ) : (
+            <BlockStack gap="200">
+              {events.map((e) => (
+                <InlineStack key={e.id} align="space-between">
+                  <Text>{e.type}</Text>
+                  <Text tone="subdued">{e.tsServerIso || "—"}</Text>
+                </InlineStack>
+              ))}
+              {cursor && <Button onClick={loadMore}>Load more</Button>}
+            </BlockStack>
+          )}
+        </BlockStack>
+      </Card>
+    </Page>
   );
 }

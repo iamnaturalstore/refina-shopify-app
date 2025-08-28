@@ -1,3 +1,4 @@
+// admin-ui/src/pages/Home.jsx
 import * as React from "react";
 import {
   Card,
@@ -14,7 +15,7 @@ import {
   ProgressBar,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { api, getStoreIdFromUrl } from "../api/client";
+import { api, getShop } from "../api/client.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
@@ -46,10 +47,11 @@ function fmt(n) {
 }
 
 export default function Home() {
-  const storeId = React.useMemo(() => getStoreIdFromUrl(), []);
-  const storeQS = React.useMemo(
-    () => (storeId ? `?storeId=${encodeURIComponent(storeId)}` : ""),
-    [storeId]
+  // Always a FULL domain, e.g. "refina-demo.myshopify.com"
+  const shop = React.useMemo(() => getShop(), []);
+  const shopQS = React.useMemo(
+    () => (shop ? `?shop=${encodeURIComponent(shop)}` : ""),
+    [shop]
   );
 
   // state
@@ -72,10 +74,8 @@ export default function Home() {
     (async () => {
       try {
         setLoadingPlan(true);
-        const q = new URLSearchParams();
-        if (storeId) q.set("storeId", storeId);
-        q.set("ts", String(Date.now()));
-        const j = await api(`/api/billing/plan?${q.toString()}`);
+        // api() appends host/shop/storeId context; no need to pass ?shop=
+        const j = await api(`/api/billing/plan`);
         if (on) setPlan(parsePlanResponse(j));
       } catch (e) {
         if (on) setErr(`Plan error: ${e?.message || "failed to load"}`);
@@ -84,33 +84,27 @@ export default function Home() {
       }
     })();
     return () => { on = false; };
-  }, [storeId]);
+  }, [shop]);
 
   // fetch: settings
   React.useEffect(() => {
-  let on = true;
-  (async () => {
-    try {
-      setLoadingSettings(true);
-      // Build a robust URL: include both storeId (short) and shop (full)
-      const qs = new URLSearchParams();
-      if (storeId) {
-        qs.set("storeId", storeId);
-        qs.set("shop", `${storeId}.myshopify.com`);
+    let on = true;
+    (async () => {
+      try {
+        setLoadingSettings(true);
+        // api() injects context; do not send short IDs
+        const j = await api(`/api/admin/store-settings`);
+        if (on) setSettings(j?.settings || {});
+      } catch (e) {
+        // Non-blocking: fall back silently so Home doesn’t show a red banner for settings alone
+        console.warn("Home: settings load failed", e?.message || e);
+        if (on) setSettings({});
+      } finally {
+        if (on) setLoadingSettings(false);
       }
-      const j = await api(`/api/admin/store-settings${qs.toString() ? `?${qs.toString()}` : ""}`);
-      if (on) setSettings(j?.settings || {});
-    } catch (e) {
-      // Non-blocking: fall back silently so Home doesn’t show a red banner for settings alone
-      console.warn("Home: settings load failed", e?.message || e);
-      if (on) setSettings({});
-    } finally {
-      if (on) setLoadingSettings(false);
-    }
-  })();
-  return () => { on = false; };
-}, [storeId]);
-
+    })();
+    return () => { on = false; };
+  }, [shop]);
 
   // fetch: analytics overview (30d)
   React.useEffect(() => {
@@ -118,7 +112,7 @@ export default function Home() {
     (async () => {
       try {
         setLoadingOverview(true);
-        const over = await api(`/api/admin/analytics/overview?days=30${storeQS ? `&${storeQS.slice(1)}` : ""}`);
+        const over = await api(`/api/admin/analytics/overview?days=30`);
         if (on) setOverview(over || {});
       } catch (e) {
         if (on) setErr(prev => prev || `Analytics error: ${e?.message || "failed to load"}`);
@@ -127,7 +121,7 @@ export default function Home() {
       }
     })();
     return () => { on = false; };
-  }, [storeQS]);
+  }, [shop]);
 
   // fetch: recent logs (limit 5)
   React.useEffect(() => {
@@ -135,7 +129,7 @@ export default function Home() {
     (async () => {
       try {
         setLoadingLogs(true);
-        const j = await api(`/api/admin/analytics/logs?limit=5${storeQS ? `&${storeQS.slice(1)}` : ""}`);
+        const j = await api(`/api/admin/analytics/logs?limit=5`);
         const items = Array.isArray(j?.logs) ? j.logs : (Array.isArray(j) ? j : []);
         if (on) setLogs(items.slice(0, 5));
       } catch {
@@ -145,7 +139,7 @@ export default function Home() {
       }
     })();
     return () => { on = false; };
-  }, [storeQS]);
+  }, [shop]);
 
   // health
   React.useEffect(() => {
@@ -194,7 +188,7 @@ export default function Home() {
   const checklistDone = [hasTone, hasCategory, hasDomain].filter(Boolean).length;
 
   // links
-  const qsParam = storeId ? `?storeId=${encodeURIComponent(storeId)}` : "";
+  const qsParam = shop ? `?shop=${encodeURIComponent(shop)}` : "";
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
@@ -217,9 +211,9 @@ export default function Home() {
         <Divider />
         <Box padding="400">
           <InlineStack gap="300">
-            <Button variant="primary" url={`#/analytics${qsParam}`}>View analytics</Button>
-            <Button url={`#/settings${qsParam}`}>Settings</Button>
-            <Button url={`#/billing${qsParam}`}>Billing</Button>
+            <Button variant="primary" url={`#/analytics${shopQS}`}>View analytics</Button>
+            <Button url={`#/settings${shopQS}`}>Settings</Button>
+            <Button url={`#/billing${shopQS}`}>Billing</Button>
           </InlineStack>
         </Box>
       </Card>
@@ -328,7 +322,7 @@ export default function Home() {
               {level === "premium" ? (
                 <Badge tone="success">Premium</Badge>
               ) : (
-                <Button variant="primary" url={`#/billing${qsParam}`}>
+                <Button variant="primary" url={`#/billing${shopQS}`}>
                   {level === "free" ? "Upgrade to Pro" : "Upgrade to Premium"}
                 </Button>
               )}
@@ -356,7 +350,7 @@ export default function Home() {
                     <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
                     <Text as="span">
                       Set your <strong>tone</strong> in{" "}
-                      <a href={`#/settings${qsParam}`}>Settings</a>
+                      <a href={`#/settings${shopQS}`}>Settings</a>
                     </Text>
                   </InlineStack>
 
@@ -364,7 +358,7 @@ export default function Home() {
                     <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
                     <Text as="span">
                       Choose your <strong>category</strong> in{" "}
-                      <a href={`#/settings${qsParam}`}>Settings</a>
+                      <a href={`#/settings${shopQS}`}>Settings</a>
                     </Text>
                   </InlineStack>
 
@@ -372,7 +366,7 @@ export default function Home() {
                     <Icon source={CheckIcon} tone={hasDomain ? "success" : "subdued"} />
                     <Text as="span">
                       Connect your <strong>domain</strong> in{" "}
-                      <a href={`#/settings${qsParam}`}>Settings</a>
+                      <a href={`#/settings${shopQS}`}>Settings</a>
                     </Text>
                   </InlineStack>
                 </BlockStack>
@@ -412,7 +406,7 @@ export default function Home() {
                           </Box>
                         );
                       })}
-                      <Button url={`#/analytics${qsParam}`} plain>See full log</Button>
+                      <Button url={`#/analytics${shopQS}`} plain>See full log</Button>
                     </BlockStack>
                   ) : (
                     <Text tone="subdued">No activity yet — check back after some traffic.</Text>

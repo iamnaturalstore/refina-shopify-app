@@ -1,51 +1,78 @@
-// refina-backend/utils/planSync.js - pre CDN-BFF
-import { getFirestore } from 'firebase-admin/firestore';
+// refina-backend/utils/planSync.js - full-domain keys only
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+
+function toMyshopifyDomain(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) throw new Error("shopDomain/storeId required");
+  // Strip protocol + path
+  try {
+    if (/^https?:\/\//i.test(s)) {
+      const u = new URL(s);
+      const h = (u.hostname || "").toLowerCase();
+      if (!h.endsWith(".myshopify.com")) throw new Error("Invalid shop domain");
+      return h;
+    }
+  } catch { /* ignore */ }
+  if (s.endsWith(".myshopify.com")) return s;
+  if (s.includes(".")) throw new Error("Invalid shop domain");
+  return `${s}.myshopify.com`;
+}
+
+function canonicalize({ storeId, shopDomain }) {
+  if (shopDomain) return toMyshopifyDomain(shopDomain);
+  if (storeId) return toMyshopifyDomain(storeId);
+  throw new Error("storeId or shopDomain required");
+}
 
 /**
- * plans/{storeId}
+ * plans/{<shop>.myshopify.com}
  * {
  *   level: 'free' | 'starter' | 'growth' | 'premium' | 'enterprise',
  *   shopDomain: 'my-shop.myshopify.com',
  *   chargeId: 'gid://shopify/AppSubscription/12345' | null,
  *   trialEndsAt: '2025-08-23T00:00:00.000Z' | null,
- *   updatedAt: 'ISO8601 string'
+ *   updatedAt: Firestore serverTimestamp()
  * }
  */
-
 export async function setPlan({ storeId, shopDomain, level, chargeId = null, trialEndsAt = null }) {
   const db = getFirestore();
-  const shortId = (storeId || "").trim() || (shopDomain || "").replace(/\.myshopify\.com$/i, "");
-  const longId  = (shopDomain || "").trim() || `${shortId}.myshopify.com`;
+  const shopFull = canonicalize({ storeId, shopDomain });
 
   const payload = {
     level,
-    shopDomain: longId || undefined,
+    shopDomain: shopFull,
     chargeId: chargeId ?? null,
     trialEndsAt: trialEndsAt ?? null,
-    updatedAt: new Date().toISOString(),
+    updatedAt: FieldValue.serverTimestamp(),
   };
 
-  // Write to both doc IDs to keep them in sync
-  await Promise.all([
-    db.collection("plans").doc(shortId).set(payload, { merge: true }),
-    db.collection("plans").doc(longId).set(payload, { merge: true }),
-  ]);
+  await db.collection("plans").doc(shopFull).set(payload, { merge: true });
 }
 
 export async function getPlan({ storeId, shopDomain }) {
   const db = getFirestore();
-  const shortId = (storeId || "").trim() || (shopDomain || "").replace(/\.myshopify\.com$/i, "");
-  const longId  = (shopDomain || "").trim() || `${shortId}.myshopify.com`;
+  const shopFull = canonicalize({ storeId, shopDomain });
 
-  // Prefer short ID; fallback to full domain
-  const shortSnap = await db.collection("plans").doc(shortId).get();
-  if (shortSnap.exists) return shortSnap.data();
+  // Read the canonical doc
+  const longSnap = await db.collection("plans").doc(shopFull).get();
+  if (longSnap.exists) return longSnap.data();
 
-  const longSnap = await db.collection("plans").doc(longId).get();
-  return longSnap.exists ? longSnap.data() : null;
+  // Optional rescue: if a short doc exists, migrate once
+  const short = shopFull.replace(/\.myshopify\.com$/i, "");
+  const shortSnap = await db.collection("plans").doc(short).get();
+  if (shortSnap.exists) {
+    const data = shortSnap.data();
+    await db.collection("plans").doc(shopFull).set(
+      { ...data, shopDomain: shopFull, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    return (await db.collection("plans").doc(shopFull).get()).data();
+  }
+
+  return null;
 }
 
-export async function downgradeToFree({ storeId, shopDomain }) {
-  return setPlan({ storeId, shopDomain, level: "free", chargeId: null, trialEndsAt: null });
+export async function downgradeToFree(params) {
+  const shopFull = canonicalize(params);
+  return setPlan({ shopDomain: shopFull, level: "free", chargeId: null, trialEndsAt: null });
 }
-

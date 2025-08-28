@@ -1,21 +1,33 @@
 // refina-backend/lib/planWriter.js
 import admin from "firebase-admin";
 
-export function shopToStoreId(shop) {
-  if (!shop) throw new Error("Missing shop");
-  return String(shop).split(".")[0];
+function toMyshopifyDomain(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) throw new Error("Missing shop");
+  // strip protocol + path if URL is passed
+  try {
+    if (/^https?:\/\//i.test(s)) {
+      const u = new URL(s);
+      const h = (u.hostname || "").toLowerCase();
+      if (!h.endsWith(".myshopify.com")) throw new Error("Invalid shop domain");
+      return h;
+    }
+  } catch {
+    /* ignore */
+  }
+  if (s.endsWith(".myshopify.com")) return s;
+  if (s.includes(".")) throw new Error("Invalid shop domain");
+  return `${s}.myshopify.com`;
 }
 
-/** Write/merge billing state to plans/{storeId} */
+/** Write/merge billing state to plans/{<shop>.myshopify.com} */
 export async function writePlan(shopOrStoreId, patch) {
-  const storeId = (shopOrStoreId || "").includes(".myshopify.com")
-    ? shopToStoreId(shopOrStoreId)
-    : shopOrStoreId;
+  const shopFull = toMyshopifyDomain(shopOrStoreId);
 
   const db = admin.firestore();
   await db
     .collection("plans")
-    .doc(storeId)
+    .doc(shopFull)
     .set(
       {
         ...patch,
@@ -24,5 +36,5 @@ export async function writePlan(shopOrStoreId, patch) {
       { merge: true }
     );
 
-  return storeId;
+  return shopFull; // return canonical key
 }

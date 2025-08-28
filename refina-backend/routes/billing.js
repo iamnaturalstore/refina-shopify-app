@@ -1,4 +1,4 @@
-// refina-backend/routes/billing.js - GOLDEN PATH subscription plans working
+// refina-backend/routes/billing.js - GOLDEN PATH subscription plans (full-domain keys)
 "use strict";
 
 import express from "express";
@@ -10,7 +10,6 @@ const router = express.Router();
 /* --------------------------- Utilities --------------------------- */
 
 function absoluteAppUrl(req) {
-  // Works in dev (ngrok) and prod behind proxies
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
   const host = req.get("x-forwarded-host") || req.get("host");
   return `${proto}://${host}`;
@@ -24,32 +23,25 @@ function normalizePlan(data) {
 }
 
 /**
- * Resolve shop/storeId with your existing guard + query fallbacks.
- * No session loading here (Firestore-only for /plan).
- * Throws 401 if shop cannot be determined.
+ * Resolve canonical shop from guard/query; no short IDs; throws 401 on failure.
  */
-async function resolveShopContext(req, res) {
-  // 1) Use guard-resolved shop from server.js
-  let shop = (typeof req.shop === "string" && req.shop) ? req.shop : null;
+async function resolveShopContext(req, _res) {
+  // 1) Use guard-resolved shop from server.js (preferred)
+  let shop = (typeof req.shop === "string" && req.shop) ? req.shop.toLowerCase() : null;
 
-  // 2) Fallbacks: ?shop / ?host (admin.shopify.com/store/<store> or <store>.myshopify.com/admin)
+  // 2) Fallbacks: ?shop=<full>, or derive from ?host (base64)
   const q = req.query || {};
-  if (!shop && typeof q.shop === "string" && q.shop.endsWith(".myshopify.com")) {
-    shop = q.shop;
+  if (!shop && typeof q.shop === "string" && q.shop.toLowerCase().endsWith(".myshopify.com")) {
+    shop = q.shop.toLowerCase();
   }
   if (!shop && typeof q.host === "string") {
     try {
       const decoded = Buffer.from(q.host, "base64").toString("utf8");
       const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
       const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
-      if (m1?.[1]) shop = `${m1[1]}.myshopify.com`;
-      if (!shop && m2?.[1]) shop = `${m2[1]}.myshopify.com`;
+      if (m1?.[1]) shop = `${m1[1].toLowerCase()}.myshopify.com`;
+      if (!shop && m2?.[1]) shop = `${m2[1].toLowerCase()}.myshopify.com`;
     } catch { /* no-op */ }
-  }
-
-  // 3) Cookie fallback (mirrors server.js guard)
-  if (!shop && req.cookies?.storeId) {
-    shop = `${req.cookies.storeId}.myshopify.com`;
   }
 
   if (!shop) {
@@ -58,8 +50,7 @@ async function resolveShopContext(req, res) {
     throw err;
   }
 
-  const storeId = shop.replace(".myshopify.com", "");
-  return { shop, storeId };
+  return { shop };
 }
 
 /* ----------------------------- Routes ---------------------------- */
@@ -70,30 +61,19 @@ async function resolveShopContext(req, res) {
  */
 router.get("/plan", async (req, res) => {
   try {
-    const { shop, storeId } = await resolveShopContext(req, res);
+    const { shop } = await resolveShopContext(req, res);
 
-// Try short ID first (e.g., "refina-demo"), then full domain (e.g., "refina-demo.myshopify.com")
-const plans = dbAdmin.collection("plans");
-const shortSnap = await plans.doc(storeId).get();
-let raw = shortSnap.exists ? shortSnap.data() : null;
+    // Single source of truth: plans/<shop>.myshopify.com
+    const plans = dbAdmin.collection("plans");
+    const longSnap = await plans.doc(shop).get();
+    let raw = longSnap.exists ? longSnap.data() : null;
 
-if (!raw) {
-  const longSnap = await plans.doc(shop).get(); // full domain
-  raw = longSnap.exists ? longSnap.data() : null;
-}
-
-let plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
-// Legacy migration: treat stored "pro+" as "premium"
-if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
-  plan = { ...plan, level: "premium" };
-}
-
-return res.json({ plan });
-
-    // Legacy migration: treat stored "pro+" as "premium"
+    // Legacy migration: if "pro+" -> "premium"
+    let plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
     if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
       plan = { ...plan, level: "premium" };
     }
+
     return res.json({ plan });
   } catch (err) {
     if (err?.status === 401) {
@@ -111,11 +91,7 @@ return res.json({ plan });
 /**
  * POST /api/billing/subscribe
  * Body: { plan: "pro" | "premium" }  (also accepts legacy: "pro+", "pro plus", "pro_plus")
- * Returns:
- *  - 200 { confirmationUrl } on success
- *  - 409 { error: "ALREADY_ACTIVE", level } if same plan clicked
- *  - 409 { error: "ALREADY_HAS_ACTIVE", message } if Shopify blocks due to active charge and cancel failed/not allowed
- *  - 400 { error, errors? } for other userErrors
+ * Response: { confirmationUrl }
  */
 router.post("/subscribe", async (req, res) => {
   try {
@@ -126,7 +102,6 @@ router.post("/subscribe", async (req, res) => {
     const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
     let offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
 
-    // Dev fallback: allow admin token if present
     if (!offlineSession?.accessToken) {
       return res
         .status(401)
@@ -137,26 +112,24 @@ router.post("/subscribe", async (req, res) => {
 
     // Accept body OR query; normalize legacy strings to canonical keys
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
-// Normalize legacy spellings: pro%2B -> pro+, pro_plus/pro-plus -> pro plus
-const normalized = raw
-  .replace(/%2b/gi, "+")
-  .replace(/[_-]+/g, " ")
-  .replace(/\s+/g, " ")
-  .trim();
+    const normalized = raw
+      .replace(/%2b/gi, "+")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
-const target =
-  /\bpremium\b/.test(normalized)
-    ? "premium"
-    : /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
-    ? "premium" // legacy names map to premium
-    : /^pro\b/.test(normalized)
-    ? "pro"
-    : "";
+    const target =
+      /\bpremium\b/.test(normalized)
+        ? "premium"
+        : /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
+        ? "premium" // legacy names map to premium
+        : /^pro\b/.test(normalized)
+        ? "pro"
+        : "";
 
-if (!["pro", "premium"].includes(target)) {
-  return res.status(400).json({ error: "Invalid plan" });
-}
-
+    if (!["pro", "premium"].includes(target)) {
+      return res.status(400).json({ error: "Invalid plan" });
+    }
 
     const client = new shopify.clients.Graphql({ session: offlineSession });
 
@@ -192,32 +165,30 @@ if (!["pro", "premium"].includes(target)) {
       }
     }
 
-    // Block clicks on the already-active plan (lets UI gray-out safely)
+    // Block clicks on the already-active plan
     if (currentLevel === target) {
       return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
     }
 
-    // 2) Get shop currency (keeps pricing correct per shop)
+    // 2) Get shop currency
     const shopQ = `query { shop { currencyCode } }`;
     const shopResp = await client.request(shopQ);
     let currencyCode = (shopResp?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
 
-    // 3) Plan catalog (prices from your listing)
+    // 3) Plan catalog
     const PLAN = target === "premium"
       ? { name: "Premium", amount: "29.00" }
       : { name: "Pro",      amount: "9.00" };
 
-    // --- Build a clean HTTPS returnUrl on your app host, no fragments for GraphQL parsing ---
-    const rawHost = process.env.HOST || absoluteAppUrl(req); // e.g. https://refina.ngrok.app
+    // 4) Return URL
+    const rawHost = process.env.HOST || absoluteAppUrl(req);
     let host = String(rawHost).replace(/\/$/, "");
     if (host.startsWith("http://")) host = host.replace(/^http:\/\//, "https://");
-    // Use a simple path; your UI can read query params if needed
     const returnUrl = `${host}/admin-ui/`;
 
-    // 4) Create helper to call appSubscriptionCreate
-    const amt = PLAN.amount; // Decimal scalar as string
-    const cc = currencyCode.replace(/[^A-Z]/g, ""); // sanitize to enum token
-
+    // 5) Create subscription
+    const amt = PLAN.amount;
+    const cc = currencyCode.replace(/[^A-Z]/g, "");
     const createMutation = `
       mutation AppSubscribe {
         appSubscriptionCreate(
@@ -243,17 +214,33 @@ if (!["pro", "premium"].includes(target)) {
       return { errors, confirmationUrl };
     };
 
-    // First attempt: try to create directly
     let { errors, confirmationUrl } = await tryCreate();
     if (!errors.length && confirmationUrl) {
       return res.json({ confirmationUrl });
     }
 
-    // If Shopify blocks due to already-active sub, optionally cancel and retry ONCE
+    // Handle "already-active" block
     const msg = (errors || []).map(e => e?.message || "").join("; ");
     const looksLikeActiveBlock = /already.*active|existing.*active|active recurring/i.test(msg);
 
-    if (looksLikeActiveBlock && currentSubId) {
+    if (looksLikeActiveBlock) {
+      const currentQ2 = `
+        query AppInstall {
+          currentAppInstallation {
+            activeSubscriptions { id name status }
+          }
+        }
+      `;
+      const currentResp2 = await client.request(currentQ2);
+      const subs2 = currentResp2?.data?.currentAppInstallation?.activeSubscriptions || [];
+      const match = subs2.find(s => (String(s?.name || "").toLowerCase().includes("premium") && target === "premium")
+                                 || (String(s?.name || "").toLowerCase().includes("pro") && target === "pro"));
+      const currentSubId = match?.id || null;
+
+      if (!currentSubId) {
+        return res.status(409).json({ error: "ALREADY_HAS_ACTIVE", message: "Existing active subscription" });
+      }
+
       const cancelMutation = `
         mutation CancelSub($id: ID!) {
           appSubscriptionCancel(id: $id) {
@@ -303,11 +290,11 @@ if (!["pro", "premium"].includes(target)) {
 
 /**
  * POST /api/billing/sync
- * Upserts plans/{storeId}
+ * Upserts plans/{<shop>.myshopify.com}
  */
 router.post("/sync", async (req, res) => {
   try {
-    const { shop, storeId } = await resolveShopContext(req, res);
+    const { shop } = await resolveShopContext(req, res);
 
     const offlineId = shopify.session.getOfflineId(shop);
     const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
@@ -345,14 +332,9 @@ router.post("/sync", async (req, res) => {
       if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
     }
 
-    // A3: dual-write (short storeId and full shop domain)
+    // Write only to full-domain doc
     const payload = { level, status, updatedAt: FieldValue.serverTimestamp() };
-    const plans = dbAdmin.collection("plans");
-
-    await Promise.all([
-      plans.doc(storeId).set(payload, { merge: true }),
-      plans.doc(shop).set(payload,   { merge: true }),
-    ]);
+    await dbAdmin.collection("plans").doc(shop).set(payload, { merge: true });
 
     return res.json({ ok: true, level, status });
   } catch (err) {
@@ -369,4 +351,3 @@ router.post("/sync", async (req, res) => {
 });
 
 export default router;
-

@@ -3,13 +3,15 @@ import express from "express";
 import shopify from "../shopify.js";
 import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
 
-function productShapeFromShopify(raw) {
+function productShapeFromShopify(raw, shop) {
   const price = Number(raw?.variants?.[0]?.price ?? NaN);
   const image = raw?.image?.src || raw?.images?.[0]?.src || "";
   const tags = String(raw?.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return {
     id: String(raw.id),
+    storeId: shop, // full domain
     name: raw.title || "",
+    title: raw.title || "",
     description: raw.body_html || "",
     tags,
     productType: raw.product_type || "",
@@ -35,12 +37,11 @@ export default function mountBackfillRoutes(app) {
     next();
   }
 
-  // POST /api/admin/backfill-products?shop=refina-demo.myshopify.com
+  // POST /api/admin/backfill-products?shop=<full-domain>
   router.post("/backfill-products", requireAdmin, async (req, res) => {
     try {
-      const shop = (req.query.shop || req.body?.shop || "").toLowerCase();
+      const shop = String(req.query.shop || req.body?.shop || "").toLowerCase();
       if (!shop.endsWith(".myshopify.com")) return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
-      const storeId = shop.replace(".myshopify.com", "");
 
       const api = shopify.api;
       const offlineId = api.session.getOfflineId(shop);
@@ -60,8 +61,8 @@ export default function mountBackfillRoutes(app) {
 
         const batch = dbAdmin.batch();
         for (const raw of products) {
-          const doc = productShapeFromShopify(raw);
-          batch.set(dbAdmin.doc(`products/${storeId}/items/${doc.id}`), doc, { merge: true });
+          const doc = productShapeFromShopify(raw, shop);
+          batch.set(dbAdmin.doc(`products/${shop}/items/${doc.id}`), doc, { merge: true });
         }
         await batch.commit();
 
@@ -84,7 +85,7 @@ export default function mountBackfillRoutes(app) {
         url = nextUrl;
       }
 
-      return res.json({ ok: true, synced: total, pages, storeId });
+      return res.json({ ok: true, synced: total, pages, shop });
     } catch (e) {
       console.error("backfill error:", e);
       return res.status(500).json({ ok: false, error: "backfill_failed" });

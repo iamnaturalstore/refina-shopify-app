@@ -4,10 +4,13 @@ import { buildShareHref, copyToClipboard } from "./utils/shareHref";
 export function createTitleBar({ app, actions, title, shop, host, storeId }) {
   const { TitleBar, Button, Toast } = actions;
 
+  // Force full-domain ID locally; prevents stale/short leakage
+  storeId = shop;
+
   // Primary action: Copy link
   const copyBtn = Button.create(app, { label: "Copy link" });
   copyBtn.subscribe(Button.Action.CLICK, async () => {
-    const href = buildShareHref({ shop, host, storeId });
+    const href = buildShareHref({ shop, host, storeId: shop });
     await copyToClipboard(href);
     const toast = Toast.create(app, { message: "Link copied", duration: 2000 });
     toast.dispatch(Toast.Action.SHOW);
@@ -29,10 +32,12 @@ export function createTitleBar({ app, actions, title, shop, host, storeId }) {
   }
 
   function updateShareContext(next) {
-    // If you need to swap shop/host/storeId dynamically (rare):
-    if (next?.shop) shop = next.shop;
+    if (next?.shop) {
+      shop = next.shop;
+      storeId = shop; // lock to full-domain
+    }
     if (next?.host) host = next.host;
-    if (next?.storeId) storeId = next.storeId;
+    // NOTE: intentionally ignore next.storeId to prevent short-id reintroduction
   }
 
   return { updateTitle, updateShareContext, destroy: () => tb.unsubscribe && tb.unsubscribe() };

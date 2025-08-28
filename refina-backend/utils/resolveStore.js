@@ -1,12 +1,27 @@
 // refina-backend/utils/resolveStore.js
 const sanitize = (s) =>
-  String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, "");
+  String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-_.:/?#]/g, "");
 
-export function toMyshopifyDomain(raw) {
-  const s = sanitize(raw);
+function toMyshopifyDomain(raw) {
+  const s = String(raw || "").trim().toLowerCase();
   if (!s) return "";
-  if (s.endsWith(".myshopify.com")) return s;
-  return `${s}.myshopify.com`;
+  // If it's a URL, use the hostname
+  try {
+    if (/^https?:\/\//i.test(s)) {
+      const u = new URL(s);
+      const h = (u.hostname || "").toLowerCase();
+      return h.endsWith(".myshopify.com") ? h : "";
+    }
+  } catch { /* ignore */ }
+
+  const cleaned = sanitize(s);
+  if (cleaned.endsWith(".myshopify.com")) return cleaned;
+
+  // If it contains a dot but not the right suffix, reject
+  if (cleaned.includes(".")) return "";
+
+  // Bare handle -> append suffix
+  return `${cleaned}.myshopify.com`;
 }
 
 export function shopFromHostB64(hostB64) {
@@ -38,27 +53,36 @@ export function shopFromIdToken(idToken) {
 }
 
 export function resolveStoreDomain(q = {}) {
-  // 1) storeId | shop (handle or full domain)
-  const raw = q.storeId || q.shop;
-  if (raw) {
-    const dom = toMyshopifyDomain(raw);
-    if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(dom)) return dom;
+  // 1) prefer ?shop, 2) legacy ?storeId
+  const rawShop = q.shop || "";
+  const rawStoreId = q.storeId || "";
+
+  let dom = toMyshopifyDomain(rawShop);
+  if (!dom && rawStoreId) {
+    dom = toMyshopifyDomain(rawStoreId);
+    // (optional) console.warn once here to find legacy callers
   }
-  // 2) host (base64)
+  if (dom) return dom;
+
+  // 3) host (base64)
   const fromHost = shopFromHostB64(q.host);
   if (fromHost) return fromHost;
-  // 3) id_token / idToken (JWT with .dest)
+
+  // 4) id_token / idToken (JWT with .dest)
   const fromJwt = shopFromIdToken(q.id_token || q.idToken);
   if (fromJwt) return fromJwt;
+
   return "";
 }
 
 export function assertShop(q = {}) {
   const shop = resolveStoreDomain(q);
   if (!shop) {
-    const e = new Error("storeId or shop is required");
+    const e = new Error("shop is required");
     e.status = 400;
     throw e;
   }
   return shop;
 }
+
+export { toMyshopifyDomain };

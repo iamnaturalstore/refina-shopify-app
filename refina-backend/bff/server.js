@@ -12,6 +12,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
+import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -157,7 +158,7 @@ async function getPlan(storeId) {
   try {
     const snap = await db.doc(`plans/${storeId}`).get();
     const data = snap.exists ? snap.data() || {} : {};
-    const raw = String(data.plan || data.tier || data.name || "free").toLowerCase().trim();
+    const raw = String(data.plan || data.tier || data.name || data.level || "free").toLowerCase().trim();
     if (/\bpremium\b/.test(raw) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(raw)) return "premium";
     if (/^pro\b/.test(raw)) return "pro";
     return "free";
@@ -226,12 +227,11 @@ function rateLimitAppProxy(req, res, next) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Shopify App Proxy verification (for /proxy/refina/v1/*)
+// Shopify App Proxy verification (HMAC verified)
 // ─────────────────────────────────────────────────────────────
 function verifyAppProxy(req) {
   if (!SHOPIFY_APP_SECRET) return { ok: false, reason: "missing_secret" };
 
-  // Build raw query string excluding 'signature', sorted by key; concat as k=v (no separators)
   const signature = String(req.query.signature || "");
   const entries = Object.entries(req.query)
     .filter(([k]) => k !== "signature")
@@ -243,13 +243,12 @@ function verifyAppProxy(req) {
   const expected = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(message).digest("hex");
   const provided = signature;
 
-  // timing-safe compare (hex)
   const ok =
     expected.length === provided.length &&
     crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
 
   const shop = String(req.query.shop || req.headers["x-shopify-shop-domain"] || "").toLowerCase();
-  return ok ? { ok: true, shop } : { ok: false, reason: ok ? "unknown" : "bad_signature", shop };
+  return ok ? { ok: true, shop } : { ok: false, reason: "bad_signature", shop };
 }
 
 function requireAppProxy(req, res, next) {
@@ -258,7 +257,9 @@ function requireAppProxy(req, res, next) {
     const status = v.reason === "missing_secret" ? 500 : 401;
     return res.status(status).json({ error: "unauthorized", reason: v.reason });
   }
-  if (!v.shop) return res.status(400).json({ error: "missing_shop" });
+  if (!v.shop || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(v.shop)) {
+    return res.status(400).json({ error: "invalid_shop" });
+  }
 
   // Canonical storeId = full myshopify domain
   req.shopDomain = v.shop;
@@ -275,10 +276,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(cors());
 
 // ───────────────────────── BEGIN Refina settings v1 ─────────────────────────
-// Minimal, production-safe defaults with ETag + Cache-Control.
-// Shopify storefront should call:  GET /apps/refina/v1/settings  (App Proxy)
-// which Shopify forwards to:       GET /proxy/refina/v1/settings  (this route)
-
+// (unchanged)
 const RF_DEFAULT_THEME = {
   presetId: "minimal",
   version: 1,
@@ -296,7 +294,6 @@ const RF_DEFAULT_THEME = {
 
 function rfStableStringify(x) {
   try {
-    // stable key order for deterministic ETag
     const seen = new WeakSet();
     const sortKeys = (obj) => {
       if (obj && typeof obj === "object") {
@@ -314,11 +311,9 @@ function rfStableStringify(x) {
     return JSON.stringify(x);
   }
 }
-
 function rfMakeEtag(obj) {
   try {
     const s = rfStableStringify(obj);
-    // lightweight 32-bit hash → hex
     let h = 0;
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
     return `"rf-${(h >>> 0).toString(16)}"`;
@@ -363,16 +358,12 @@ app.get(
 );
 // ────────────────────────── END Refina settings v1 ──────────────────────────
 
-// ─────────────────────────────────────────────────────────────
-// Shopify Webhooks (HMAC verified, raw body)
-// ─────────────────────────────────────────────────────────────
+// Webhooks (unchanged except validations)
 const rawJson = express.raw({ type: "application/json" });
-
 function verifyWebhookHmac(req, res, next) {
   if (!SHOPIFY_APP_SECRET) return res.status(500).send("missing_secret");
   const hmac = String(req.get("x-shopify-hmac-sha256") || "");
   const body = req.body; // Buffer from express.raw
-
   try {
     const digest = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(body).digest("base64");
     const ok =
@@ -385,8 +376,6 @@ function verifyWebhookHmac(req, res, next) {
     return res.status(400).send("hmac_error");
   }
 }
-
-// App uninstalled
 app.post("/webhooks/app/uninstalled", rawJson, verifyWebhookHmac, async (req, res) => {
   const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
   const topic = String(req.get("x-shopify-topic") || "");
@@ -398,24 +387,18 @@ app.post("/webhooks/app/uninstalled", rawJson, verifyWebhookHmac, async (req, re
   }
   res.status(200).send("ok");
 });
-
-// GDPR: customers/data_request
 app.post("/webhooks/customers/data_request", rawJson, verifyWebhookHmac, (req, res) => {
   const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
   const topic = String(req.get("x-shopify-topic") || "");
   console.log(`[Webhook] ${topic} from ${shop}`);
   res.status(200).send("ok");
 });
-
-// GDPR: customers/redact
 app.post("/webhooks/customers/redact", rawJson, verifyWebhookHmac, (req, res) => {
   const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
   const topic = String(req.get("x-shopify-topic") || "");
   console.log(`[Webhook] ${topic} from ${shop}`);
   res.status(200).send("ok");
 });
-
-// GDPR: shop/redact
 app.post("/webhooks/shop/redact", rawJson, verifyWebhookHmac, (req, res) => {
   const shop = String(req.get("x-shopify-shop-domain") || "").toLowerCase();
   const topic = String(req.get("x-shopify-topic") || "");
@@ -423,9 +406,8 @@ app.post("/webhooks/shop/redact", rawJson, verifyWebhookHmac, (req, res) => {
   res.status(200).send("ok");
 });
 
-// (A) Shopify App Proxy HTML shell (no wildcards, exact path)
+// (A) Shopify App Proxy HTML shell (unchanged)
 app.get("/proxy/refina", (_req, res) => {
-  // CSP safe for Shopify storefront iframe
   res.setHeader(
     "Content-Security-Policy",
     [
@@ -439,8 +421,6 @@ app.get("/proxy/refina", (_req, res) => {
   );
   res.setHeader("Cache-Control", "no-store");
 
-  // IMPORTANT: absolute shop paths so the browser requests /apps/refina/... on the shop
-  // Shopify forwards those to our Proxy URL /proxy/refina/...
   res
     .type("html")
     .send(`<!doctype html>
@@ -460,11 +440,9 @@ app.get("/proxy/refina", (_req, res) => {
 });
 
 // (B) App Proxy APIs — authoritative for storefront
-// Frontend calls /apps/refina/v1/* on the shop, Shopify forwards to /proxy/refina/v1/* here.
 app.get("/proxy/refina/v1/concerns", requireAppProxy, rateLimitAppProxy, async (req, res) => {
   try {
     const storeId = req.storeId;
-
     const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`));
     let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
     if (!chips.length) {
@@ -485,9 +463,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
     const concernInput = String(req.body?.concern || "").trim();
     if (!concernInput) return res.status(400).json({ error: "concern required" });
 
-    // Enforce plan server-side; ignore client-provided plan
     const plan = await getPlan(storeId);
-
     const normalizedConcern = normalizeConcern(concernInput);
     const settings = await getSettings(storeId);
     const { category, tone, domain } = settings;
@@ -558,7 +534,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
   }
 });
 
-// (C) Narrow asset proxies (AFTER App Proxy APIs; no catch-all)
+// (C) Narrow asset proxies (unchanged)
 app.use(
   "/proxy/refina/concierge.js",
   createProxyMiddleware({
@@ -569,7 +545,6 @@ app.use(
     logLevel: "warn"
   })
 );
-
 app.use(
   "/proxy/refina/concierge.css",
   createProxyMiddleware({
@@ -580,7 +555,6 @@ app.use(
     logLevel: "warn"
   })
 );
-
 app.use(
   "/proxy/refina/chunks",
   createProxyMiddleware({
@@ -601,7 +575,8 @@ app.get(/^\/admin-ui(?:\/.*)?$/, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
 });
 
-// Redirect Embedded entry → /admin-ui/, preserving ?host=&shop=&storeId=
+// Redirect Embedded entry → /admin-ui/, preserving ?host=&shop=
+// (Do not propagate legacy storeId; Admin UI will persist `shop` and `host` itself)
 app.get("/embedded", (req, res) => {
   const qs = req.originalUrl.includes("?")
     ? req.originalUrl.slice(req.originalUrl.indexOf("?"))
@@ -618,19 +593,19 @@ app.get("/v1/health", (_req, res) => {
   });
 });
 
-// (Legacy direct endpoints kept for health/local use; storefront should use /proxy/refina/v1/*)
+// (Legacy direct endpoints; enforce full-domain now)
 app.get("/v1/concerns", async (req, res) => {
   try {
-    const storeId = String(req.query.storeId || "").trim();
-    if (!storeId) return res.status(400).json({ error: "storeId required" });
+    const shop = toMyshopifyDomain(req.query.shop || req.query.storeId || "");
+    if (!shop) return res.status(400).json({ error: "shop required" });
 
-    const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`));
+    const docChips = await getDocSafe(db.doc(`commonConcerns/${shop}`));
     let chips = Array.isArray(docChips?.chips) ? docChips.chips : [];
     if (!chips.length) {
-      const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get();
+      const colSnap = await db.collection(`commonConcerns/${shop}/items`).get();
       chips = colSnap.docs.map((d) => d.data()?.text).filter(Boolean);
     }
-    res.json({ storeId, chips });
+    res.json({ storeId: shop, chips });
   } catch (e) {
     console.error("GET /v1/concerns error", e);
     res.status(500).json({ error: "internal_error" });
@@ -640,24 +615,23 @@ app.get("/v1/concerns", async (req, res) => {
 app.post("/v1/recommend", async (req, res) => {
   const t0 = Date.now();
   try {
-    const { storeId: rawStoreId, concern: rawConcern, plan: rawPlan } = req.body || {};
-    const storeId = String(rawStoreId || "").trim();
-    const concernInput = String(rawConcern || "").trim();
-    const plan = String(rawPlan || "free").toLowerCase();
-    if (!storeId || !concernInput)
-      return res.status(400).json({ error: "storeId and concern required" });
+    const shop = toMyshopifyDomain(req.body?.storeId || req.body?.shop || "");
+    const concernInput = String(req.body?.concern || "").trim();
+    const plan = String(req.body?.plan || "free").toLowerCase();
+    if (!shop || !concernInput)
+      return res.status(400).json({ error: "shop and concern required" });
 
     const normalizedConcern = normalizeConcern(concernInput);
-    const settings = await getSettings(storeId);
+    const settings = await getSettings(shop);
     const { category, tone, domain } = settings;
 
-    const cacheKey = ["rec", storeId, normalizedConcern, plan, tone].join("|");
+    const cacheKey = ["rec", shop, normalizedConcern, plan, tone].join("|");
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } });
 
-    const allProducts = await fetchProducts(storeId);
+    const allProducts = await fetchProducts(shop);
 
-    const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
+    const mappingRef = db.doc(`mappings/${shop}/concernToProducts/${normalizedConcern}`);
     const mapping = await getDocSafe(mappingRef);
     let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
 
@@ -714,19 +688,21 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 
-// Canonicalize shop/storeId to <shop>.myshopify.com for Admin routes
+// Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
-  const raw = String(req.query.storeId || req.query.shop || "").toLowerCase().trim();
-  if (raw) {
-    const full = raw.endsWith(".myshopify.com") ? raw : `${raw}.myshopify.com`;
+  const raw = String((req.query.shop || req.query.storeId || "")).toLowerCase().trim();
+  const full = toMyshopifyDomain(raw);
+  if (full) {
     req.query.shop = full;
-    req.query.storeId = full;
+    // TEMP back-compat: mirror storeId to full; remove after clients fully migrated
+    req.query.storeId = full; // TODO: remove once unused
   }
   next();
 }
 
 // mount routers with this guard first:
 app.use("/api/admin", canonicalizeShopParam);
+app.use("/api/billing", canonicalizeShopParam); // ensure billing sees full-domain
 
 // Billing APIs used by Home + Billing page
 app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
