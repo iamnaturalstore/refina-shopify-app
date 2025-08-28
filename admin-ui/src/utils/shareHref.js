@@ -8,24 +8,18 @@ function toMyshopifyDomain(raw) {
     if (/^https?:\/\//i.test(s)) {
       const u = new URL(s);
       const h = (u.hostname || "").toLowerCase();
-      if (h.endsWith(".myshopify.com")) return h;
-      return "";
+      return h.endsWith(".myshopify.com") ? h : "";
     }
   } catch {
     /* ignore */
   }
-  // if it already ends with .myshopify.com, keep it
-  if (s.endsWith(".myshopify.com")) return s;
-  // if it contains a dot but not the right suffix, reject
-  if (s.includes(".")) return "";
-  // otherwise treat as a handle and append suffix
-  return `${s}.myshopify.com`;
+  // only accept full myshopify domains; reject bare handles and wrong suffixes
+  return s.endsWith(".myshopify.com") ? s : "";
 }
 
-export function buildShareHref({ shop, host, storeId }) {
+export function buildShareHref({ shop, host /* storeId deprecated */ }) {
   // Canonicalize inputs
-  const shopFull =
-    toMyshopifyDomain(shop) || toMyshopifyDomain(storeId) || "";
+  const shopFull = toMyshopifyDomain(shop) || "";
 
   // Best-effort host: use provided, fallback to persisted (created by client.js)
   let hostVal = host || "";
@@ -45,9 +39,6 @@ export function buildShareHref({ shop, host, storeId }) {
   const qs = url.searchParams;
   qs.set("shop", shopFull);
   qs.set("host", hostVal);
-
-  // Back-compat: include storeId but force to full domain
-  qs.set("storeId", shopFull);
 
   // Preserve current hash path (/#/analytics etc)
   const hash = window.location.hash || "#/";

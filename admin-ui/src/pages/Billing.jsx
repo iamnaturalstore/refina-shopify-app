@@ -45,6 +45,27 @@ const PLAN_DETAILS = {
   },
 };
 
+// Resolve full myshopify domain from ?shop or ?host
+function shopFromHostB64(hostB64) {
+  if (!hostB64) return "";
+  try {
+    const decoded = atob(hostB64);
+    const mAdmin = decoded.match(/^admin\.shopify\.com\/store\/([^\/?#]+)/i);
+    if (mAdmin?.[1]) return `${mAdmin[1].toLowerCase()}.myshopify.com`;
+    const mShop = decoded.match(/^([^\/?#]+)\.myshopify\.com\/admin/i);
+    if (mShop?.[1]) return `${mShop[1].toLowerCase()}.myshopify.com`;
+  } catch {}
+  return "";
+}
+function resolveShop() {
+  const usp = new URLSearchParams(window.location.search);
+  const qShop = (usp.get("shop") || "").toLowerCase();
+  if (qShop.endsWith(".myshopify.com")) return qShop;
+  const host = usp.get("host") || "";
+  const fromHost = shopFromHostB64(host);
+  return fromHost || "";
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
@@ -81,11 +102,15 @@ export default function Billing() {
     setError("");
     setLoading(true);
     try {
-      const j = await api("/api/billing/plan");
+      const shop = resolveShop();
+      if (!shop) throw new Error("Missing shop context");
+      const j = await api(`/api/billing/plan?shop=${encodeURIComponent(shop)}`);
       setPlan(parsePlanResponse(j));
     } catch {
       try {
-        const r = await fetch("/billing/plan", { credentials: "include" });
+        const shop = resolveShop();
+        if (!shop) throw new Error("Missing shop context");
+        const r = await fetch(`/billing/plan?shop=${encodeURIComponent(shop)}`, { credentials: "include" });
         if (!r.ok) throw new Error("bad status");
         const j = await r.json();
         setPlan(parsePlanResponse(j));
@@ -142,7 +167,9 @@ export default function Billing() {
   async function subscribe(which /* "pro" | "premium" */) {
     try {
       setBusy(true); setError("");
-      const j = await api("/api/billing/subscribe", { method: "POST", body: { plan: which } });
+      const shop = resolveShop();
+      if (!shop) throw new Error("Missing shop context");
+      const j = await api(`/api/billing/subscribe?shop=${encodeURIComponent(shop)}`, { method: "POST", body: { plan: which } });
       const url = j?.confirmationUrl || j?.url || j?.confirmation_url || j?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
@@ -301,4 +328,3 @@ export default function Billing() {
     </Box>
   );
 }
-

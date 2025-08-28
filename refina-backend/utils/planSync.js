@@ -3,8 +3,8 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 function toMyshopifyDomain(raw) {
   const s = String(raw || "").trim().toLowerCase();
-  if (!s) throw new Error("shopDomain/storeId required");
-  // Strip protocol + path
+  if (!s) throw new Error("shopDomain required");
+  // Accept full domain or URL with full domain; reject bare handles
   try {
     if (/^https?:\/\//i.test(s)) {
       const u = new URL(s);
@@ -14,14 +14,12 @@ function toMyshopifyDomain(raw) {
     }
   } catch { /* ignore */ }
   if (s.endsWith(".myshopify.com")) return s;
-  if (s.includes(".")) throw new Error("Invalid shop domain");
-  return `${s}.myshopify.com`;
+  throw new Error("Invalid shop domain");
 }
 
-function canonicalize({ storeId, shopDomain }) {
+function canonicalize({ shopDomain }) {
   if (shopDomain) return toMyshopifyDomain(shopDomain);
-  if (storeId) return toMyshopifyDomain(storeId);
-  throw new Error("storeId or shopDomain required");
+  throw new Error("shopDomain required");
 }
 
 /**
@@ -31,12 +29,12 @@ function canonicalize({ storeId, shopDomain }) {
  *   shopDomain: 'my-shop.myshopify.com',
  *   chargeId: 'gid://shopify/AppSubscription/12345' | null,
  *   trialEndsAt: '2025-08-23T00:00:00.000Z' | null,
- *   updatedAt: Firestore serverTimestamp()
+ *   updatedAt: FieldValue.serverTimestamp()
  * }
  */
-export async function setPlan({ storeId, shopDomain, level, chargeId = null, trialEndsAt = null }) {
+export async function setPlan({ shopDomain, level, chargeId = null, trialEndsAt = null }) {
   const db = getFirestore();
-  const shopFull = canonicalize({ storeId, shopDomain });
+  const shopFull = canonicalize({ shopDomain });
 
   const payload = {
     level,
@@ -49,30 +47,18 @@ export async function setPlan({ storeId, shopDomain, level, chargeId = null, tri
   await db.collection("plans").doc(shopFull).set(payload, { merge: true });
 }
 
-export async function getPlan({ storeId, shopDomain }) {
+export async function getPlan({ shopDomain }) {
   const db = getFirestore();
-  const shopFull = canonicalize({ storeId, shopDomain });
+  const shopFull = canonicalize({ shopDomain });
 
-  // Read the canonical doc
+  // Read the canonical doc only (no short-ID migration)
   const longSnap = await db.collection("plans").doc(shopFull).get();
   if (longSnap.exists) return longSnap.data();
-
-  // Optional rescue: if a short doc exists, migrate once
-  const short = shopFull.replace(/\.myshopify\.com$/i, "");
-  const shortSnap = await db.collection("plans").doc(short).get();
-  if (shortSnap.exists) {
-    const data = shortSnap.data();
-    await db.collection("plans").doc(shopFull).set(
-      { ...data, shopDomain: shopFull, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true }
-    );
-    return (await db.collection("plans").doc(shopFull).get()).data();
-  }
 
   return null;
 }
 
 export async function downgradeToFree(params) {
-  const shopFull = canonicalize(params);
+  const shopFull = canonicalize({ shopDomain: params.shopDomain });
   return setPlan({ shopDomain: shopFull, level: "free", chargeId: null, trialEndsAt: null });
 }

@@ -2,7 +2,7 @@
 import createApp from "@shopify/app-bridge";
 import { authenticatedFetch } from "@shopify/app-bridge-utils";
 
-// Persist host/shop/storeId once per load to survive navigation
+// Persist host/shop once per load to survive navigation
 (function persistParams() {
   try {
     const q = new URLSearchParams(window.location.search || "");
@@ -12,7 +12,6 @@ import { authenticatedFetch } from "@shopify/app-bridge-utils";
     const pairs = [
       ["host", "shopify-host"],
       ["shop", "shopify-shop"],
-      ["storeId", "storeId"],
     ];
     for (const [key, storeKey] of pairs) {
       const v = pick(key);
@@ -30,11 +29,11 @@ function getPersisted(key, storeKey) {
   return q.get(key) || h.get(key) || sessionStorage.getItem(storeKey) || "";
 }
 
-// Canonicalize to "<shop>.myshopify.com" (lowercase)
+// Canonicalize to "<shop>.myshopify.com" (must already be full)
 function toMyshopifyDomain(raw) {
   const s = String(raw || "").trim().toLowerCase();
   if (!s) return "";
-  return s.endsWith(".myshopify.com") ? s : `${s}.myshopify.com`;
+  return s.endsWith(".myshopify.com") ? s : "";
 }
 
 function getHost() {
@@ -47,32 +46,21 @@ export function getShop() {
   return toMyshopifyDomain(raw);
 }
 
-// ⬅️ Now returns a FULL domain; never a short ID
+// ⬅️ Deprecated: returns full shop only (kept for compatibility)
 export function getStoreIdFromUrl() {
-  const explicit = getPersisted("storeId", "storeId");
-  if (explicit) {
-    const v = String(explicit).trim().toLowerCase();
-    return v.includes(".myshopify.com") ? v : `${v}.myshopify.com`;
-  }
-  // Fallback to full shop domain
   return (getShop() || "").toLowerCase();
 }
 
-// ⬅️ Always OVERWRITES params and always sends FULL domains
+// ⬅️ Always preserves existing params; sends FULL domains when missing
 export function withContext(path) {
   const url = new URL(path, window.location.origin);
   const params = new URLSearchParams(url.search);
 
   const host = getHost();
   const shopFull = (getShop() || "").toLowerCase();
-  const stored = (getPersisted("storeId", "storeId") || "").toLowerCase();
-  const storeIdFull = stored
-    ? (stored.includes(".myshopify.com") ? stored : `${stored}.myshopify.com`)
-    : shopFull;
 
-  if (host) params.set("host", host);
-  if (shopFull) params.set("shop", shopFull);
-  if (storeIdFull) params.set("storeId", storeIdFull);
+  if (host && !params.has("host")) params.set("host", host);
+  if (shopFull && !params.has("shop")) params.set("shop", shopFull);
 
   url.search = params.toString();
   return url.toString();
@@ -97,7 +85,7 @@ function getAppBridge() {
 
 /**
  * Authenticated fetch with:
- * - Canonical shop & storeId in query (no short IDs leaking into APIs)
+ * - Canonical shop in query (no short IDs leaking into APIs)
  * - Cache control: no-store (Admin pages should always reflect latest)
  * - Shopify reauth handling (401/403 with reauth headers)
  */
@@ -149,7 +137,7 @@ export async function api(path, init = {}) {
 
 /* ─────────────────────────────
  * Convenience wrappers expected by pages
- * (keep URLs minimal; api() adds host/shop/storeId automatically)
+ * (keep URLs minimal; api() adds host/shop automatically)
  * ───────────────────────────── */
 
 export const adminApi = {

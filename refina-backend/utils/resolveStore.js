@@ -13,15 +13,8 @@ function toMyshopifyDomain(raw) {
       return h.endsWith(".myshopify.com") ? h : "";
     }
   } catch { /* ignore */ }
-
   const cleaned = sanitize(s);
-  if (cleaned.endsWith(".myshopify.com")) return cleaned;
-
-  // If it contains a dot but not the right suffix, reject
-  if (cleaned.includes(".")) return "";
-
-  // Bare handle -> append suffix
-  return `${cleaned}.myshopify.com`;
+  return cleaned.endsWith(".myshopify.com") ? cleaned : "";
 }
 
 export function shopFromHostB64(hostB64) {
@@ -53,22 +46,16 @@ export function shopFromIdToken(idToken) {
 }
 
 export function resolveStoreDomain(q = {}) {
-  // 1) prefer ?shop, 2) legacy ?storeId
+  // 1) require ?shop (full myshopify domain)
   const rawShop = q.shop || "";
-  const rawStoreId = q.storeId || "";
-
-  let dom = toMyshopifyDomain(rawShop);
-  if (!dom && rawStoreId) {
-    dom = toMyshopifyDomain(rawStoreId);
-    // (optional) console.warn once here to find legacy callers
-  }
+  const dom = toMyshopifyDomain(rawShop);
   if (dom) return dom;
 
-  // 3) host (base64)
+  // 2) host (base64)
   const fromHost = shopFromHostB64(q.host);
   if (fromHost) return fromHost;
 
-  // 4) id_token / idToken (JWT with .dest)
+  // 3) id_token / idToken (JWT with .dest)
   const fromJwt = shopFromIdToken(q.id_token || q.idToken);
   if (fromJwt) return fromJwt;
 
