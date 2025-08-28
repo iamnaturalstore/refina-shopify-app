@@ -81,3 +81,7 @@ refina-migrate/
 # Local Netlify folder
 .netlify
 /frontend/dist-concierge/
+
+# Keep built Admin UI in repo for Render
+!refina-backend/admin-ui-dist/
+!refina-backend/admin-ui-dist/**
