@@ -18,7 +18,9 @@ function requireFullShop(req, res) {
   const headerShop = (req.get("X-Shopify-Shop-Domain") || "").trim().toLowerCase();
   const candidate = String(
     (res.locals && res.locals.shop) || headerShop || (req.query && req.query.shop) || ""
-  ).trim().toLowerCase();
+  )
+    .trim()
+    .toLowerCase();
 
   const isFull = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(candidate);
   if (!isFull) {
@@ -29,7 +31,6 @@ function requireFullShop(req, res) {
   }
   return candidate;
 }
-
 
 function parseYYYYMMDD(s) {
   if (!s) return null;
@@ -97,6 +98,26 @@ function groupByDayUTC(items, getDate) {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
+/** -------- Indexless fallbacks & coercion helpers (safe in all schemas) -------- */
+
+/**
+ * Always-indexed fallback: read recent docs by document ID, then filter/sort in memory.
+ */
+async function fetchRecentDocs(logsCol, cap = 500) {
+  const snap = await logsCol.orderBy("__name__", "desc").limit(cap).get();
+  return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
+}
+
+function coerceDateMaybe(v) {
+  try {
+    if (v && typeof v.toDate === "function") return v.toDate(); // Firestore Timestamp
+    if (v instanceof Date) return v;
+    if (typeof v === "number") return new Date(v);
+    if (typeof v === "string") return new Date(v);
+  } catch (_) {}
+  return null;
+}
+
 export default function mountAnalytics(app) {
   const r = Router();
 
@@ -113,42 +134,31 @@ export default function mountAnalytics(app) {
     const limit = Math.min(Number(req.query.limit) || 50, 1000);
 
     const to = toQ || new Date(); // default now (UTC)
-    const from =
-      fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // default last 30d
+    const from = fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // default last 30d
 
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
     try {
-      // Peek at one document to pick a ts field name without assumptions.
-      const peekSnap = await logsCol.orderBy("ts", "desc").limit(1).get().catch(() => null);
-      const peekDoc = peekSnap && !peekSnap.empty ? peekSnap.docs[0].data() : null;
-      const tsField = chooseTsField(peekDoc);
+      // Fallback-first path: avoid index/type pitfalls by using __name__ and in-memory filter/sort
+      const fallbackCap = Math.max(limit * 4, 200);
+      const recent = await fetchRecentDocs(logsCol, fallbackCap);
 
-      // Build the query using the chosen timestamp field.
-      let q = logsCol.where(tsField, ">=", startOfDayUTC(from)).where(tsField, "<=", endOfDayUTC(to)).orderBy(tsField, "desc").limit(limit);
-
-      // If the field doesn't exist or index is missing, fall back to simple orderBy without range
-      let snap;
-      try {
-        snap = await q.get();
-      } catch (err) {
-        // Fallback: drop range filters, still order by tsField if possible
-        try {
-          snap = await logsCol.orderBy(tsField, "desc").limit(limit).get();
-        } catch {
-          // Final fallback: no orderBy
-          snap = await logsCol.limit(limit).get();
-        }
-      }
-
-      const rows = [];
-      snap.forEach((d) => {
-        const data = d.data() || {};
-        const ts =
-          data.ts || data.createdAt || data.timestamp || null;
-
-        rows.push({
-          id: d.id,
+      const rows = recent
+        .map(({ id, data }) => {
+          const tsRaw = data.ts ?? data.createdAt ?? data.timestamp ?? null;
+          const dateObj = coerceDateMaybe(tsRaw);
+          return { id, data, dateObj };
+        })
+        .filter(
+          (x) =>
+            x.dateObj &&
+            x.dateObj >= startOfDayUTC(from) &&
+            x.dateObj <= endOfDayUTC(to)
+        )
+        .sort((a, b) => b.dateObj - a.dateObj)
+        .slice(0, limit)
+        .map(({ id, data }) => ({
+          id,
           concern: data.concern ?? null,
           // Keep common analytics fields if present; do not invent or rename.
           productIds: Array.isArray(data.productIds) ? data.productIds : null,
@@ -156,14 +166,13 @@ export default function mountAnalytics(app) {
           plan: data.plan ?? null,
           model: data.model ?? null,
           explanation: data.explanation ?? null,
-          // Normalized timestamp
-          ts: toISO(ts),
+          // Normalized timestamp (no persistence of createdAt/storeId here)
+          ts: toISO(data.ts ?? data.createdAt ?? data.timestamp ?? null),
           // Any extra safe fields you may have stored:
           meta: data.meta ?? null,
-        });
-      });
+        }));
 
-      res.json({
+      return res.json({
         range: {
           from: startOfDayUTC(from).toISOString(),
           to: endOfDayUTC(to).toISOString(),
@@ -172,8 +181,8 @@ export default function mountAnalytics(app) {
         rows,
       });
     } catch (err) {
-      console.error("analytics/logs error:", err);
-      res.status(500).json({ error: "Failed to load analytics logs." });
+      console.error("analytics/logs error:", err && (err.stack || err.message || err));
+      return res.status(500).json({ error: "Failed to load analytics logs." });
     }
   });
 
@@ -191,48 +200,32 @@ export default function mountAnalytics(app) {
     const limit = Math.min(Number(req.query.limit) || 1000, 5000); // cap to avoid huge scans
 
     const to = toQ || new Date();
-    const from =
-      fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30d default
+    const from = fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30d default
 
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
     try {
-      // Peek to choose ts field
-      const peekSnap = await logsCol.orderBy("ts", "desc").limit(1).get().catch(() => null);
-      const peekDoc = peekSnap && !peekSnap.empty ? peekSnap.docs[0].data() : null;
-      const tsField = chooseTsField(peekDoc);
+      // Indexless fallback: pull recent docs by __name__, then filter/sort
+      const fallbackCap = Math.max(limit * 4, 500);
+      const recent = await fetchRecentDocs(logsCol, fallbackCap);
 
-      // Try ranged query, then fallbacks like above
-      let q = logsCol
-        .where(tsField, ">=", startOfDayUTC(from))
-        .where(tsField, "<=", endOfDayUTC(to))
-        .orderBy(tsField, "desc")
-        .limit(limit);
-
-      let snap;
-      try {
-        snap = await q.get();
-      } catch (err) {
-        try {
-          snap = await logsCol.orderBy(tsField, "desc").limit(limit).get();
-        } catch {
-          snap = await logsCol.limit(limit).get();
-        }
-      }
-
-      const entries = [];
-      snap.forEach((d) => {
-        const data = d.data() || {};
-        const ts = data.ts || data.createdAt || data.timestamp || null;
-        entries.push({
-          ts,
-          plan: data.plan ?? null,
-          model: data.model ?? null,
-          // if you store a sessionId, include it to enable distinct counts client-side
-          sessionId: data.sessionId ?? null,
-          hadAi: !!(data.explanation || data.model || data.productIds),
-        });
-      });
+      const entries = recent
+        .map(({ data }) => {
+          const tsRaw = data.ts ?? data.createdAt ?? data.timestamp ?? null;
+          return {
+            ts: coerceDateMaybe(tsRaw),
+            plan: data.plan ?? null,
+            model: data.model ?? null,
+            // if you store a sessionId, include it to enable distinct counts client-side
+            sessionId: data.sessionId ?? null,
+            hadAi: !!(data.explanation || data.model || data.productIds),
+          };
+        })
+        .filter(
+          (e) => e.ts && e.ts >= startOfDayUTC(from) && e.ts <= endOfDayUTC(to)
+        )
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, limit);
 
       const series = groupByDayUTC(entries, (e) => e.ts);
       const totals = {
@@ -243,7 +236,7 @@ export default function mountAnalytics(app) {
           new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
       };
 
-      res.json({
+      return res.json({
         range: {
           from: startOfDayUTC(from).toISOString(),
           to: endOfDayUTC(to).toISOString(),
@@ -252,8 +245,8 @@ export default function mountAnalytics(app) {
         rows: series, // [{ date:'YYYY-MM-DD', count:Number }, ...]
       });
     } catch (err) {
-      console.error("analytics/overview error:", err);
-      res.status(500).json({ error: "Failed to load analytics overview." });
+      console.error("analytics/overview error:", err && (err.stack || err.message || err));
+      return res.status(500).json({ error: "Failed to load analytics overview." });
     }
   });
 
