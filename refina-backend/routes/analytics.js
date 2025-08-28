@@ -14,19 +14,22 @@ import { db } from "../bff/lib/firestore.js";
  * Accept only full *.myshopify.com domains; reject short IDs or missing values.
  */
 function requireFullShop(req, res) {
-  const candidate =
-    String((res.locals?.shop || req.query?.shop || "")).trim().toLowerCase();
+  // Prefer verified session, then Shopify header, then explicit query
+  const headerShop = (req.get("X-Shopify-Shop-Domain") || "").trim().toLowerCase();
+  const candidate = String(
+    (res.locals && res.locals.shop) || headerShop || (req.query && req.query.shop) || ""
+  ).trim().toLowerCase();
 
-  // Require full myshopify.com domain (e.g., refina-demo.myshopify.com)
   const isFull = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(candidate);
   if (!isFull) {
-    res
-      .status(400)
-      .json({ error: "Missing or invalid 'shop'. Provide full myshopify.com domain." });
+    res.status(400).json({
+      error: "Missing or invalid 'shop'. Provide full *.myshopify.com domain.",
+    });
     return null;
   }
   return candidate;
 }
+
 
 function parseYYYYMMDD(s) {
   if (!s) return null;
