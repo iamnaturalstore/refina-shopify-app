@@ -4,7 +4,9 @@
 // - Reads from: conversations/{shop}/logs
 // - Endpoints:
 //   GET /admin/analytics/logs?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50
+//   GET /admin/analytics/logs?days=30&limit=50
 //   GET /admin/analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=1000
+//   GET /admin/analytics/overview?days=30&limit=1000
 
 import { Router } from "express";
 import { db } from "../bff/lib/firestore.js";
@@ -41,6 +43,12 @@ function parseYYYYMMDD(s) {
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
+function parseDaysParam(s, fallbackDays = 30, min = 1, max = 365) {
+  const n = Number(s);
+  if (!Number.isFinite(n)) return fallbackDays;
+  return Math.min(Math.max(Math.floor(n), min), max);
+}
+
 function startOfDayUTC(d) {
   const dt = new Date(d);
   dt.setUTCHours(0, 0, 0, 0);
@@ -54,28 +62,12 @@ function endOfDayUTC(d) {
 }
 
 /**
- * Choose the timestamp field used in logs.
- * We prefer 'ts', then 'createdAt', then 'timestamp'.
- * This does NOT write anything.
- */
-function chooseTsField(docData) {
-  if (!docData) return "ts";
-  if (docData.ts) return "ts";
-  if (docData.createdAt) return "createdAt";
-  if (docData.timestamp) return "timestamp";
-  return "ts";
-}
-
-/**
- * Normalize a Firestore Timestamp, Date, or string into ISO string (UTC).
+ * Normalize a Firestore Timestamp, Date, or primitive into ISO string (UTC).
  */
 function toISO(x) {
   try {
-    // Firestore admin Timestamp: has toDate()
-    if (x && typeof x.toDate === "function") return x.toDate().toISOString();
-    // Date
+    if (x && typeof x.toDate === "function") return x.toDate().toISOString(); // Firestore Timestamp
     if (x instanceof Date) return x.toISOString();
-    // string or number
     const d = new Date(x);
     if (!Number.isNaN(d.getTime())) return d.toISOString();
   } catch (_) {}
@@ -83,7 +75,7 @@ function toISO(x) {
 }
 
 /**
- * Group an array of items by yyyy-mm-dd key (UTC day).
+ * Group items by yyyy-mm-dd (UTC).
  */
 function groupByDayUTC(items, getDate) {
   const out = new Map();
@@ -98,7 +90,7 @@ function groupByDayUTC(items, getDate) {
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-/** -------- Indexless fallbacks & coercion helpers (safe in all schemas) -------- */
+/** -------- Indexless fallbacks & coercion helpers (safe for all schemas) -------- */
 
 /**
  * Always-indexed fallback: read recent docs by document ID, then filter/sort in memory.
@@ -124,22 +116,25 @@ export default function mountAnalytics(app) {
   /**
    * GET /admin/analytics/logs
    * Returns recent conversation logs for the shop (no storeId in payload).
+   * Accepts either from/to or days=30.
    */
   r.get("/admin/analytics/logs", async (req, res) => {
     const shop = requireFullShop(req, res);
     if (!shop) return;
 
+    // Range handling: from/to overrides days
     const fromQ = parseYYYYMMDD(req.query.from);
     const toQ = parseYYYYMMDD(req.query.to);
-    const limit = Math.min(Number(req.query.limit) || 50, 1000);
+    const days = parseDaysParam(req.query.days, 30);
 
     const to = toQ || new Date(); // default now (UTC)
-    const from = fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // default last 30d
+    const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+    const limit = Math.min(Number(req.query.limit) || 50, 1000);
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
     try {
-      // Fallback-first path: avoid index/type pitfalls by using __name__ and in-memory filter/sort
+      // Fallback-first: avoid index/type pitfalls using __name__ and in-memory filter/sort
       const fallbackCap = Math.max(limit * 4, 200);
       const recent = await fetchRecentDocs(logsCol, fallbackCap);
 
@@ -160,15 +155,12 @@ export default function mountAnalytics(app) {
         .map(({ id, data }) => ({
           id,
           concern: data.concern ?? null,
-          // Keep common analytics fields if present; do not invent or rename.
           productIds: Array.isArray(data.productIds) ? data.productIds : null,
           matchedProducts: Array.isArray(data.matchedProducts) ? data.matchedProducts : null,
           plan: data.plan ?? null,
           model: data.model ?? null,
           explanation: data.explanation ?? null,
-          // Normalized timestamp (no persistence of createdAt/storeId here)
           ts: toISO(data.ts ?? data.createdAt ?? data.timestamp ?? null),
-          // Any extra safe fields you may have stored:
           meta: data.meta ?? null,
         }));
 
@@ -181,7 +173,11 @@ export default function mountAnalytics(app) {
         rows,
       });
     } catch (err) {
-      console.error("analytics/logs error:", err && (err.stack || err.message || err));
+      console.error("analytics/logs error:", {
+        shop,
+        path: req.originalUrl,
+        err: err && (err.stack || err.message || err),
+      });
       return res.status(500).json({ error: "Failed to load analytics logs." });
     }
   });
@@ -189,19 +185,22 @@ export default function mountAnalytics(app) {
   /**
    * GET /admin/analytics/overview
    * Returns lightweight totals + per-day counts for the time window.
+   * Accepts either from/to or days=30.
    * No storeId in payload.
    */
   r.get("/admin/analytics/overview", async (req, res) => {
     const shop = requireFullShop(req, res);
     if (!shop) return;
 
+    // Range handling: from/to overrides days
     const fromQ = parseYYYYMMDD(req.query.from);
     const toQ = parseYYYYMMDD(req.query.to);
-    const limit = Math.min(Number(req.query.limit) || 1000, 5000); // cap to avoid huge scans
+    const days = parseDaysParam(req.query.days, 30);
 
     const to = toQ || new Date();
-    const from = fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30d default
+    const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+    const limit = Math.min(Number(req.query.limit) || 1000, 5000); // cap to avoid huge scans
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
     try {
@@ -216,7 +215,6 @@ export default function mountAnalytics(app) {
             ts: coerceDateMaybe(tsRaw),
             plan: data.plan ?? null,
             model: data.model ?? null,
-            // if you store a sessionId, include it to enable distinct counts client-side
             sessionId: data.sessionId ?? null,
             hadAi: !!(data.explanation || data.model || data.productIds),
           };
@@ -231,7 +229,6 @@ export default function mountAnalytics(app) {
       const totals = {
         events: entries.length,
         aiEvents: entries.filter((e) => e.hadAi).length,
-        // If you store sessionId, estimate sessions (distinct) for the window:
         sessions:
           new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
       };
@@ -245,7 +242,11 @@ export default function mountAnalytics(app) {
         rows: series, // [{ date:'YYYY-MM-DD', count:Number }, ...]
       });
     } catch (err) {
-      console.error("analytics/overview error:", err && (err.stack || err.message || err));
+      console.error("analytics/overview error:", {
+        shop,
+        path: req.originalUrl,
+        err: err && (err.stack || err.message || err),
+      });
       return res.status(500).json({ error: "Failed to load analytics overview." });
     }
   });
