@@ -11,8 +11,7 @@ const sanitize = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-
 function toMyshopifyDomain(raw) {
   const s = sanitize(raw);
   if (!s) return "";
-  if (s.endsWith(".myshopify.com")) return s;
-  return `${s}.myshopify.com`;
+  return s.endsWith(".myshopify.com") ? s : `${s}.myshopify.com`;
 }
 
 /** host (base64) → "<shop>.myshopify.com" */
@@ -46,68 +45,68 @@ function shopFromIdToken(idToken) {
 }
 
 /** Resolve incoming store identifier from query/body and canonicalize */
-function resolveShop(source) {
-  const q = source || {};
+function resolveShop(source = {}) {
   // 1) explicit storeId | shop
-  const raw = q.storeId || q.shop;
+  const raw = source.storeId || source.shop;
   if (raw) {
     const dom = toMyshopifyDomain(raw);
     if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(dom)) return dom;
   }
   // 2) host (base64)
-  const fromHost = shopFromHostB64(q.host);
+  const fromHost = shopFromHostB64(source.host);
   if (fromHost) return fromHost;
   // 3) id_token (Shopify JWT)
-  const fromJwt = shopFromIdToken(q.id_token || q.idToken);
+  const fromJwt = shopFromIdToken(source.id_token || source.idToken);
   if (fromJwt) return fromJwt;
   return "";
-}
-
-function assertShop(q) {
-  const shop = resolveShop(q);
-  if (!shop) {
-    const e = new Error("storeId is required");
-    e.status = 400;
-    throw e;
-  }
-  return shop;
 }
 
 /* ───────── Router ───────── */
 
 const router = Router();
 
-/** GET /api/admin/store-settings?storeId|shop|host|id_token */
-router.get("/store-settings", async (req, res, next) => {
+/** GET /api/admin/store-settings?storeId|shop|host|id_token
+ *  Returns { storeId, settings }. Never 500s on read.
+ */
+router.get("/store-settings", async (req, res) => {
+  const shop = resolveShop(req.query);
+  if (!shop) return res.status(400).json({ error: "shop required" });
+
   try {
-    const shop = assertShop(req.query);
-    const doc = await dbAdmin.collection("storeSettings").doc(shop).get();
-    // We keep plan inside settings for backward compatibility with your UI
-    const settings = doc.exists ? doc.data() : { plan: "free" };
-    res.json({ storeId: shop, settings });
-  } catch (err) {
-    next(err);
+    const ref = dbAdmin.collection("storeSettings").doc(shop);
+    const snap = await ref.get();
+    // Keep minimal back-compat: default plan "free" if nothing there
+    const settings = snap.exists ? (snap.data() || {}) : { plan: "free" };
+    return res.json({ storeId: shop, settings });
+  } catch (e) {
+    console.error("GET /api/admin/store-settings error:", e?.message || e);
+    // don’t 500 on read; UI can work with empty settings
+    return res.json({ storeId: shop, settings: {} });
   }
 });
 
 /** PUT /api/admin/store-settings
- * body: { storeId|shop|host|id_token, settings: { ... } }
+ *  Body: { storeId|shop|host|id_token, settings: { ... } }
  */
-router.put("/store-settings", async (req, res, next) => {
+router.put("/store-settings", async (req, res) => {
   try {
-    const shop = assertShop({ ...req.query, ...req.body });
+    const shop = resolveShop({ ...(req.query || {}), ...(req.body || {}) });
+    if (!shop) return res.status(400).json({ error: "shop required" });
+
     const settings = req.body?.settings || {};
-    await dbAdmin.collection("storeSettings").doc(shop).set(
-      { ...settings, updatedAt: FieldValue.serverTimestamp() },
-      { merge: true },
-    );
-    const fresh = await dbAdmin.collection("storeSettings").doc(shop).get();
-    res.json({ ok: true, storeId: shop, settings: fresh.exists ? fresh.data() : settings });
-  } catch (err) {
-    next(err);
+    const ref = dbAdmin.collection("storeSettings").doc(shop);
+    await ref.set({ ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
+    const fresh = await ref.get();
+    return res.json({
+      ok: true,
+      storeId: shop,
+      settings: fresh.exists ? fresh.data() : settings,
+    });
+  } catch (e) {
+    console.error("PUT /api/admin/store-settings error:", e?.message || e);
+    return res.status(500).json({ error: "update_failed" });
   }
 });
 
-export default function mountAdminSettingsRoutes(app) {
-  app.use("/api/admin", router);
-}
+export default router;
