@@ -1,275 +1,258 @@
 // refina-backend/routes/analytics.js
+// Admin Analytics routes (full-domain shop keys only)
+// - No short IDs. No alias writes. No `storeId` in responses.
+// - Reads from: conversations/{shop}/logs
+// - Endpoints:
+//   GET /admin/analytics/logs?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50
+//   GET /admin/analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=1000
+
 import { Router } from "express";
-import { dbAdmin } from "../firebaseAdmin.js"; // shared Firebase Admin (single init)
-
-/** ──────────────────────────────────────────────────────────────────────────
- * Helpers (validation, canonicalization, stable JSON for ETag)
- * ────────────────────────────────────────────────────────────────────────── */
-
-function assertString(v, name) {
-  if (typeof v !== "string" || !v.trim()) {
-    const e = new Error(`${name} is required`);
-    e.status = 400;
-    throw e;
-  }
-}
-
-const sanitize = (s) =>
-  String(s || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\-_.]/g, "");
-
-/** Canonicalize to "<shop>.myshopify.com" */
-function toMyshopifyDomain(raw) {
-  const s = sanitize(raw);
-  if (!s) return "";
-  if (s.endsWith(".myshopify.com")) return s;
-  return `${s}.myshopify.com`;
-}
-
-/** Resolve incoming store identifier from query and canonicalize */
-function resolveStoreDomain(q) {
-  const raw = q.storeId || q.shop || "";
-  const dom = toMyshopifyDomain(raw);
-  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(dom)) return "";
-  return dom;
-}
-
-/** Normalize a per-row timestamp from createdAt | timestamp (Firestore TS or ISO string) */
-function normalizeTimestamp(data) {
-  const t = data?.createdAt ?? data?.timestamp;
-  if (!t) return null;
-  if (typeof t?.toDate === "function") return t.toDate(); // Firestore Timestamp
-  const d = new Date(t);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** Stable JSON (sorted keys) for deterministic ETag */
-function stableJson(obj) {
-  const seen = new WeakSet();
-  const walk = (v) => {
-    if (v && typeof v === "object") {
-      if (seen.has(v)) return v;
-      seen.add(v);
-      if (Array.isArray(v)) return v.map(walk);
-      const out = {};
-      for (const k of Object.keys(v).sort()) out[k] = walk(v[k]);
-      return out;
-    }
-    return v;
-  };
-  return JSON.stringify(walk(obj));
-}
-function makeEtag(obj) {
-  const s = stableJson(obj);
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return `"anx-${(h >>> 0).toString(16)}"`; // short, deterministic
-}
-
-/** ──────────────────────────────────────────────────────────────────────────
- * Router
- * ────────────────────────────────────────────────────────────────────────── */
-
-const router = Router();
+import { db } from "../bff/lib/firestore.js";
 
 /**
- * GET /api/admin/analytics/overview?storeId=xxx|shop=xxx&days=30
- * - Order-only fetch (createdAt → timestamp fallback), filter in memory.
- * - Avoids Firestore where(Date) vs string mismatches.
- * - Adds ETag + short-lived private caching for Admin UX.
+ * Extract and validate full shop domain.
+ * Accept only full *.myshopify.com domains; reject short IDs or missing values.
  */
-router.get("/analytics/overview", async (req, res, next) => {
+function requireFullShop(req, res) {
+  const candidate =
+    String((res.locals?.shop || req.query?.shop || "")).trim().toLowerCase();
+
+  // Require full myshopify.com domain (e.g., refina-demo.myshopify.com)
+  const isFull = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(candidate);
+  if (!isFull) {
+    res
+      .status(400)
+      .json({ error: "Missing or invalid 'shop'. Provide full myshopify.com domain." });
+    return null;
+  }
+  return candidate;
+}
+
+function parseYYYYMMDD(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [_, y, mo, d] = m;
+  const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), 0, 0, 0));
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function startOfDayUTC(d) {
+  const dt = new Date(d);
+  dt.setUTCHours(0, 0, 0, 0);
+  return dt;
+}
+
+function endOfDayUTC(d) {
+  const dt = new Date(d);
+  dt.setUTCHours(23, 59, 59, 999);
+  return dt;
+}
+
+/**
+ * Choose the timestamp field used in logs.
+ * We prefer 'ts', then 'createdAt', then 'timestamp'.
+ * This does NOT write anything.
+ */
+function chooseTsField(docData) {
+  if (!docData) return "ts";
+  if (docData.ts) return "ts";
+  if (docData.createdAt) return "createdAt";
+  if (docData.timestamp) return "timestamp";
+  return "ts";
+}
+
+/**
+ * Normalize a Firestore Timestamp, Date, or string into ISO string (UTC).
+ */
+function toISO(x) {
   try {
-    const storeDomain = resolveStoreDomain(req.query);
-    assertString(storeDomain, "storeId or shop");
+    // Firestore admin Timestamp: has toDate()
+    if (x && typeof x.toDate === "function") return x.toDate().toISOString();
+    // Date
+    if (x instanceof Date) return x.toISOString();
+    // string or number
+    const d = new Date(x);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  } catch (_) {}
+  return null;
+}
 
-    const daysRaw = parseInt(req.query.days, 10);
-    const daysNum = Math.max(1, Math.min(90, Number.isFinite(daysRaw) ? daysRaw : 30));
-    const since = new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
-    const LIMIT = 2000;
+/**
+ * Group an array of items by yyyy-mm-dd key (UTC day).
+ */
+function groupByDayUTC(items, getDate) {
+  const out = new Map();
+  for (const it of items) {
+    const iso = toISO(getDate(it));
+    if (!iso) continue;
+    const day = iso.slice(0, 10); // yyyy-mm-dd
+    out.set(day, (out.get(day) || 0) + 1);
+  }
+  return Array.from(out.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
 
-    const coll = dbAdmin.collection("conversations").doc(storeDomain).collection("logs");
+export default function mountAnalytics(app) {
+  const r = Router();
 
-    // Try createdAt first
-    let snap = await coll.orderBy("createdAt", "desc").limit(LIMIT).get();
-    let docs = snap.docs.filter((d) => {
-      const dt = normalizeTimestamp(d.data());
-      return dt && dt >= since;
-    });
+  /**
+   * GET /admin/analytics/logs
+   * Returns recent conversation logs for the shop (no storeId in payload).
+   */
+  r.get("/admin/analytics/logs", async (req, res) => {
+    const shop = requireFullShop(req, res);
+    if (!shop) return;
 
-    // Fallback to timestamp if createdAt not present
-    if (docs.length === 0) {
-      snap = await coll.orderBy("timestamp", "desc").limit(LIMIT).get();
-      docs = snap.docs.filter((d) => {
-        const dt = normalizeTimestamp(d.data());
-        return dt && dt >= since;
-      });
-    }
+    const fromQ = parseYYYYMMDD(req.query.from);
+    const toQ = parseYYYYMMDD(req.query.to);
+    const limit = Math.min(Number(req.query.limit) || 50, 1000);
 
-    const total = docs.length;
-    const concernCounts = new Map();
-    const productCounts = new Map();
-    const planCounts = { free: 0, pro: 0, premium: 0, unknown: 0 };
+    const to = toQ || new Date(); // default now (UTC)
+    const from =
+      fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // default last 30d
 
-    for (const d of docs) {
-      const data = d.data() || {};
-      const concern = (data.concern || data.input || data.query || "").toString().trim();
-      if (concern) concernCounts.set(concern, (concernCounts.get(concern) || 0) + 1);
+    const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
-      // Normalize legacy plan names: map "pro+" / "pro plus" → "premium"
-      const _rawPlan = (data.plan || data.tier || "").toString().toLowerCase().trim();
-      const _normPlan =
-        /\bpremium\b/.test(_rawPlan) || /\bpro\s*\+|\bpro\W*plus\b/.test(_rawPlan)
-          ? "premium"
-          : /\bpro\b/.test(_rawPlan)
-          ? "pro"
-          : _rawPlan || "unknown";
-      if (planCounts[_normPlan] !== undefined) planCounts[_normPlan] += 1;
-      else planCounts.unknown += 1;
+    try {
+      // Peek at one document to pick a ts field name without assumptions.
+      const peekSnap = await logsCol.orderBy("ts", "desc").limit(1).get().catch(() => null);
+      const peekDoc = peekSnap && !peekSnap.empty ? peekSnap.docs[0].data() : null;
+      const tsField = chooseTsField(peekDoc);
 
-      const productIds = Array.isArray(data.productIds)
-        ? data.productIds
-        : Array.isArray(data.products)
-        ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
-        : [];
+      // Build the query using the chosen timestamp field.
+      let q = logsCol.where(tsField, ">=", startOfDayUTC(from)).where(tsField, "<=", endOfDayUTC(to)).orderBy(tsField, "desc").limit(limit);
 
-      for (const pid of productIds) {
-        const key = String(pid);
-        productCounts.set(key, (productCounts.get(key) || 0) + 1);
+      // If the field doesn't exist or index is missing, fall back to simple orderBy without range
+      let snap;
+      try {
+        snap = await q.get();
+      } catch (err) {
+        // Fallback: drop range filters, still order by tsField if possible
+        try {
+          snap = await logsCol.orderBy(tsField, "desc").limit(limit).get();
+        } catch {
+          // Final fallback: no orderBy
+          snap = await logsCol.limit(limit).get();
+        }
       }
-    }
 
-    const topConcerns = [...concernCounts.entries()]
-      .map(([label, count]) => ({
-        label,
-        count,
-        share: total ? Math.round((count / total) * 100) : 0
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      const rows = [];
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        const ts =
+          data.ts || data.createdAt || data.timestamp || null;
 
-    const topProducts = [...productCounts.entries()]
-      .map(([productId, count]) => ({ productId, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-
-    const payload = {
-      storeId: storeDomain,
-      rangeDays: daysNum,
-      totalEvents: total,
-      uniqueConcerns: concernCounts.size,
-      uniqueProductsSuggested: productCounts.size,
-      planCounts,
-      topConcerns,
-      topProducts,
-      generatedAt: new Date().toISOString()
-    };
-
-    // Caching: short-lived, private; ETag for cheap revalidate
-    const etag = makeEtag(payload);
-    res.set("ETag", etag);
-    res.set("Cache-Control", "private, max-age=60, stale-while-revalidate=30");
-    res.set("X-Refina-Store", storeDomain);
-
-    if (req.headers["if-none-match"] === etag) {
-      return res.status(304).end();
-    }
-
-    res.type("application/json").status(200).send(stableJson(payload));
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * GET /api/admin/analytics/logs?storeId=xxx|shop=xxx&limit=50&after=ISO
- * - Order-only fetch + optional in-memory `after` filter.
- * - Response shape preserved.
- * - No-store cache (may include sensitive text snippets).
- */
-router.get("/analytics/logs", async (req, res, next) => {
-  try {
-    const storeDomain = resolveStoreDomain(req.query);
-    assertString(storeDomain, "storeId or shop");
-
-    const LIMIT = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
-    const after = req.query.after ? new Date(req.query.after) : null;
-
-    const coll = dbAdmin.collection("conversations").doc(storeDomain).collection("logs");
-
-    // Try createdAt first
-    let snap = await coll.orderBy("createdAt", "desc").limit(LIMIT).get();
-    let docs = snap.docs;
-
-    // If nothing under createdAt, fall back to timestamp
-    if (docs.length === 0) {
-      snap = await coll.orderBy("timestamp", "desc").limit(LIMIT).get();
-      docs = snap.docs;
-    }
-
-    // Optional after filter (client-side to avoid type mismatches)
-    if (after instanceof Date && !Number.isNaN(after.getTime())) {
-      docs = docs.filter((d) => {
-        const dt = normalizeTimestamp(d.data());
-        return dt && dt < after;
+        rows.push({
+          id: d.id,
+          concern: data.concern ?? null,
+          // Keep common analytics fields if present; do not invent or rename.
+          productIds: Array.isArray(data.productIds) ? data.productIds : null,
+          matchedProducts: Array.isArray(data.matchedProducts) ? data.matchedProducts : null,
+          plan: data.plan ?? null,
+          model: data.model ?? null,
+          explanation: data.explanation ?? null,
+          // Normalized timestamp
+          ts: toISO(ts),
+          // Any extra safe fields you may have stored:
+          meta: data.meta ?? null,
+        });
       });
+
+      res.json({
+        range: {
+          from: startOfDayUTC(from).toISOString(),
+          to: endOfDayUTC(to).toISOString(),
+        },
+        count: rows.length,
+        rows,
+      });
+    } catch (err) {
+      console.error("analytics/logs error:", err);
+      res.status(500).json({ error: "Failed to load analytics logs." });
     }
+  });
 
-    const rows = docs.map((d) => {
-      const data = d.data() || {};
-      const ts = normalizeTimestamp(data);
+  /**
+   * GET /admin/analytics/overview
+   * Returns lightweight totals + per-day counts for the time window.
+   * No storeId in payload.
+   */
+  r.get("/admin/analytics/overview", async (req, res) => {
+    const shop = requireFullShop(req, res);
+    if (!shop) return;
 
-      const productIds = Array.isArray(data.productIds)
-        ? data.productIds
-        : Array.isArray(data.products)
-        ? data.products.map((p) => p?.id || p?.productId).filter(Boolean)
-        : [];
+    const fromQ = parseYYYYMMDD(req.query.from);
+    const toQ = parseYYYYMMDD(req.query.to);
+    const limit = Math.min(Number(req.query.limit) || 1000, 5000); // cap to avoid huge scans
 
-      // Normalize plan for output rows, too
-      const _rawPlan = (data.plan || data.tier || "").toString().toLowerCase().trim();
-      const _normPlan =
-        /\bpremium\b/.test(_rawPlan) || /\bpro\s*\+|\bpro\W*plus\b/.test(_rawPlan)
-          ? "premium"
-          : /\bpro\b/.test(_rawPlan)
-          ? "pro"
-          : _rawPlan || "unknown";
+    const to = toQ || new Date();
+    const from =
+      fromQ || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // last 30d default
 
-      return {
-        id: d.id,
-        createdAt: ts ? ts.toISOString() : null,
-        concern: (data.concern || data.input || data.query || "").toString(),
-        plan: _normPlan,
-        productIds,
-        summary: (data.explanation || data.answer || "").toString().slice(0, 160)
+    const logsCol = db.collection("conversations").doc(shop).collection("logs");
+
+    try {
+      // Peek to choose ts field
+      const peekSnap = await logsCol.orderBy("ts", "desc").limit(1).get().catch(() => null);
+      const peekDoc = peekSnap && !peekSnap.empty ? peekSnap.docs[0].data() : null;
+      const tsField = chooseTsField(peekDoc);
+
+      // Try ranged query, then fallbacks like above
+      let q = logsCol
+        .where(tsField, ">=", startOfDayUTC(from))
+        .where(tsField, "<=", endOfDayUTC(to))
+        .orderBy(tsField, "desc")
+        .limit(limit);
+
+      let snap;
+      try {
+        snap = await q.get();
+      } catch (err) {
+        try {
+          snap = await logsCol.orderBy(tsField, "desc").limit(limit).get();
+        } catch {
+          snap = await logsCol.limit(limit).get();
+        }
+      }
+
+      const entries = [];
+      snap.forEach((d) => {
+        const data = d.data() || {};
+        const ts = data.ts || data.createdAt || data.timestamp || null;
+        entries.push({
+          ts,
+          plan: data.plan ?? null,
+          model: data.model ?? null,
+          // if you store a sessionId, include it to enable distinct counts client-side
+          sessionId: data.sessionId ?? null,
+          hadAi: !!(data.explanation || data.model || data.productIds),
+        });
+      });
+
+      const series = groupByDayUTC(entries, (e) => e.ts);
+      const totals = {
+        events: entries.length,
+        aiEvents: entries.filter((e) => e.hadAi).length,
+        // If you store sessionId, estimate sessions (distinct) for the window:
+        sessions:
+          new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
       };
-    });
 
-    res.set("Cache-Control", "no-store");
-    res.set("X-Refina-Store", storeDomain);
-    res.status(200).json({ storeId: storeDomain, count: rows.length, rows });
-  } catch (err) {
-    next(err);
-  }
-});
+      res.json({
+        range: {
+          from: startOfDayUTC(from).toISOString(),
+          to: endOfDayUTC(to).toISOString(),
+        },
+        totals,
+        rows: series, // [{ date:'YYYY-MM-DD', count:Number }, ...]
+      });
+    } catch (err) {
+      console.error("analytics/overview error:", err);
+      res.status(500).json({ error: "Failed to load analytics overview." });
+    }
+  });
 
-/** Router-scoped error handler to preserve status codes and avoid leaking internals */
-router.use((err, _req, res, _next) => {
-  const status = Number(err.status) || 500;
-  const code =
-    status === 400
-      ? "bad_request"
-      : status === 401
-      ? "unauthorized"
-      : status === 404
-      ? "not_found"
-      : "internal_error";
-  if (status >= 500) {
-    // Minimal server-side log; no payload echo
-    console.error("[analytics] error:", err?.message || err);
-  }
-  res.status(status).json({ error: code, message: err?.message || "Unexpected error" });
-});
-
-export default router;
+  app.use(r);
+}
