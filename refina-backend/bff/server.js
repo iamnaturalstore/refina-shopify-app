@@ -570,6 +570,16 @@ app.use(
 const ADMIN_UI_DIR = path.join(__dirname, "../admin-ui-dist");
 app.use("/admin-ui", express.static(ADMIN_UI_DIR, { index: false }));
 
+// Serve asset folder for both prefixed and root paths (prevents MIME/type=html errors)
+app.use(
+  "/admin-ui/assets",
+  express.static(path.join(ADMIN_UI_DIR, "assets"), { immutable: true, maxAge: "1y" })
+);
+app.use(
+  "/assets",
+  express.static(path.join(ADMIN_UI_DIR, "assets"), { immutable: true, maxAge: "1y" })
+);
+
 // SPA fallback (Express v5-safe: use RegExp, not "*")
 app.get(/^\/admin-ui(?:\/.*)?$/, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
@@ -611,6 +621,7 @@ app.get("/v1/concerns", async (req, res) => {
     res.status(500).json({ error: "internal_error" });
   }
 });
+
 
 app.post("/v1/recommend", async (req, res) => {
   const t0 = Date.now();
