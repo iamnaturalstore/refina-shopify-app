@@ -3,8 +3,8 @@ import admin from "firebase-admin";
 
 function toMyshopifyDomain(raw) {
   const s = String(raw || "").trim().toLowerCase();
-  if (!s) throw new Error("Missing shop");
-  // strip protocol + path if URL is passed
+  if (!s) throw new Error("shopDomain required");
+  // Accept full domain or URL with full domain; reject bare handles
   try {
     if (/^https?:\/\//i.test(s)) {
       const u = new URL(s);
@@ -12,12 +12,9 @@ function toMyshopifyDomain(raw) {
       if (!h.endsWith(".myshopify.com")) throw new Error("Invalid shop domain");
       return h;
     }
-  } catch {
-    /* ignore */
-  }
+  } catch { /* ignore */ }
   if (s.endsWith(".myshopify.com")) return s;
-  if (s.includes(".")) throw new Error("Invalid shop domain");
-  return `${s}.myshopify.com`;
+  throw new Error("Invalid shop domain");
 }
 
 /** Write/merge billing state to plans/{<shop>.myshopify.com} */
