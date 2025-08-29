@@ -14,7 +14,7 @@ import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import analyticsIngestRouter from "../routes/analyticsIngest.js";
-import { buildGeminiPrompt } from "./lib/buildGeminiPrompt.js";
+import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";
 
 
 
