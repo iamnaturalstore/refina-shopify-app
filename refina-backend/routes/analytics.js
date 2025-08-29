@@ -3,10 +3,13 @@
 // - No short IDs. No alias writes. No `storeId` in responses.
 // - Reads from: conversations/{shop}/logs
 // - Endpoints:
-//   GET /admin/analytics/logs?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50
-//   GET /admin/analytics/logs?days=30&limit=50
-//   GET /admin/analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=1000
-//   GET /admin/analytics/overview?days=30&limit=1000
+//   GET /api/admin/analytics/logs?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=50
+//   GET /api/admin/analytics/logs?days=30&limit=50
+//   GET /api/admin/analytics/overview?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=1000
+//   GET /api/admin/analytics/overview?days=30&limit=1000
+//
+// NOTE: This module exports a middleware-compatible function,
+// so you can do: app.use(mountAnalytics) or app.use('/api', mountAnalytics).
 
 import { Router } from "express";
 import { db } from "../bff/lib/firestore.js";
@@ -110,11 +113,14 @@ function coerceDateMaybe(v) {
   return null;
 }
 
-export default function mountAnalytics(app) {
+/**
+ * Build and return the analytics Router (mounted under whatever base your server uses).
+ */
+function buildRouter() {
   const r = Router();
 
   /**
-   * GET /admin/analytics/logs
+   * GET /admin/analytics/logs (often mounted as /api/admin/analytics/logs)
    * Returns recent conversation logs for the shop (no storeId in payload).
    * Accepts either from/to or days=30.
    */
@@ -132,6 +138,19 @@ export default function mountAnalytics(app) {
 
     const limit = Math.min(Number(req.query.limit) || 50, 1000);
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
+    // inside r.get("/admin/analytics/logs", async (req, res) => {
+console.error("analytics/logs entry", {
+  path: req.originalUrl,
+  shopHeader: (req.get("X-Shopify-Shop-Domain") || "").toLowerCase(),
+  hasLocalsShop: !!(res.locals && res.locals.shop),
+});
+if (String(req.query.diag) === "1") {
+  const shop = (res.locals && res.locals.shop) ||
+               (req.get("X-Shopify-Shop-Domain") || "").trim().toLowerCase() ||
+               (req.query.shop || "");
+  return res.json({ ok: true, shop, note: "diag mode (no Firestore)" });
+}
+
 
     try {
       // Fallback-first: avoid index/type pitfalls using __name__ and in-memory filter/sort
@@ -183,7 +202,7 @@ export default function mountAnalytics(app) {
   });
 
   /**
-   * GET /admin/analytics/overview
+   * GET /admin/analytics/overview (often mounted as /api/admin/analytics/overview)
    * Returns lightweight totals + per-day counts for the time window.
    * Accepts either from/to or days=30.
    * No storeId in payload.
@@ -202,6 +221,19 @@ export default function mountAnalytics(app) {
 
     const limit = Math.min(Number(req.query.limit) || 1000, 5000); // cap to avoid huge scans
     const logsCol = db.collection("conversations").doc(shop).collection("logs");
+    // inside r.get("/admin/analytics/overview", async (req, res) => {
+console.error("analytics/overview entry", {
+  path: req.originalUrl,
+  shopHeader: (req.get("X-Shopify-Shop-Domain") || "").toLowerCase(),
+  hasLocalsShop: !!(res.locals && res.locals.shop),
+});
+if (String(req.query.diag) === "1") {
+  const shop = (res.locals && res.locals.shop) ||
+               (req.get("X-Shopify-Shop-Domain") || "").trim().toLowerCase() ||
+               (req.query.shop || "");
+  return res.json({ ok: true, shop, note: "diag mode (no Firestore)" });
+}
+
 
     try {
       // Indexless fallback: pull recent docs by __name__, then filter/sort
@@ -251,5 +283,18 @@ export default function mountAnalytics(app) {
     }
   });
 
-  app.use(r);
+  return r;
+}
+
+/**
+ * Export a middleware-compatible function that delegates to a singleton Router.
+ * This lets server code do: app.use(mountAnalytics) or app.use('/api', mountAnalytics)
+ * without needing to change server.js.
+ */
+let _routerSingleton = null;
+export default function mountAnalytics(req, res, next) {
+  if (!_routerSingleton) {
+    _routerSingleton = buildRouter();
+  }
+  return _routerSingleton(req, res, next);
 }
