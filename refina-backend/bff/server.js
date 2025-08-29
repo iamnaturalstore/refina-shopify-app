@@ -93,6 +93,7 @@ function coerceToContract(obj = {}) {
   const primary = obj.primary || {};
   const alts = Array.isArray(obj.alternatives) ? obj.alternatives : [];
   const explanation = obj.explanation || {};
+  if (!obj || typeof obj !== "object") obj = {};
 
   const safePrimary = {
     id: String(primary.id || "").trim(),
@@ -611,10 +612,15 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
 
       try {
         const modelText = await callGemini(prompt, genConfig);
-        const parsed = extractJson(modelText);
-        const enriched = coerceToContract(parsed);
+        let enriched = null;
+        if (modelText) {
+          const parsed = extractJson(modelText);
+          if (parsed && typeof parsed === "object") {
+            enriched = coerceToContract(parsed);
+          }
+        }
 
-        if (Array.isArray(enriched.productIds) && enriched.productIds.length) {
+        if (enriched && Array.isArray(enriched.productIds) && enriched.productIds.length) {
           // Prefer Gemini’s ordering, but only keep products that exist in index
           const inIndex = new Set(allProducts.map((p) => p.id));
           used = enriched.productIds.filter((id) => inIndex.has(id)).slice(0, limit);
@@ -622,7 +628,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
         }
 
         // Attach enriched for response & copy override
-        req._enriched = enriched;
+        if (enriched) req._enriched = enriched;
       } catch (err) {
         console.warn(
           "[BFF] Gemini call failed, using deterministic selection:",
