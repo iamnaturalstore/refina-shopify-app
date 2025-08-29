@@ -68,6 +68,33 @@ export default function Home() {
   const [loadingLogs, setLoadingLogs] = React.useState(true);
   const [checkingHealth, setCheckingHealth] = React.useState(true);
 
+  // NEW: refresh both overview + logs on-demand (used by event listener below)
+  async function refreshAnalytics() {
+    try {
+      setLoadingOverview(true);
+      setLoadingLogs(true);
+      const [over, j] = await Promise.all([
+        api(`/api/admin/analytics/overview?days=30`),
+        api(`/api/admin/analytics/logs?limit=5`),
+      ]);
+      setOverview(over || {});
+      const items = Array.isArray(j?.rows)
+        ? j.rows
+        : Array.isArray(j?.logs)
+        ? j.logs
+        : Array.isArray(j)
+        ? j
+        : [];
+      setLogs(items.slice(0, 5));
+    } catch (e) {
+      // keep this quiet; initial load already reports errors
+      console.warn("Home: refreshAnalytics failed:", e?.message || e);
+    } finally {
+      setLoadingOverview(false);
+      setLoadingLogs(false);
+    }
+  }
+
   // fetch: plan
   React.useEffect(() => {
     let on = true;
@@ -130,7 +157,14 @@ export default function Home() {
       try {
         setLoadingLogs(true);
         const j = await api(`/api/admin/analytics/logs?limit=5`);
-        const items = Array.isArray(j?.logs) ? j.logs : (Array.isArray(j) ? j : []);
+        // CHANGED: prefer `rows`, then `logs`, then array fallback (matches backend response)
+        const items = Array.isArray(j?.rows)
+          ? j.rows
+          : Array.isArray(j?.logs)
+          ? j.logs
+          : Array.isArray(j)
+          ? j
+          : [];
         if (on) setLogs(items.slice(0, 5));
       } catch {
         // silently ignore
@@ -140,6 +174,15 @@ export default function Home() {
     })();
     return () => { on = false; };
   }, [shop]);
+
+  // NEW: auto-refresh the dashboard after a successful ingest (from anywhere in the UI)
+  React.useEffect(() => {
+    function onIngest() {
+      refreshAnalytics();
+    }
+    window.addEventListener("rf:analytics:ingested", onIngest);
+    return () => window.removeEventListener("rf:analytics:ingested", onIngest);
+  }, []);
 
   // health
   React.useEffect(() => {
