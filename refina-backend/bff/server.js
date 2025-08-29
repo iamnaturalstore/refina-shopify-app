@@ -13,6 +13,8 @@ import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
+import analyticsIngestRouter from "../routes/analyticsIngest.js";
+
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -721,6 +723,8 @@ app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
 // Admin APIs used by Home/Settings/Analytics
 app.use("/api/admin", analyticsRouter); // /api/admin/analytics/* (overview, logs)
 app.use("/api/admin", adminSettingsRouter); // /api/admin/store-settings (GET/PUT)
+app.use("/api/admin", analyticsIngestRouter);
+app.use("/api", analyticsIngestRouter);
 
 // ─────────────────────────────────────────────────────────────
 // Listen
