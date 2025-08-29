@@ -15,7 +15,7 @@ import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import analyticsIngestRouter from "../routes/analyticsIngest.js";
 import { callGemini } from "./ai/gemini.js";
-
+import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -45,16 +45,27 @@ function shorten(text = "", max = 240) {
 }
 
 function condenseProducts(products = []) {
-  return products.slice(0, 120).map(p => ({
-    id: p.id || p.productId || p.handle || "",
-    name: p.name || p.title || "",
-    productType: p.productTypeNormalized || p.productType || "",
-    ingredients: Array.isArray(p.ingredients) ? p.ingredients : (Array.isArray(p.keyIngredients) ? p.keyIngredients : []),
-    keywords: Array.isArray(p.keywords) ? p.keywords : [],
-    tags: Array.isArray(p.tags) ? p.tags : (typeof p.tags === "string" ? p.tags.split(",").map(t => t.trim()).filter(Boolean) : []),
-    descriptionShort: shorten(p.descriptionShort || p.description || p.body_html || ""),
-    price: p.price || p.minPrice || p.compareAtPrice || undefined,
-  })).filter(x => x.id && x.name);
+  return products
+    .slice(0, 120)
+    .map((p) => ({
+      id: p.id || p.productId || p.handle || "",
+      name: p.name || p.title || "",
+      productType: p.productTypeNormalized || p.productType || "",
+      ingredients: Array.isArray(p.ingredients)
+        ? p.ingredients
+        : Array.isArray(p.keyIngredients)
+        ? p.keyIngredients
+        : [],
+      keywords: Array.isArray(p.keywords) ? p.keywords : [],
+      tags: Array.isArray(p.tags)
+        ? p.tags
+        : typeof p.tags === "string"
+        ? p.tags.split(",").map((t) => t.trim()).filter(Boolean)
+        : [],
+      descriptionShort: shorten(p.descriptionShort || p.description || p.body_html || ""),
+      price: p.price || p.minPrice || p.compareAtPrice || undefined
+    }))
+    .filter((x) => x.id && x.name);
 }
 
 // Accepts model text that may be raw JSON or wrapped in ```json fences
@@ -70,7 +81,9 @@ function extractJson(text = "") {
     const end = jsonLike.lastIndexOf("}");
     if (start >= 0 && end > start) {
       const maybe = jsonLike.slice(start, end + 1);
-      try { return JSON.parse(maybe); } catch {}
+      try {
+        return JSON.parse(maybe);
+      } catch {}
     }
     throw new Error("Model did not return valid JSON.");
   }
@@ -86,27 +99,29 @@ function coerceToContract(obj = {}) {
     score: Number.isFinite(primary.score) ? primary.score : 0,
     reasons: Array.isArray(primary.reasons) ? primary.reasons.slice(0, 6).map(String) : [],
     howToUse: Array.isArray(primary.howToUse) ? primary.howToUse.slice(0, 6).map(String) : [],
-    tagsMatched: Array.isArray(primary.tagsMatched) ? primary.tagsMatched.slice(0, 8).map(String) : [],
+    tagsMatched: Array.isArray(primary.tagsMatched) ? primary.tagsMatched.slice(0, 8).map(String) : []
   };
 
-  const safeAlts = alts.slice(0, 2).map(a => ({
-    id: String(a.id || "").trim(),
-    when: String(a.when || "").trim(),
-    reasons: Array.isArray(a.reasons) ? a.reasons.slice(0, 3).map(String) : [],
-  })).filter(a => a.id);
+  const safeAlts = alts
+    .slice(0, 2)
+    .map((a) => ({
+      id: String(a.id || "").trim(),
+      when: String(a.when || "").trim(),
+      reasons: Array.isArray(a.reasons) ? a.reasons.slice(0, 3).map(String) : []
+    }))
+    .filter((a) => a.id);
 
   const safeExpl = {
     oneLiner: String(explanation.oneLiner || "").trim(),
     friendlyParagraph: String(explanation.friendlyParagraph || "").trim(),
-    expertBullets: Array.isArray(explanation.expertBullets) ? explanation.expertBullets.slice(0, 6).map(String) : [],
-    usageTips: Array.isArray(explanation.usageTips) ? explanation.usageTips.slice(0, 6).map(String) : [],
+    expertBullets: Array.isArray(explanation.expertBullets)
+      ? explanation.expertBullets.slice(0, 6).map(String)
+      : [],
+    usageTips: Array.isArray(explanation.usageTips) ? explanation.usageTips.slice(0, 6).map(String) : []
   };
 
   // Back-compat fields expected by current UI
-  const productIds = [
-    safePrimary.id,
-    ...safeAlts.map(a => a.id),
-  ].filter(Boolean);
+  const productIds = [safePrimary.id, ...safeAlts.map((a) => a.id)].filter(Boolean);
 
   const explanationFlat = safeExpl.friendlyParagraph || safeExpl.oneLiner || "";
 
@@ -115,10 +130,9 @@ function coerceToContract(obj = {}) {
     alternatives: safeAlts,
     explanation: safeExpl,
     productIds,
-    explanationFlat,
+    explanationFlat
   };
 }
-
 
 // ─────────────────────────────────────────────────────────────
 // Tiny in-memory TTL cache
@@ -145,10 +159,7 @@ function normalizeConcern(s) {
     .trim();
 }
 function stripHtml(s) {
-  return String(s || "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 function tokenize(s) {
   return String(s || "")
@@ -211,7 +222,7 @@ async function getSettings(storeId) {
   if (!snap.exists) {
     const seed = {
       tone: (process.env.BFF_DEFAULT_TONE || "expert").toLowerCase(),
-      category: (process.env.BFF_DEFAULT_CATEGORY || "Generic"),
+      category: process.env.BFF_DEFAULT_CATEGORY || "Generic",
       enabledPacks: (process.env.BFF_ENABLED_PACKS || "")
         .split(",")
         .map((s) => s.trim())
@@ -244,8 +255,10 @@ async function getPlan(storeId) {
   try {
     const snap = await db.doc(`plans/${storeId}`).get();
     const data = snap.exists ? snap.data() || {} : {};
-    const raw = String(data.plan || data.tier || data.name || data.level || "free").toLowerCase().trim();
-    if (/\bpremium\b/.test(raw) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(raw)) return "premium";
+    const raw = String(data.plan || data.tier || data.name || data.level || "free")
+      .toLowerCase()
+      .trim();
+    if (/\bpremium\b/.test(raw)) return "premium";
     if (/^pro\b/.test(raw)) return "pro";
     return "free";
   } catch {
@@ -268,16 +281,15 @@ async function fetchProducts(storeId, limit = 1500) {
 
   // Fallback to flat collection (back-compat)
   try {
-    const flatSnap = await db
-      .collection("products")
-      .where("storeId", "==", storeId)
-      .limit(limit)
-      .get();
+    const flatSnap = await db.collection("products").where("storeId", "==", storeId).limit(limit).get();
     const out = [];
     flatSnap.forEach((d) => out.push({ id: d.id, ...d.data() }));
     return out;
   } catch (e) {
-    console.error(`[BFF] flat collection fetch failed for ${storeId}:`, e?.message || e);
+    console.error(
+      `[BFF] flat collection fetch failed for ${storeId}:`,
+      e?.message || e
+    );
     return [];
   }
 }
@@ -577,10 +589,10 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
     const limit = plan === "free" ? 3 : 8;
     let used = productIds.slice(0, limit);
 
-    // --- Pro/Pro+: Call Gemini and enrich (preserves Free behavior) ---
+    // --- Premium/Pro: Call Gemini and enrich (preserves Free behavior) ---
     if (plan !== "free") {
-      const constraints = {}; // wire optional constraints from settings if you have them
-      const condensed = condenseProducts(allProducts); // provided by helper (B)
+      const constraints = {}; // optional: hydrate from settings if available
+      const condensed = condenseProducts(allProducts);
 
       const prompt = buildGeminiPrompt({
         concern: concernInput,
@@ -588,32 +600,35 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
         category,
         tone,
         constraints,
-        candidates: condensed,
+        products: condensed
       });
 
       const genConfig = {
-        temperature: /pro\+/i.test(plan) ? 0.7 : 0.5,
+        temperature: plan === "premium" ? 0.7 : 0.5,
         topP: 0.9,
-        maxOutputTokens: 800,
+        maxOutputTokens: 800
       };
 
       try {
-        const modelText = await callGemini(prompt, genConfig); // use your existing Gemini client
-        const parsed = extractJson(modelText);                 // provided by helper (B)
-        const enriched = coerceToContract(parsed);             // provided by helper (B)
+        const modelText = await callGemini(prompt, genConfig);
+        const parsed = extractJson(modelText);
+        const enriched = coerceToContract(parsed);
 
         if (Array.isArray(enriched.productIds) && enriched.productIds.length) {
           // Prefer Gemini’s ordering, but only keep products that exist in index
-          const inIndex = new Set(allProducts.map(p => p.id));
-          used = enriched.productIds.filter(id => inIndex.has(id)).slice(0, limit);
+          const inIndex = new Set(allProducts.map((p) => p.id));
+          used = enriched.productIds.filter((id) => inIndex.has(id)).slice(0, limit);
           source = "gemini";
         }
 
-        // We’ll attach enriched + friendly explanation to the final payload below
+        // Attach enriched for response & copy override
         req._enriched = enriched;
       } catch (err) {
-        console.warn("[BFF] Gemini call failed, using deterministic selection:", err?.message || err);
-        // keep used as-is (mapping/fallback); source remains mapping/fallback
+        console.warn(
+          "[BFF] Gemini call failed, using deterministic selection:",
+          err?.message || err
+        );
+        // keep used as-is (mapping/fallback)
       }
     }
 
@@ -636,22 +651,47 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       };
     });
 
-    const copy = shapeCopy({
+    // Legacy copy (deterministic)…
+    let copy = shapeCopy({
       products: allProducts.filter((p) => used.includes(p.id)),
       concern: normalizedConcern,
       tone,
       category
     });
 
+    // …then override when Gemini enriched text exists (so the modal shows concierge tone)
+    if (req._enriched) {
+      const ex = req._enriched.explanation || {};
+      const primary = req._enriched.primary || {};
+      copy = {
+        why: (ex.friendlyParagraph || ex.oneLiner || copy.why || "").trim(),
+        rationale: (
+          Array.isArray(ex.expertBullets) && ex.expertBullets.length
+            ? ex.expertBullets.join(" • ")
+            : (copy.rationale || "")
+        ).trim(),
+        extras: (
+          (Array.isArray(primary.howToUse) && primary.howToUse.length
+            ? primary.howToUse.join(" • ")
+            : (Array.isArray(ex.usageTips) && ex.usageTips.length
+              ? ex.usageTips.join(" • ")
+              : (copy.extras || "")
+            )
+          )
+        ).trim()
+      };
+    }
+
     const payload = {
       productIds: used,
       products: hydrate,
       copy,
-      // If Gemini enriched data exists, include it and surface a flat explanation for back-compat
-      ...(req._enriched ? {
-        explanation: req._enriched.explanationFlat || "",
-        enriched: req._enriched
-      } : {}),
+      ...(req._enriched
+        ? {
+            explanation: req._enriched.explanationFlat || "",
+            enriched: req._enriched
+          }
+        : {}),
       meta: { source, cache: "miss", tone, plan }
     };
 
@@ -665,7 +705,6 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
     if (ms > 500) console.log(`[BFF] /proxy/refina/v1/recommend took ${ms}ms for ${req.storeId}`);
   }
 });
-
 
 // (C) Narrow asset proxies (unchanged)
 app.use(
@@ -754,7 +793,6 @@ app.get("/v1/concerns", async (req, res) => {
     res.status(500).json({ error: "internal_error" });
   }
 });
-
 
 app.post("/v1/recommend", async (req, res) => {
   const t0 = Date.now();
@@ -858,8 +896,7 @@ app.use("/api/admin", analyticsIngestRouter);
 app.use("/api", analyticsIngestRouter);
 
 // ─────────────────────────────────────────────────────────────
-// Listen
-// ─────────────────────────────────────────────────────────────
+/* Listen */
 app.listen(PORT, () => {
   console.log(`Refina BFF running on :${PORT}`);
   console.log(

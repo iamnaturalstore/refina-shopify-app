@@ -1,11 +1,9 @@
 // src/gemini.js
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { buildGeminiPrompt } from "./utils/buildGeminiPrompt";
+// Production-safe client wrapper: NO direct LLM calls from the browser.
+// Delegates to BFF at /proxy/refina/v1/recommend and adapts the response
+// to the legacy shape expected by callers of getGeminiResponse().
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-const modelName = import.meta.env.VITE_GEMINI_MODEL || "gemini-1.5-flash-lite";
-const genAI = new GoogleGenerativeAI(apiKey);
-
+//
 // ───────────────────────────
 // Domain intents (normalized)
 // ───────────────────────────
@@ -26,7 +24,7 @@ function detectBodyIntent(text = "") {
   return /\bbody\b|\bhand\b|\bfoot\b|\bleg\b|\bshower\b|\bkp\b|\bkeratosis\b/.test(s);
 }
 
-// Hair product check (kept)
+// Hair product check (kept for potential client-side hints only)
 function isHairProduct(p = {}) {
   const t = String(p.productType || "").toLowerCase();
   const tags = (p.tags || []).map((x) => String(x).toLowerCase());
@@ -35,7 +33,7 @@ function isHairProduct(p = {}) {
   return /\bhair|scalp|shampoo|conditioner|spray|hairspray|styling|frizz|curl\b/.test(hay);
 }
 
-// Type token filter (uses normalized fields when present)
+// Optional, light client-side type token bias (not sent to BFF; BFF does the heavy lifting)
 function filterByTypeToken(concern, products) {
   const tokens = String(concern || "").toLowerCase().split(/\s+/).filter(Boolean);
   if (!tokens.length) return products;
@@ -61,22 +59,10 @@ function filterByTypeToken(concern, products) {
   return filtered.length >= 3 ? filtered : products;
 }
 
+//
 // ───────────────────────────
-// Track A helpers
+// Follow-up heuristics (UI chips)
 // ───────────────────────────
-function formatSessionContext(context) {
-  if (!context || typeof context !== "object") return "";
-  const parts = [];
-  for (const [k, v] of Object.entries(context)) {
-    if (v === undefined || v === null || String(v).trim() === "") continue;
-    const val = Array.isArray(v) ? v.join(", ") : String(v);
-    parts.push(`${k}: ${val}`);
-  }
-  return parts.length
-    ? `SESSION CONTEXT (use to refine picks & follow-ups):\n${parts.map((p) => `- ${p}`).join("\n")}\n`
-    : "";
-}
-
 function heuristicFollowUps(concern = "") {
   const ups = [];
   if (detectHairIntent(concern)) {
@@ -91,168 +77,123 @@ function heuristicFollowUps(concern = "") {
   return ups.slice(0, 3);
 }
 
+//
+// ───────────────────────────
+// Response mapping helpers
+// ───────────────────────────
+function buildReasonsByIdFromEnriched(enriched) {
+  const reasonsById = {};
+  if (!enriched || typeof enriched !== "object") return reasonsById;
+
+  const pri = enriched.primary || {};
+  if (pri.id && Array.isArray(pri.reasons) && pri.reasons.length) {
+    reasonsById[pri.id] = "• " + pri.reasons.join("\n• ");
+  }
+
+  const alts = Array.isArray(enriched.alternatives) ? enriched.alternatives : [];
+  for (const a of alts) {
+    if (a.id && Array.isArray(a.reasons) && a.reasons.length) {
+      reasonsById[a.id] = "• " + a.reasons.join("\n• ");
+    }
+  }
+  return reasonsById;
+}
+
+function buildScoresByIdFromEnriched(enriched) {
+  const scoresById = {};
+  if (!enriched || typeof enriched !== "object") return scoresById;
+
+  const pri = enriched.primary || {};
+  if (pri.id && typeof pri.score === "number") scoresById[pri.id] = Math.max(0, Math.min(1, pri.score));
+
+  // You can add alt scores later if your BFF provides them.
+  return scoresById;
+}
+
+//
+// ───────────────────────────
+// Public API (browser)
+// ───────────────────────────
+/**
+ * Calls the BFF to get concierge picks. No API keys on the client.
+ *
+ * @param {Object} args
+ * @param {string} args.concern - user concern text
+ * @param {string} [args.category] - optional, for local hints only
+ * @param {string} [args.tone] - optional, for local hints only
+ * @param {Array}  [args.products] - optional client-side list (used only for minor UI hints)
+ * @param {Object} [args.context] - optional session context (not sent to BFF)
+ * @param {number} [args.maxPicks=3] - desired number of picks
+ * @returns {Promise<{productIds: string[], explanation: string, followUps: string[], reasonsById: Record<string,string>, scoresById: Record<string,number>, enriched?: any, meta?: any}>}
+ */
 export async function getGeminiResponse({
   concern,
   category,
   tone,
-  products,
-  context = null,   // optional session context (e.g., { age: 59, skin: "sensitive", budget: "<$60", prefer: "oil" })
-  maxPicks = 3      // keep UI snappy
+  products = [],
+  context = null,
+  maxPicks = 3
 }) {
+  // Optional local hints (do not affect BFF; purely for future UI affordances)
+  let hinted = Array.isArray(products) ? products : [];
+  if (detectHairIntent(concern)) {
+    const hair = hinted.filter(isHairProduct);
+    if (hair.length >= 3) hinted = hair;
+  }
+  hinted = filterByTypeToken(concern, hinted);
+
   try {
-    // 1) Pre-filter catalog by intent (use normalized fields when present)
-    let filteredProducts = Array.isArray(products) ? products : [];
-    if (detectHairIntent(concern)) {
-      const hair = filteredProducts.filter(isHairProduct);
-      if (hair.length >= 3) filteredProducts = hair;
-    }
-    if (detectMakeupIntent(concern)) {
-      const mk = filteredProducts.filter((p) => {
-        const cat = String(p.categoryNormalized || p.category || "").toLowerCase();
-        const type = String(p.productTypeNormalized || p.productType || "").toLowerCase();
-        const hay = [cat, type, String(p.description || "").toLowerCase()].join(" ");
-        return cat.includes("makeup") || /\blipstick|lip oil|tint|stain|mascara|concealer|blush|liner\b/.test(hay);
-      });
-      if (mk.length >= 3) filteredProducts = mk;
-    }
-    if (detectBodyIntent(concern)) {
-      const body = filteredProducts.filter((p) => {
-        const cat = String(p.categoryNormalized || p.category || "").toLowerCase();
-        const hay = [cat, String(p.description || "").toLowerCase()].join(" ");
-        return cat.includes("body") || /\bbody|lotion|butter|hand|foot|shower\b/.test(hay);
-      });
-      if (body.length >= 3) filteredProducts = body;
-    }
-    filteredProducts = filterByTypeToken(concern, filteredProducts);
-
-    // 2) Build prompt + strict JSON contract (concierge bullets + tone) + session context
-    const promptBody = buildGeminiPrompt({
-      concern,
-      category,
-      tone,
-      products: filteredProducts
+    // Call your BFF (Shopify App Proxy path). The BFF derives storeId from HMAC.
+    const res = await fetch("/proxy/refina/v1/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Keep payload minimal: the BFF fetches catalog + settings and handles plan gating.
+      body: JSON.stringify({ concern: String(concern || "").trim() })
     });
 
-    const toneHint =
-      String(tone || "").toLowerCase().includes("bestie")
-        ? "Use a warm, friendly 'smart bestie' tone while staying precise."
-        : "Use a confident, compact expert tone—friendly but no fluff.";
+    if (!res.ok) throw new Error(`BFF HTTP ${res.status}`);
+    const payload = await res.json();
 
-    const contextText = formatSessionContext(context);
+    // Expecting: { productIds, products[], copy{why,rationale,extras}, enriched?, meta? }
+    const productIds = Array.isArray(payload.productIds) ? payload.productIds.slice(0, Number(maxPicks) || 3) : [];
+    const enriched = payload.enriched || null;
 
-    const contract = `
-Return ONLY JSON with this exact schema and no extra text:
-{
-  "scoredMatches": [
-    { "id": "<id-or-exact-name-from-products>", "score": 0.0-1.0, "reason": "string with 2–4 bullets prefixed by • " }
-  ],
-  "explanation": "1–2 sentences summarizing the picks",
-  "followUps": ["<2–3 short follow-up chips that refine intent>"]
-}
-Rules:
-- ${toneHint}
-- Use the product fields provided—do not invent data.
-- 2–4 bullets per match in a warm, expert concierge voice:
-  • Bullet 1: speak directly to the user's concern (e.g., "For <concern>…").
-  • Bullet 2: key ingredient(s)/features → plain-English benefit.
-  • Bullet 3: a short, practical "Use tip".
-  • If ingestible or strong actives are implied, add a final "Heads-up:" safety bullet.
-- 12–18 words per bullet. No emojis. No medical claims.
-- Pick up to ${Math.max(1, Number(maxPicks) || 3)} items from the provided "products" list ONLY.
-- "id" MUST be from product "id" or exact "name".
-- If nothing fits, return an empty array for "scoredMatches".
-- Always propose 2–3 helpful "followUps" that would clarify type, sensitivity, budget, or routine step.
-`.trim();
+    // Prefer enriched concierge paragraph; fall back to legacy copy.why or explanation
+    const friendly =
+      (enriched && enriched.explanation && (enriched.explanation.friendlyParagraph || enriched.explanation.oneLiner)) ||
+      (payload.explanation || "") ||
+      (payload.copy && payload.copy.why) ||
+      "";
 
-    const fullPrompt = `${contextText}${promptBody}\n\n${contract}`.trim();
+    // Build reasons/scores maps if enriched is present
+    const reasonsById = buildReasonsByIdFromEnriched(enriched);
+    const scoresById  = buildScoresByIdFromEnriched(enriched);
 
-    const model = genAI.getGenerativeModel({
-      model: modelName,
-      generationConfig: { responseMimeType: "application/json" },
-    });
-
-    const result = await model.generateContent(fullPrompt);
-    const raw = String(result?.response?.text?.() ?? "").trim();
-    const jsonText = extractJsonBlock(raw);
-    const parsed = JSON.parse(jsonText);
-
-    if (!Array.isArray(parsed.scoredMatches) && !Array.isArray(parsed.productIds)) {
-      throw new Error("Gemini returned malformed JSON");
-    }
-
-    // 3) allow-list normalization (map name/id variants back to canonical ids)
-    const allow = new Map();
-    for (const p of filteredProducts) {
-      const canonical = String(p.id ?? p.name ?? "").trim();
-      if (!canonical) continue;
-      allow.set(canonical.toLowerCase(), canonical);
-      if (p.name) allow.set(String(p.name).toLowerCase(), canonical);
-    }
-
-    const picked = (parsed.scoredMatches || [])
-      .map((m) => ({
-        id: String(m.id ?? "").trim(),
-        score: Number(m.score ?? 0),
-        reason: String(m.reason ?? "").trim(),
-      }))
-      .filter((m) => m.id);
-
-    const normalizedIds = (picked.length ? picked.map((m) => m.id) : (parsed.productIds || []))
-      .map((x) => String(x || "").toLowerCase().trim())
-      .filter(Boolean)
-      .map((k) => allow.get(k))
-      .filter(Boolean);
-
-    // maps for UI
-    const reasonsById = {};
-    const scoresById = {};
-    for (const m of picked) {
-      const canon = allow.get(String(m.id).toLowerCase());
-      if (canon) {
-        if (!reasonsById[canon] && m.reason) reasonsById[canon] = m.reason;
-        if (!scoresById[canon]) scoresById[canon] = Math.max(0, Math.min(1, m.score || 0));
-      }
-    }
-
-    // Ensure we have actionable follow-ups even if the model omits them
-    const followUps =
-      Array.isArray(parsed.followUps) && parsed.followUps.length
-        ? parsed.followUps.slice(0, 3)
-        : heuristicFollowUps(concern);
+    // Follow-ups: if you later add followUps server-side, prefer them; else heuristic
+    const followUps = Array.isArray(payload.followUps) && payload.followUps.length
+      ? payload.followUps.slice(0, 3)
+      : heuristicFollowUps(concern);
 
     return {
-      productIds: Array.from(new Set(normalizedIds)).slice(0, Number(maxPicks) || 3),
-      explanation: String(parsed.explanation || ""),
+      productIds,
+      explanation: String(friendly || "").trim(),
       followUps,
       reasonsById,
       scoresById,
+      enriched,
+      meta: payload.meta || {}
     };
   } catch (err) {
-    console.error("❌ Gemini AI Error:", err?.message || err);
-    if (err?.message?.includes("redirect") || err?.message?.includes("403")) {
-      console.warn("⚠️ Check your VITE_GEMINI_API_KEY and ensure it's valid for the selected model.");
-    }
+    // Network or server error — keep UI responsive with a graceful fallback
+    console.error("❌ Concierge error:", err?.message || err);
     return {
       productIds: [],
-      explanation: "Sorry, I couldn’t generate expert suggestions right now.",
+      explanation: "Sorry, I couldn’t fetch expert suggestions right now.",
       followUps: heuristicFollowUps(concern),
       reasonsById: {},
       scoresById: {},
+      enriched: null,
+      meta: { source: "client-fallback" }
     };
   }
-}
-
-function extractJsonBlock(text) {
-  try {
-    JSON.parse(text);
-    return text;
-  } catch {}
-  const jsonMatch = String(text || "").match(/```json([\s\S]*?)```/i);
-  if (jsonMatch) return jsonMatch[1].trim();
-  const firstBrace = String(text || "").indexOf("{");
-  const lastBrace = String(text || "").lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    return text.substring(firstBrace, lastBrace + 1).trim();
-  }
-  throw new Error("No valid JSON block found in Gemini response.");
 }

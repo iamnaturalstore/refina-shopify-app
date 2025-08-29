@@ -1,72 +1,115 @@
-// Server-side Gemini call via REST (avoids ESM import issues).
-// Falls back gracefully when GEMINI_API_KEY is missing or on timeout.
+// refina-backend/bff/ai/gemini.js
+// Pure ESM. Server-side call to Google Generative Language API (Gemini)
+// Returns the **raw model text** (expected to be STRICT JSON per your prompt).
+// BFF parses/normalizes downstream via extractJson() + coerceToContract().
 
-const { setTimeout: sleep } = require("timers/promises");
+import { setTimeout as sleep } from "timers/promises";
 
-async function ensureFetch() {
-  if (typeof fetch !== "function") {
-    // Node <18 fallback
-    try { global.fetch = (await import("node-fetch")).default; }
-    catch (e) { throw new Error("No fetch available; install node-fetch or use Node 18+"); }
-  }
-}
+const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-async function callGeminiStructured({ prompt, model, timeoutMs = 4000 }) {
-  const apiKey = process.env.GEMINI_API_KEY;
+/**
+ * Low-level caller. Returns model **text** (string) or null on failure.
+ *
+ * @param {Object} args
+ * @param {string} args.prompt
+ * @param {string} [args.model] - e.g. "gemini-1.5-flash"
+ * @param {number} [args.timeoutMs=8000]
+ * @param {number} [args.temperature]
+ * @param {number} [args.topP]
+ * @param {number} [args.maxOutputTokens]
+ */
+export async function callGeminiStructured({
+  prompt,
+  model,
+  timeoutMs = 8000,
+  temperature,
+  topP,
+  maxOutputTokens
+}) {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   if (!apiKey) {
     console.warn("[Gemini] GEMINI_API_KEY missing — skipping AI path");
     return null;
   }
 
-  await ensureFetch();
+  const mdl = String(model || process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
+  const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
+  // Build body. We **do not** set response_mime_type to avoid REST casing pitfalls.
   const body = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: 0.4,
-      topP: 0.9,
-      maxOutputTokens: 800
-    }
+    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+    generationConfig: {}
   };
+  if (Number.isFinite(temperature)) body.generationConfig.temperature = temperature;
+  if (Number.isFinite(topP)) body.generationConfig.topP = topP;
+  if (Number.isFinite(maxOutputTokens)) body.generationConfig.maxOutputTokens = maxOutputTokens;
 
-  // Simple timeout guard + one retry
   const attempt = async () => {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
+    const t = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const resp = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal });
-      clearTimeout(id);
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      clearTimeout(t);
+
       if (!resp.ok) {
-        const text = await resp.text();
-        console.warn("[Gemini] non-200:", resp.status, text.slice(0, 300));
+        const txt = await resp.text().catch(() => "");
+        console.warn("[Gemini] HTTP", resp.status, txt.slice(0, 300));
         return null;
       }
-      const data = await resp.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (!text) return null;
 
-      // Expect strict JSON; try parse; if markdown fences slipped in, strip them
-      const jsonText = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(jsonText);
-      const productIds = Array.isArray(parsed.productIds) ? parsed.productIds : [];
-      const copy = parsed.copy || {};
-      if (!productIds.length || !copy.why || !copy.rationale || !copy.extras) return null;
-      return { productIds, copy };
+      const data = await resp.json();
+
+      // Extract concatenated text from parts
+      const parts = data?.candidates?.[0]?.content?.parts;
+      let out = "";
+      if (Array.isArray(parts)) {
+        out = parts
+          .map((p) => (typeof p?.text === "string" ? p.text : ""))
+          .join("")
+          .trim();
+      } else if (typeof data?.candidates?.[0]?.content?.parts?.[0]?.text === "string") {
+        out = String(data.candidates[0].content.parts[0].text || "").trim();
+      }
+
+      return out || null;
     } catch (e) {
-      console.warn("[Gemini] error:", e?.name || e?.message || e);
+      clearTimeout(t);
+      // AbortError, network, etc.
+      const msg = e?.name ? `${e.name}: ${e.message || ""}` : String(e || "");
+      console.warn("[Gemini] request error:", msg);
       return null;
     }
   };
 
-  let result = await attempt();
-  if (!result) {
+  // One retry with jitter
+  let text = await attempt();
+  if (!text) {
     await sleep(200 + Math.random() * 250);
-    result = await attempt();
+    text = await attempt();
   }
-  return result;
+  return text;
 }
 
-module.exports = { callGeminiStructured };
+/**
+ * Thin wrapper used by bff/server.js:
+ *   const modelText = await callGemini(prompt, genConfig)
+ * where genConfig may contain { model, temperature, topP, maxOutputTokens, timeoutMs }.
+ */
+export function callGemini(prompt, genConfig = {}) {
+  return callGeminiStructured({
+    prompt,
+    model: genConfig?.model,
+    temperature: genConfig?.temperature,
+    topP: genConfig?.topP,
+    maxOutputTokens: genConfig?.maxOutputTokens,
+    timeoutMs: genConfig?.timeoutMs ?? 8000
+  });
+}
+
+export default { callGeminiStructured, callGemini };
