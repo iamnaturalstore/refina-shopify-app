@@ -14,21 +14,7 @@ import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import analyticsIngestRouter from "../routes/analyticsIngest.js";
-import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";
-
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const { callGeminiStructured } = require("./ai/gemini.js");
-
-// Make server.js call signature stay: callGemini(prompt, genConfig)
-const callGemini = (prompt, genConfig = {}) =>
-  callGeminiStructured({
-    prompt,
-    model: genConfig?.model,          // optional
-    timeoutMs: genConfig?.timeoutMs ?? 8000
-  });
-
-
+import { callGemini } from "./ai/gemini.js";
 
 
 // ─────────────────────────────────────────────────────────────
