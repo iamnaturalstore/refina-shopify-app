@@ -14,6 +14,8 @@ import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import analyticsIngestRouter from "../routes/analyticsIngest.js";
+import { buildGeminiPrompt } from "./lib/buildGeminiPrompt.js";
+
 
 
 // ─────────────────────────────────────────────────────────────
@@ -35,6 +37,89 @@ const PUBLIC_BACKEND_ORIGIN = String(
 
 // Shopify App Proxy secret (used to verify /proxy/refina/v1/*)
 const SHOPIFY_APP_SECRET = String(process.env.SHOPIFY_APP_SECRET || process.env.SHOPIFY_API_SECRET || "");
+
+// --- Gemini helpers: condense candidates, parse JSON, and normalize the contract ---
+
+function shorten(text = "", max = 240) {
+  const s = String(text).replace(/\s+/g, " ").trim();
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+}
+
+function condenseProducts(products = []) {
+  return products.slice(0, 120).map(p => ({
+    id: p.id || p.productId || p.handle || "",
+    name: p.name || p.title || "",
+    productType: p.productTypeNormalized || p.productType || "",
+    ingredients: Array.isArray(p.ingredients) ? p.ingredients : (Array.isArray(p.keyIngredients) ? p.keyIngredients : []),
+    keywords: Array.isArray(p.keywords) ? p.keywords : [],
+    tags: Array.isArray(p.tags) ? p.tags : (typeof p.tags === "string" ? p.tags.split(",").map(t => t.trim()).filter(Boolean) : []),
+    descriptionShort: shorten(p.descriptionShort || p.description || p.body_html || ""),
+    price: p.price || p.minPrice || p.compareAtPrice || undefined,
+  })).filter(x => x.id && x.name);
+}
+
+// Accepts model text that may be raw JSON or wrapped in ```json fences
+function extractJson(text = "") {
+  const raw = String(text).trim();
+  const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonLike = fenceMatch ? fenceMatch[1] : raw;
+  try {
+    return JSON.parse(jsonLike);
+  } catch {
+    // try to find a top-level JSON object in the text
+    const start = jsonLike.indexOf("{");
+    const end = jsonLike.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      const maybe = jsonLike.slice(start, end + 1);
+      try { return JSON.parse(maybe); } catch {}
+    }
+    throw new Error("Model did not return valid JSON.");
+  }
+}
+
+function coerceToContract(obj = {}) {
+  const primary = obj.primary || {};
+  const alts = Array.isArray(obj.alternatives) ? obj.alternatives : [];
+  const explanation = obj.explanation || {};
+
+  const safePrimary = {
+    id: String(primary.id || "").trim(),
+    score: Number.isFinite(primary.score) ? primary.score : 0,
+    reasons: Array.isArray(primary.reasons) ? primary.reasons.slice(0, 6).map(String) : [],
+    howToUse: Array.isArray(primary.howToUse) ? primary.howToUse.slice(0, 6).map(String) : [],
+    tagsMatched: Array.isArray(primary.tagsMatched) ? primary.tagsMatched.slice(0, 8).map(String) : [],
+  };
+
+  const safeAlts = alts.slice(0, 2).map(a => ({
+    id: String(a.id || "").trim(),
+    when: String(a.when || "").trim(),
+    reasons: Array.isArray(a.reasons) ? a.reasons.slice(0, 3).map(String) : [],
+  })).filter(a => a.id);
+
+  const safeExpl = {
+    oneLiner: String(explanation.oneLiner || "").trim(),
+    friendlyParagraph: String(explanation.friendlyParagraph || "").trim(),
+    expertBullets: Array.isArray(explanation.expertBullets) ? explanation.expertBullets.slice(0, 6).map(String) : [],
+    usageTips: Array.isArray(explanation.usageTips) ? explanation.usageTips.slice(0, 6).map(String) : [],
+  };
+
+  // Back-compat fields expected by current UI
+  const productIds = [
+    safePrimary.id,
+    ...safeAlts.map(a => a.id),
+  ].filter(Boolean);
+
+  const explanationFlat = safeExpl.friendlyParagraph || safeExpl.oneLiner || "";
+
+  return {
+    primary: safePrimary,
+    alternatives: safeAlts,
+    explanation: safeExpl,
+    productIds,
+    explanationFlat,
+  };
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Tiny in-memory TTL cache
@@ -490,7 +575,48 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       source = "fallback";
     }
 
-    const used = productIds.slice(0, plan === "free" ? 3 : 8);
+    const limit = plan === "free" ? 3 : 8;
+    let used = productIds.slice(0, limit);
+
+    // --- Pro/Pro+: Call Gemini and enrich (preserves Free behavior) ---
+    if (plan !== "free") {
+      const constraints = {}; // wire optional constraints from settings if you have them
+      const condensed = condenseProducts(allProducts); // provided by helper (B)
+
+      const prompt = buildGeminiPrompt({
+        concern: concernInput,
+        normalizedConcern,
+        category,
+        tone,
+        constraints,
+        candidates: condensed,
+      });
+
+      const genConfig = {
+        temperature: /pro\+/i.test(plan) ? 0.7 : 0.5,
+        topP: 0.9,
+        maxOutputTokens: 800,
+      };
+
+      try {
+        const modelText = await callGemini(prompt, genConfig); // use your existing Gemini client
+        const parsed = extractJson(modelText);                 // provided by helper (B)
+        const enriched = coerceToContract(parsed);             // provided by helper (B)
+
+        if (Array.isArray(enriched.productIds) && enriched.productIds.length) {
+          // Prefer Gemini’s ordering, but only keep products that exist in index
+          const inIndex = new Set(allProducts.map(p => p.id));
+          used = enriched.productIds.filter(id => inIndex.has(id)).slice(0, limit);
+          source = "gemini";
+        }
+
+        // We’ll attach enriched + friendly explanation to the final payload below
+        req._enriched = enriched;
+      } catch (err) {
+        console.warn("[BFF] Gemini call failed, using deterministic selection:", err?.message || err);
+        // keep used as-is (mapping/fallback); source remains mapping/fallback
+      }
+    }
 
     const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, "");
     const hydrate = used.map((id) => {
@@ -522,6 +648,11 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       productIds: used,
       products: hydrate,
       copy,
+      // If Gemini enriched data exists, include it and surface a flat explanation for back-compat
+      ...(req._enriched ? {
+        explanation: req._enriched.explanationFlat || "",
+        enriched: req._enriched
+      } : {}),
       meta: { source, cache: "miss", tone, plan }
     };
 
@@ -535,6 +666,7 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
     if (ms > 500) console.log(`[BFF] /proxy/refina/v1/recommend took ${ms}ms for ${req.storeId}`);
   }
 });
+
 
 // (C) Narrow asset proxies (unchanged)
 app.use(

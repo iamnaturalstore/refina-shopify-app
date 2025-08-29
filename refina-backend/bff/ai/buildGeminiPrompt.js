@@ -1,100 +1,107 @@
-// refina-backend/bff/ai/buildGeminiPrompt.js
-// ESM module (matches BFF `import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";`)
-function stripHtml(s) {
-  return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-}
+// refina-backend/bff/lib/buildGeminiPrompt.js
+// Builds a compact, high-signal prompt for Gemini that returns an enriched, human-friendly recommendation.
+// No external deps. Plain JS. ESM-compatible.
 
-function productToCompact(p) {
-  // Normalize common field variations so prompt stays store-agnostic
-  const name = p.title || p.name || "";
-  const productTypeNormalized =
-    p.productType_norm || p.productTypeNormalized || p.productType || "";
-  const usageStep = p.usageStep || p.step || "";
-  const benefits =
-    (Array.isArray(p.benefitsNormalized) && p.benefitsNormalized) ||
-    (Array.isArray(p.benefits) && p.benefits) ||
-    [];
-  const concerns =
-    (Array.isArray(p.concernsNormalized) && p.concernsNormalized) ||
-    (Array.isArray(p.concerns) && p.concerns) ||
-    [];
-  const audience = p.audience || {}; // { skinType?, hairType? }
+function toCompactCandidateTable(candidates = []) {
+  // Expect each candidate to have:
+  // id, name, productType, ingredients[], keywords[], tags[], descriptionShort, price (optional)
+  const lines = candidates.map(c => {
+    const id = c.id ?? "";
+    const name = (c.name ?? "").replace(/\s+/g, " ").trim();
+    const type = c.productType ?? "";
+    const ingredients = Array.isArray(c.ingredients) ? c.ingredients.slice(0, 8).join(", ") : "";
+    const keywords = Array.isArray(c.keywords) ? c.keywords.slice(0, 8).join(", ") : "";
+    const tags = Array.isArray(c.tags) ? c.tags.slice(0, 8).join(", ") : "";
+    const desc = (c.descriptionShort ?? "").replace(/\s+/g, " ").trim();
+    const price = (c.price ?? "") ? ` | $${c.price}` : "";
+    return `${id} | ${name}${price} | ${type} | [${ingredients}] | [${keywords}] | [${tags}] | ${desc}`;
+  });
 
-  return {
-    id: p.id,
-    name,
-    description: stripHtml(p.description).slice(0, 700),
-    tags: Array.isArray(p.tags) ? p.tags.slice(0, 12) : [],
-    keywords: Array.isArray(p.keywords) ? p.keywords.slice(0, 12) : [],
-    ingredients: Array.isArray(p.ingredients) ? p.ingredients.slice(0, 12) : [],
-    productType: p.productType || "",
-    // normalized facets (preferred when present)
-    productType_norm: productTypeNormalized,
-    usageStep,
-    benefits,
-    concerns,
-    audience, // { skinType?, hairType? }
-    category: p.categoryNormalized || p.category || "",
-  };
+  if (lines.length === 0) return "NONE";
+  return [
+    "id | name | price | type | ingredients | keywords | tags | descShort",
+    ...lines,
+  ].join("\n");
 }
 
 /**
- * Build the Gemini prompt used by the BFF.
- * Returns a single string with:
- *  - store context (category, tone)
- *  - the customer's concern
- *  - compact candidate products (JSON)
- *  - clear selection rubric
- *  - strict JSON response contract (productIds + copy{ why, rationale, extras })
+ * Build the complete Gemini prompt.
+ * @param {Object} params
+ * @param {string} params.concern - User's original concern text.
+ * @param {string} [params.normalizedConcern] - Normalized/cleaned version (optional).
+ * @param {string} [params.category="Beauty"] - Store category (e.g., "Beauty", "Outdoors").
+ * @param {string} [params.tone="warm, friendly, expert with a wink"] - Voice/style.
+ * @param {Object} [params.constraints] - Optional store/user constraints (e.g., { avoidFragrance: true, vegan: true, budgetMin: 0, budgetMax: 60 }).
+ * @param {Array}  [params.candidates=[]] - Condensed products (fields defined above).
+ * @returns {string} prompt
  */
-export function buildGeminiPrompt({ concern, category, tone, products }) {
-  const compact = products.map(productToCompact);
-
-  // For beauty-like catalogs, call out "ingredients"; otherwise "features"
-  const middleWord = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
-    ? "ingredients"
-    : "features";
-
-  // Bestie vs Expert voice hint (from your original client logic)
-  const toneHint = /bestie/i.test(String(tone || ""))
-    ? "Use a warm, friendly 'smart bestie' tone while staying precise."
-    : "Use a confident, compact expert tone—friendly but no fluff.";
-
-  return `
-You are a thoughtful, precise product concierge for a Shopify store.
-Category: "${category}"
-Tone: "${tone}"
-
-The customer asked for help with:
-"${concern}"
-
-You have a small candidate set of store products (JSON array). Consider only these:
-${JSON.stringify(compact, null, 2)}
-
-Selection rubric (in priority order):
-1) Match the requested **type / routine step** when present (productType_norm or usageStep).
-2) Address the customer’s **concern(s)** and relevant **audience** (e.g., skin/hair type, age if mentioned).
-3) Support your picks with concrete ${middleWord}/benefits; corroborate with tags/keywords/description.
-4) Prefer fewer, higher-confidence picks; do not force weak matches.
-
-Rules:
-- ${toneHint}
-- Base all statements on the provided product fields only. Do not invent new data.
-- Avoid irrelevant categories; if nothing fits, return fewer items or none.
-- Return STRICT JSON only (no markdown, no backticks).
-- Then generate three short texts for the overall recommendation (store-wide, not per-item):
-  1) "why": a friendly-bestie/expert 2–3 sentence reason this selection fits the user's concern.
-  2) "rationale": a crisp explanation tying ${middleWord}/evidence to the concern.
-  3) "extras": usage tips or added benefits inferred from descriptions; if none, give sensible usage guidance.
-
-Response JSON schema (STRICT):
-{
-  "productIds": ["id1","id2","..."],   // choose up to 8 ids from the candidates above
-  "copy": {
-    "why": "string",
-    "rationale": "string",
-    "extras": "string"
+export function buildGeminiPrompt({
+  concern,
+  normalizedConcern = "",
+  category = "Beauty",
+  tone = "warm, friendly, expert with a wink",
+  constraints = {},
+  candidates = [],
+} = {}) {
+  const constraintLines = [];
+  if (constraints) {
+    if (constraints.avoidFragrance) constraintLines.push("- Prefer fragrance-free.");
+    if (constraints.vegan)          constraintLines.push("- Prefer vegan.");
+    if (constraints.glutenFree)     constraintLines.push("- Prefer gluten-free.");
+    if (constraints.crueltyFree)    constraintLines.push("- Prefer cruelty-free.");
+    if (constraints.budgetMin != null || constraints.budgetMax != null) {
+      const min = constraints.budgetMin != null ? `$${constraints.budgetMin}` : "";
+      const max = constraints.budgetMax != null ? `$${constraints.budgetMax}` : "";
+      constraintLines.push(`- Consider budget range ${min}${min && max ? "–" : ""}${max}.`);
+    }
+    if (constraints.notes) constraintLines.push(`- Notes: ${String(constraints.notes)}`); // free-form
   }
-}
-`.trim();
+
+  const candidateTable = toCompactCandidateTable(candidates);
+
+  // === PROMPT ===
+  // IMPORTANT: we ask for *JSON only* (no markdown, no commentary).
+  return [
+`You are **Refina**, an expert, friendly shopping concierge for a ${category} Shopify store.`,
+`Voice: ${tone}; Australian English. Be specific, ingredient-aware, and concise. Avoid medical claims or diagnoses.`,
+`Choose exactly ONE primary product and up to TWO strong alternatives **only from the provided CANDIDATES**.`,
+`Favor product-type relevance (e.g., for facial concerns prefer cleanser/serum/moisturizer over unrelated types).`,
+`When concern implies sensitivity/irritation, prefer gentle/fragrance-free options. Do not invent products.`,
+
+`CUSTOMER CONCERN (raw): ${concern}`,
+normalizedConcern ? `CUSTOMER CONCERN (normalized): ${normalizedConcern}` : null,
+constraintLines.length ? `CONSTRAINTS:\n${constraintLines.join("\n")}` : null,
+
+`CANDIDATES (id | name | price | type | ingredients | keywords | tags | descShort):`,
+candidateTable,
+
+`OUTPUT REQUIREMENTS (return JSON only, no markdown, no extra text):`,
+`{
+  "primary": {
+    "id": "<productId-from-candidates>",
+    "score": 0.0,
+    "reasons": ["short, specific reason 1", "reason 2"],
+    "howToUse": ["short step 1", "short step 2"],
+    "tagsMatched": ["match1", "match2"]
+  },
+  "alternatives": [
+    {
+      "id": "<altId-from-candidates>",
+      "when": "budget | sensitive | premium | lighter texture",
+      "reasons": ["short, concrete reason"]
+    }
+  ],
+  "explanation": {
+    "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
+    "friendlyParagraph": "3–4 sentences in our concierge voice explaining *why this fits you*.",
+    "expertBullets": ["Ingredient rationale 1", "Rationale 2"],
+    "usageTips": ["AM/PM tip", "Layering tip"]
+  }
+}`,
+`Rules:
+- Choose from candidates only; never fabricate IDs.
+- Keep reasons ingredient- and benefit-specific to the concern.
+- If information is insufficient, provide a conservative primary pick, leave alternatives empty, and still return valid JSON.
+`
+  ].filter(Boolean).join("\n");
 }
