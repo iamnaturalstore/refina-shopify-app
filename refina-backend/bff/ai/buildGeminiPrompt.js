@@ -1,17 +1,15 @@
-// refina-backend/bff/ai/buildGeminiPrompt.js - upgraded concierge prompt (keeps your baseline API)
-// ESM module (matches BFF `import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";`)
+// refina-backend/bff/ai/buildGeminiPrompt.js
+// ESM module. Builds a single prompt string for Gemini in JSON mode.
+// No-bullets edition: requires plain sentences only.
 
 function stripHtml(s) {
   return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
-
 function shorten(text = "", max = 280) {
   const s = String(text).replace(/\s+/g, " ").trim();
   return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
 }
-
 function productToCompact(p) {
-  // Normalize common field variations so prompt stays store-agnostic
   const name = p.title || p.name || "";
   const productTypeNormalized =
     p.productType_norm || p.productTypeNormalized || p.productType || "";
@@ -26,7 +24,6 @@ function productToCompact(p) {
     [];
   const audience = p.audience || {}; // { skinType?, hairType? }
 
-  // Prefer normalized ingredients/keywords when present
   const ingNorm =
     (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
     (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
@@ -47,35 +44,17 @@ function productToCompact(p) {
     keywords: (kwNorm || (Array.isArray(p.keywords) ? p.keywords : [])).slice(0, 12),
     ingredients: (ingNorm || (Array.isArray(p.ingredients) ? p.ingredients : [])).slice(0, 12),
     productType: p.productType || "",
-    // normalized facets (preferred when present)
     productType_norm: productTypeNormalized,
     usageStep,
     benefits,
     concerns,
-    audience, // { skinType?, hairType? }
+    audience,
     category: p.categoryNormalized || p.category || "",
-    price: p.price ?? p.minPrice ?? undefined,
+    price: p.price ?? p.minPrice ?? undefined
   };
 }
 
-/**
- * Build the Gemini prompt used by the BFF.
- * API is unchanged for callers: pass { concern, category, tone, products }.
- * Optional params are supported and defaulted, so older callers won’t break:
- * { normalizedConcern, constraints, rankMode, routineMode, ingredientFacts }
- *
- * Returns a single string with:
- *  - store context (category, tone, optional constraints)
- *  - the customer's concern (raw + optional normalized)
- *  - compact candidate products (JSON)
- *  - clear selection rubric (with closest-match rule + no-apologies rule)
- *  - STRICT JSON response contract (primary/alternatives/explanation)
- *  - back-compat fields (productIds + copy{ why, rationale, extras })
- */
-
-// INSERT NEAR TOP (helpers)
 export function formatIngredientFacts(factsObj = {}) {
-  // Compact, token-friendly
   const lines = [];
   for (const [slug, f] of Object.entries(factsObj)) {
     if (!f) continue;
@@ -85,34 +64,37 @@ export function formatIngredientFacts(factsObj = {}) {
     const cautions = f.cautions ? ` — cautions: ${f.cautions}` : "";
     lines.push(`- ${f.name || slug}${syn}${benefits}${cautions}`);
   }
-  return lines.join("\n").slice(0, 1800); // hard cap
+  return lines.join("\n").slice(0, 1800);
 }
 
+/**
+ * Build the Gemini prompt used by the BFF.
+ * Caller API unchanged: { concern, category, tone, products, normalizedConcern?, constraints?, rankMode?, routineMode?, ingredientFacts? }
+ */
 export function buildGeminiPrompt({
   concern,
   category,
   tone,
   products,
   normalizedConcern = "",
-  constraints = {},     // { avoidFragrance?, vegan?, glutenFree?, crueltyFree?, budgetMin?, budgetMax?, notes? }
-  rankMode = "relevant", // "relevant" | "rated" | "popular" (friendly label handled below)
-  routineMode = false,   // true when the ask implies AM/PM routine
-  ingredientFacts = {},  // compact facts map from the Knowledge Pack
+  constraints = {},      // { avoidFragrance?, vegan?, glutenFree?, crueltyFree?, budgetMin?, budgetMax?, notes? }
+  rankMode = "relevant", // "relevant" | "rated" | "popular"
+  routineMode = false,   // AM/PM guidance if true
+  ingredientFacts = {}
 }) {
-  const compact = (Array.isArray(products) ? products : []).slice(0, 120).map(productToCompact);
+  const compact = (Array.isArray(products) ? products : [])
+    .slice(0, 120)
+    .map(productToCompact);
 
-  // Beauty vs non-beauty wording
   const middleWord = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
     ? "ingredients"
     : "features";
 
-  // Bestie vs Expert voice hint (from your original client logic)
   const toneText = String(tone || "confident expert");
   const toneHint = /bestie/i.test(toneText)
     ? "Use a warm, friendly 'smart bestie' tone while staying precise."
     : "Use a confident, compact expert tone—friendly but no fluff.";
 
-  // Friendly label for rank mode
   const rankLabel =
     rankMode === "rated" ? "highest rated"
     : rankMode === "popular" ? "most popular"
@@ -131,70 +113,70 @@ export function buildGeminiPrompt({
   if (constraints.notes) constraintLines.push(`- Notes: ${String(constraints.notes)}`);
 
   return `
-You are **Refina**, a thoughtful, precise shopping concierge for a ${String(category || "retail")} Shopify store.
-Voice: ${toneText}. Australian English. Be specific, ingredient-aware, and concise. Avoid medical claims or diagnoses.
+You are Refina, a thoughtful, precise shopping concierge for a ${String(category || "retail")} Shopify store.
+Language: Australian English. No hedging or hype. Plain sentences only. Do not use bullet points, numbered lists, dashes, or emojis anywhere.
 
 CUSTOMER CONCERN (raw): ${String(concern || "").trim()}
 ${normalizedConcern ? `CUSTOMER CONCERN (normalized): ${normalizedConcern}` : ""}
 
 ${constraintLines.length ? `CONSTRAINTS:\n${constraintLines.join("\n")}` : ""}
 
-You have a candidate set of store products (JSON array). Consider **only** these:
+You have a candidate set of store products (JSON array). Consider only these:
 ${JSON.stringify(compact, null, 2)}
 
-Selection rubric (in priority order):
-1) Match the requested **type / routine step** when present (productType_norm or usageStep).
-2) Address the customer’s **concern(s)** and relevant **audience** (e.g., skin/hair type, age if mentioned).
-3) Support your picks with concrete ${middleWord}/benefits; corroborate with tags/keywords/description.
-4) Prefer fewer, higher-confidence picks; do not force weak matches. Do not invent products.
+Selection rubric (priority order):
+1) Match the requested type/routine step when present (productType_norm or usageStep).
+2) Address the customer’s concern(s) and relevant audience (e.g., skin/hair type, sensitivity, age if provided).
+3) Support picks with concrete ${middleWord}/benefits; corroborate with tags/keywords/description.
+4) Prefer fewer, higher-confidence picks; do not force weak matches. Do not invent products or facts.
 
-- If nothing is a strong fit, choose the closest 1–3 items and say they are “closest matches” for the concern. Do not say there are no products.
-- Never recommend searching outside this catalogue and do not apologise. Keep a helpful, neutral tone when confidence is low.
-- Write original, benefit-led phrasing (do not quote product text). Speak in second person (“you”). Include concise, actionable how-to steps for the top pick or per routine step.
-
-Rules:
+Behaviour rules:
 - ${toneHint}
-- Base all statements only on provided product fields. No fabrication.
+- Speak directly to “you”. Original phrasing only (do not quote product text).
+- If nothing is a strong fit, return the closest 1–3 items and state they are “closest matches” in the explanation (neutral tone; no apologies).
 - Avoid irrelevant categories (e.g., hair/body items for facial concerns unless explicitly relevant).
-- Return **STRICT JSON only** (no markdown/backticks, no commentary).
+- Only mention “free-from” or ingredient absence if the product data supports it.
+- Output STRICT JSON only (no markdown/backticks, no commentary). No list characters in any field.
 
 Rank mode: ${rankLabel}
-Routine mode: ${routineMode ? "yes (AM/PM guidance expected)" : "no (single-pick acceptable)"}
+Routine mode: ${routineMode ? "yes — include AM/PM usage guidance" : "no — single-pick acceptable"}
 
-Ingredient facts (curated; brief):
+Ingredient facts (compact):
 ${formatIngredientFacts(ingredientFacts)}
-
 
 RESPONSE JSON SCHEMA (STRICT):
 {
   "primary": {
     "id": "<productId-from-candidates>",
     "score": 0.0,
-    "reasons": ["short, specific reason 1", "reason 2"],
-    "howToUse": ["short step 1", "short step 2"],
+    "rationale": "One sentence explaining why this specific product fits the concern (no bullets).",
+    "howToUse": "One short sentence with a practical tip (AM/PM, water temp, amount).",
     "tagsMatched": ["match1", "match2"]
   },
   "alternatives": [
     {
       "id": "<altId-from-candidates>",
       "when": "budget | sensitive | premium | lighter texture",
-      "reasons": ["short, concrete reason"]
+      "rationale": "One sentence explaining when you’d pick this instead (no bullets)."
     }
   ],
   "explanation": {
-    "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
-    "friendlyParagraph": "3–4 sentences in our concierge voice explaining *why this fits you*.",
-    "expertBullets": ["Ingredient rationale 1", "Rationale 2"],
-    "usageTips": ["AM/PM tip", "Layering tip"]
+    "oneLiner": "A single sentence opener tailored to the concern (no bullets).",
+    "conciergeBlurb": "A short paragraph (2–4 sentences) explaining why these picks suit the concern, linking ${middleWord} or format → benefit → outcome. Mention exclusions only if grounded.",
+    "usageNote": "A short paragraph (1–2 sentences) with simple usage advice (e.g., lukewarm water, massage 20–30 seconds, pat dry)."
   },
 
-  // Backward-compat section for existing UI (derive from the above):
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
+
+  "reasonsById": { "<productId>": "One-sentence product-specific rationale, plain text.", "...": "..." },
+
   "copy": {
-    "why": "Use explanation.friendlyParagraph or oneLiner.",
-    "rationale": "Join expertBullets into a compact rationale.",
-    "extras": "Join usageTips or provide sensible usage guidance."
-  }
+    "why": "<explanation.oneLiner>",
+    "rationale": "<explanation.conciergeBlurb>",
+    "extras": "<explanation.usageNote>"
+  },
+
+  "scoresById":  { "<productId>": 0.0 }
 }
 `.trim();
 }

@@ -17,6 +17,9 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
  * @param {number} [args.temperature]
  * @param {number} [args.topP]
  * @param {number} [args.maxOutputTokens]
+ * @param {string} [args.responseMimeType="application/json"]  // ← JSON mode by default
+ * @param {object} [args.responseSchema]                       // optional JSON schema
+ * @param {string} [args.system]                               // optional system instruction text
  */
 export async function callGeminiStructured({
   prompt,
@@ -24,7 +27,10 @@ export async function callGeminiStructured({
   timeoutMs = 8000,
   temperature,
   topP,
-  maxOutputTokens
+  maxOutputTokens,
+  responseMimeType = "application/json",
+  responseSchema,
+  system
 }) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   if (!apiKey) {
@@ -35,18 +41,28 @@ export async function callGeminiStructured({
   const mdl = String(model || process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
   const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  // Build body. We **do not** set response_mime_type to avoid REST casing pitfalls.
+  // Build request body with JSON mode + optional schema.
+  const generationConfig = {
+    ...(Number.isFinite(temperature) ? { temperature } : {}),
+    ...(Number.isFinite(topP) ? { topP } : {}),
+    ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
+    ...(responseMimeType ? { responseMimeType } : {}),
+    ...(responseSchema ? { responseSchema } : {})
+  };
+
   const body = {
     contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    generationConfig: {}
+    generationConfig
   };
-  if (Number.isFinite(temperature)) body.generationConfig.temperature = temperature;
-  if (Number.isFinite(topP)) body.generationConfig.topP = topP;
-  if (Number.isFinite(maxOutputTokens)) body.generationConfig.maxOutputTokens = maxOutputTokens;
+
+  // Optional system instruction (kept minimal/compact)
+  if (system && String(system).trim()) {
+    body.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
+  }
 
   const attempt = async () => {
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const resp = await fetch(url, {
@@ -55,7 +71,7 @@ export async function callGeminiStructured({
         body: JSON.stringify(body),
         signal: controller.signal
       });
-      clearTimeout(t);
+      clearTimeout(timer);
 
       if (!resp.ok) {
         const txt = await resp.text().catch(() => "");
@@ -66,28 +82,23 @@ export async function callGeminiStructured({
       const data = await resp.json();
 
       // Extract concatenated text from parts
+      // (When responseMimeType=application/json, the JSON is still returned in parts[].text)
       const parts = data?.candidates?.[0]?.content?.parts;
-      let out = "";
       if (Array.isArray(parts)) {
-        out = parts
-          .map((p) => (typeof p?.text === "string" ? p.text : ""))
-          .join("")
-          .trim();
-      } else if (typeof data?.candidates?.[0]?.content?.parts?.[0]?.text === "string") {
-        out = String(data.candidates[0].content.parts[0].text || "").trim();
+        const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
+        return out || null;
       }
-
-      return out || null;
+      const fallback = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      return typeof fallback === "string" && fallback.trim() ? fallback.trim() : null;
     } catch (e) {
-      clearTimeout(t);
-      // AbortError, network, etc.
+      clearTimeout(timer);
       const msg = e?.name ? `${e.name}: ${e.message || ""}` : String(e || "");
       console.warn("[Gemini] request error:", msg);
       return null;
     }
   };
 
-  // One retry with jitter
+  // One retry with small jitter for transient issues
   let text = await attempt();
   if (!text) {
     await sleep(200 + Math.random() * 250);
@@ -97,9 +108,10 @@ export async function callGeminiStructured({
 }
 
 /**
- * Thin wrapper used by bff/server.js:
+ * Thin wrapper used by bff/server.js and workers:
  *   const modelText = await callGemini(prompt, genConfig)
- * where genConfig may contain { model, temperature, topP, maxOutputTokens, timeoutMs }.
+ * where genConfig may contain:
+ *   { model, temperature, topP, maxOutputTokens, timeoutMs, responseMimeType, responseSchema, system }
  */
 export function callGemini(prompt, genConfig = {}) {
   return callGeminiStructured({
@@ -108,7 +120,10 @@ export function callGemini(prompt, genConfig = {}) {
     temperature: genConfig?.temperature,
     topP: genConfig?.topP,
     maxOutputTokens: genConfig?.maxOutputTokens,
-    timeoutMs: genConfig?.timeoutMs ?? 8000
+    timeoutMs: genConfig?.timeoutMs ?? 8000,
+    responseMimeType: genConfig?.responseMimeType ?? "application/json",
+    responseSchema: genConfig?.responseSchema,
+    system: genConfig?.system
   });
 }
 
