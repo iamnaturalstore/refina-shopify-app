@@ -167,4 +167,4 @@ export const billingApi = {
   },
 };
 
-// NOTE: No default export on purpose — use named imports everywhere.
+export default api;
