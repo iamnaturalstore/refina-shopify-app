@@ -1,3 +1,4 @@
+import api from "../api/client"
 // admin-ui/src/pages/Billing.jsx
 import * as React from "react";
 import { api } from "../api/client";
@@ -110,7 +111,7 @@ export default function Billing() {
       try {
         const shop = resolveShop();
         if (!shop) throw new Error("Missing shop context");
-        const r = await fetch(`/billing/plan?shop=${encodeURIComponent(shop)}`, { credentials: "include" });
+        const r = await api(`/api/billing/plan?shop=${encodeURIComponent(shop)}`);
         if (!r.ok) throw new Error("bad status");
         const j = await r.json();
         setPlan(parsePlanResponse(j));

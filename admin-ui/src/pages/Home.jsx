@@ -190,7 +190,7 @@ export default function Home() {
     (async () => {
       try {
         setCheckingHealth(true);
-        const r = await fetch("/v1/health", { credentials: "include" });
+        const r = await fetch("/v1/health");
         const j = r.ok ? await r.json() : {};
         if (on) setHealth({ ok: !!j?.ok, now: j?.now || "" });
       } catch {

@@ -1,3 +1,4 @@
+import api from "../api/client"
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Card, BlockStack, InlineGrid, Text, Button, Divider, TextField, Select, InlineStack, Badge, Banner
@@ -66,7 +67,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await fetch("/api/admin/store-settings", { credentials: "include" });
+      const res = await api("/api/admin/store-settings");
       const json = await res.json();
       const draft = json.themeDraft || json.theme || PRESETS.Classic;
       setThemeDraft(draft);
@@ -94,7 +95,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   async function saveDraft() {
     await fetch("/api/admin/store-settings", {
       method: "POST",
-      credentials: "include",
+
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ themeDraft }),
     });
@@ -103,7 +104,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   async function applyTheme() {
     const resp = await fetch("/api/admin/store-settings/theme/apply", {
       method: "POST",
-      credentials: "include",
+
     });
     if (resp.ok) {
       const json = await resp.json();
