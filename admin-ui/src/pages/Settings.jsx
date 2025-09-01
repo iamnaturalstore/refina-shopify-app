@@ -85,7 +85,7 @@ async function saveSettings(settings) {
     });
     return j;
   } catch {
-    const r = await fetch("/api/admin/store-settings", {
+    const r = { const __opts = {
       method: "POST",
 
       headers: { "Content-Type": "application/json" },
