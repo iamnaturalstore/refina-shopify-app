@@ -66,7 +66,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await fetch("/admin/store-settings", { credentials: "include" });
+      const res = await fetch("/api/admin/store-settings", { credentials: "include" });
       const json = await res.json();
       const draft = json.themeDraft || json.theme || PRESETS.Classic;
       setThemeDraft(draft);
@@ -92,7 +92,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   };
 
   async function saveDraft() {
-    await fetch("/admin/store-settings", {
+    await fetch("/api/admin/store-settings", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -101,7 +101,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   }
 
   async function applyTheme() {
-    const resp = await fetch("/admin/store-settings/theme/apply", {
+    const resp = await fetch("/api/admin/store-settings/theme/apply", {
       method: "POST",
       credentials: "include",
     });

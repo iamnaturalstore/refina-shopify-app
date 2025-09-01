@@ -69,7 +69,7 @@ async function getSettings() {
     const j = await api("/api/admin/store-settings");
     return j?.settings || j || {};
   } catch {
-    const r = await fetch("/admin/store-settings", { credentials: "include" });
+    const r = await fetch("/api/admin/store-settings", { credentials: "include" });
     if (!r.ok) throw new Error("Failed to load settings");
     const j = await r.json();
     return j?.settings || j || {};
@@ -84,7 +84,7 @@ async function saveSettings(settings) {
     });
     return j;
   } catch {
-    const r = await fetch("/admin/store-settings", {
+    const r = await fetch("/api/admin/store-settings", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

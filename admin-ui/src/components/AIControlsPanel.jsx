@@ -1,5 +1,6 @@
 import React from "react";
 import * as P from "@shopify/polaris";
+import api from "../api/client";
 
 export default function AIControlsPanel() {
   const [loading, setLoading] = React.useState(true);
@@ -24,14 +25,10 @@ export default function AIControlsPanel() {
     setLoading(true);
     setError(null);
     try {
-      const [settingsRes, planRes] = await Promise.all([
-        fetch("/api/admin/store-settings", { credentials: "include" }),
-        fetch("/api/billing/plan", { credentials: "include" }),
+      const [settings, plan] = await Promise.all([
+        api("/api/admin/store-settings"),
+        api("/api/billing/plan"),
       ]);
-      if (!settingsRes.ok) throw new Error("Failed to load settings");
-      if (!planRes.ok) throw new Error("Failed to load plan");
-      const settings = await settingsRes.json();
-      const plan = await planRes.json();
 
       setFeatureFlags(settings?.featureFlags || { enableAIControls: false });
 
@@ -55,27 +52,26 @@ export default function AIControlsPanel() {
     (async () => {
       await reload();
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [reload]);
 
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/store-settings", {
+      await api("/api/admin/store-settings", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           aiControls: {
             promptStrictness,
             exclusions: exclusions.slice(0, 50),
             enableFollowUps,
             safetyTone,
           },
-        }),
+        },
       });
-      if (!res.ok) throw new Error("Failed to save AI controls");
     } catch (e) {
       setError(e?.message || "Failed to save");
     } finally {
@@ -113,17 +109,23 @@ export default function AIControlsPanel() {
 
           {flagOff && (
             <P.Banner tone="info" title="AI Controls are disabled on your storefront">
-              <p>Changes here are saved but won’t affect your storefront until AI Controls are enabled for this store.</p>
+              <p>
+                Changes here are saved but won’t affect your storefront until AI Controls are
+                enabled for this store.
+              </p>
             </P.Banner>
           )}
 
           <P.InlineStack align="space-between" blockAlign="center">
-            <P.Text as="h2" variant="headingMd">AI Controls</P.Text>
-            <P.Badge tone={
-              isProPlus ? "success" :
-              (planLevel === "pro" ? "attention" : "subdued")
-            }>
-              {isProPlus ? "Pro+" : (isTrialPro ? "Pro (trial)" : planLevel)}
+            <P.Text as="h2" variant="headingMd">
+              AI Controls
+            </P.Text>
+            <P.Badge
+              tone={
+                isProPlus ? "success" : planLevel === "pro" ? "attention" : "subdued"
+              }
+            >
+              {isProPlus ? "Pro+" : isTrialPro ? "Pro (trial)" : planLevel}
             </P.Badge>
           </P.InlineStack>
 
@@ -133,7 +135,10 @@ export default function AIControlsPanel() {
             <>
               {!isProPlus && (
                 <P.Banner tone="warning" title="Upgrade to Pro+ to unlock AI fine-tuning">
-                  <p>Adjust strictness, exclude ingredients, and enable multi-turn follow-ups with Pro+.</p>
+                  <p>
+                    Adjust strictness, exclude ingredients, and enable multi-turn follow-ups with
+                    Pro+.
+                  </p>
                 </P.Banner>
               )}
 
@@ -153,10 +158,15 @@ export default function AIControlsPanel() {
                 />
 
                 <P.BlockStack gap="200">
-                  <P.Text as="h3" variant="headingSm">Exclude ingredients/attributes</P.Text>
+                  <P.Text as="h3" variant="headingSm">
+                    Exclude ingredients/attributes
+                  </P.Text>
                   <P.InlineStack gap="200" wrap>
                     {exclusions.map((x) => (
-                      <P.Tag key={x} onRemove={locked ? undefined : () => removeExclusion(x)}>
+                      <P.Tag
+                        key={x}
+                        onRemove={locked ? undefined : () => removeExclusion(x)}
+                      >
                         {x}
                       </P.Tag>
                     ))}
@@ -176,9 +186,17 @@ export default function AIControlsPanel() {
                         }
                       }}
                     />
-                    <P.Button onClick={addExclusion} disabled={locked || !newExclusion.trim()}>Add</P.Button>
+                    <P.Button
+                      onClick={addExclusion}
+                      disabled={locked || !newExclusion.trim()}
+                    >
+                      Add
+                    </P.Button>
                   </P.InlineStack>
-                  <P.Text tone="subdued">Refina will avoid recommending products that match these terms in tags, ingredients, or description.</P.Text>
+                  <P.Text tone="subdued">
+                    Refina will avoid recommending products that match these terms in tags,
+                    ingredients, or description.
+                  </P.Text>
                 </P.BlockStack>
 
                 <P.Divider />
@@ -202,8 +220,12 @@ export default function AIControlsPanel() {
                 </P.InlineStack>
 
                 <P.InlineStack gap="200">
-                  <P.Button onClick={save} loading={saving} disabled={locked}>Save</P.Button>
-                  <P.Button onClick={reload} disabled={saving}>Reset</P.Button>
+                  <P.Button onClick={save} loading={saving} disabled={locked}>
+                    Save
+                  </P.Button>
+                  <P.Button onClick={reload} disabled={saving}>
+                    Reset
+                  </P.Button>
                 </P.InlineStack>
               </P.BlockStack>
             </>
