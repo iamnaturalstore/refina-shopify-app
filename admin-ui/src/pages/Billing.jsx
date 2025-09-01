@@ -14,7 +14,7 @@ import {
   Icon,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { billingApi, getShop } from "../api/client.js";
+import { billingApi } from "../api/client.js";
 
 
 const PENDING_KEY = "refina:billing:pending";
@@ -45,27 +45,6 @@ const PLAN_DETAILS = {
     ],
   },
 };
-
-// Resolve full myshopify domain from ?shop or ?host
-function shopFromHostB64(hostB64) {
-  if (!hostB64) return "";
-  try {
-    const decoded = atob(hostB64);
-    const mAdmin = decoded.match(/^admin\.shopify\.com\/store\/([^\/?#]+)/i);
-    if (mAdmin?.[1]) return `${mAdmin[1].toLowerCase()}.myshopify.com`;
-    const mShop = decoded.match(/^([^\/?#]+)\.myshopify\.com\/admin/i);
-    if (mShop?.[1]) return `${mShop[1].toLowerCase()}.myshopify.com`;
-  } catch {}
-  return "";
-}
-function resolveShop() {
-  const usp = new URLSearchParams(window.location.search);
-  const qShop = (usp.get("shop") || "").toLowerCase();
-  if (qShop.endsWith(".myshopify.com")) return qShop;
-  const host = usp.get("host") || "";
-  const fromHost = shopFromHostB64(host);
-  return fromHost || "";
-}
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
@@ -103,22 +82,11 @@ export default function Billing() {
     setError("");
     setLoading(true);
     try {
-      const shop = resolveShop();
-      if (!shop) throw new Error("Missing shop context");
-      const j = await api(`/api/billing/plan?shop=${encodeURIComponent(shop)}`);
+      const j = await billingApi.getPlan();
       setPlan(parsePlanResponse(j));
-    } catch {
-      try {
-        const shop = resolveShop();
-        if (!shop) throw new Error("Missing shop context");
-        const r = await api(`/api/billing/plan?shop=${encodeURIComponent(shop)}`);
-        if (!r.ok) throw new Error("bad status");
-        const j = await r.json();
-        setPlan(parsePlanResponse(j));
-      } catch {
-        setError("Failed to load current plan.");
-        setPlan(null);
-      }
+    } catch (e) {
+      setError("Failed to load current plan.");
+      setPlan(null);
     } finally {
       setLoading(false);
     }
@@ -168,9 +136,7 @@ export default function Billing() {
   async function subscribe(which /* "pro" | "premium" */) {
     try {
       setBusy(true); setError("");
-      const shop = resolveShop();
-      if (!shop) throw new Error("Missing shop context");
-      const j = await api(`/api/billing/subscribe?shop=${encodeURIComponent(shop)}`, { method: "POST", body: { plan: which } });
+      const j = await billingApi.subscribe({ plan: which });
       const url = j?.confirmationUrl || j?.url || j?.confirmation_url || j?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
