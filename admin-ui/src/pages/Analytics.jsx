@@ -67,6 +67,7 @@ function normalizeEvent(e) {
 
   const tsServerIso =
     e.tsServerIso ||
+    (typeof e.ts === "string" ? e.ts : null) ||
     (typeof e.createdAt === "string" ? e.createdAt : null) ||
     (typeof e.tsServer === "number" ? new Date(e.tsServer).toISOString() : null) ||
     null;
@@ -172,36 +173,43 @@ export default function Analytics() {
     topConcerns: [],
   });
 
-  // Initial load: summary + first page of events
+  async function refetchAll(initialLimit = 100) {
+    const [sum, ev] = await Promise.all([
+      adminApi.getAnalyticsSummary({ days: 30 }),
+      adminApi.getAnalyticsEvents({ limit: initialLimit }),
+    ]);
+    setSummary(normalizeSummary(sum));
+    const items = pickArray(ev).map(normalizeEvent);
+    setEvents(items);
+    const next = ev?.nextCursor ?? ev?.cursor ?? "";
+    setCursor(typeof next === "string" ? next : "");
+    setAggs(buildAggregates(items));
+  }
+
+  // Initial load + listen for ingests + light polling while visible
   React.useEffect(() => {
     let on = true;
     (async () => {
       try {
         setErr("");
         setLoading(true);
-        const [sum, ev] = await Promise.all([
-          adminApi.getAnalyticsSummary({ days: 30 }),
-          adminApi.getAnalyticsEvents({ limit: 100 }), // fetch a decent sample
-        ]);
-        if (!on) return;
-
-        setSummary(normalizeSummary(sum));
-
-        const items = pickArray(ev).map(normalizeEvent);
-        setEvents(items);
-
-        const next = ev?.nextCursor ?? ev?.cursor ?? "";
-        setCursor(typeof next === "string" ? next : "");
-
-        setAggs(buildAggregates(items));
+        await refetchAll(100);
       } catch (e) {
         if (on) setErr(e?.message || "Failed to load analytics");
       } finally {
         if (on) setLoading(false);
       }
     })();
+    function onIngest() { refetchAll(50).catch(() => {}); }
+    window.addEventListener("rf:analytics:ingested", onIngest);
+    // poll every 30s when tab is visible (catches storefront/webhook/curl ingests)
+    let iv = setInterval(() => {
+      if (document.visibilityState === "visible") refetchAll(50).catch(() => {});
+    }, 30000);
     return () => {
       on = false;
+      window.removeEventListener("rf:analytics:ingested", onIngest);
+      clearInterval(iv);
     };
   }, [shop]);
 
@@ -238,7 +246,10 @@ export default function Analytics() {
           {err && <Text tone="critical">{err}</Text>}
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h3" variant="headingSm">Last 30 days</Text>
-            {loading && <Spinner size="small" />}
+            <InlineStack gap="200" blockAlign="center">
+              {loading && <Spinner size="small" />}
+              <Button onClick={() => refetchAll().catch(() => {})} size="micro">Refresh</Button>
+            </InlineStack>
           </InlineStack>
           <Divider />
 

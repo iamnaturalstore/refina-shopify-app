@@ -71,6 +71,50 @@
   } else {
     init();
   }
+
+  /* ───────────────────────────────────────────────────────────────
+   * Analytics ingest: report modal queries back to the backend
+   * Exposes window.RefinaAnalytics.report({...})
+   * ─────────────────────────────────────────────────────────────── */
+  var SHOP =
+    (window.Shopify && window.Shopify.shop) ||
+    (window.__REFINA__ && window.__REFINA__.shop) ||
+    "";
+
+  // Overrideable via window.__REFINA__.apiBase; falls back to Render host
+  var API_BASE =
+    (window.__REFINA__ && window.__REFINA__.apiBase) ||
+    "https://refina-shopify-app.onrender.com";
+
+  async function reportAnalyticsEvent(input) {
+    try {
+      var body = {
+        type: (input && input.type) || "concern",
+        concern: (input && input.concern) || "",
+        productIds: (input && Array.isArray(input.productIds)) ? input.productIds : [],
+        plan: (input && input.plan) || "unknown",
+        model: (input && input.model) || "",
+        explanation: (input && input.explanation) || ""
+      };
+      var url = API_BASE + "/api/admin/analytics/ingest?shop=" + encodeURIComponent(SHOP);
+      var res = await fetch(url, {
+        method: "POST",
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Shop-Domain": SHOP
+        },
+        body: JSON.stringify(body)
+      });
+      // swallow errors; UX should not depend on analytics
+      await res.text().catch(function () {});
+    } catch (_) {}
+  }
+
+  // Expose a tiny API for the modal code to call:
+  window.RefinaAnalytics = {
+    report: reportAnalyticsEvent
+  };
 })();
 
 // build bump: 2025-09-01T03:10:07Z
