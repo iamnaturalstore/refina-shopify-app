@@ -1,7 +1,6 @@
-import api from "../api/client"
 // admin-ui/src/pages/Settings.jsx
+import api from "../api/client";
 import * as React from "react";
-import { api } from "../api/client";
 import {
   Card,
   BlockStack,
@@ -64,16 +63,13 @@ function normalizeLevel(v) {
   return "free";
 }
 
-// Try preferred /api route; fall back to non-/api
+// Try preferred /api route
 async function getSettings() {
   try {
     const j = await api("/api/admin/store-settings");
     return j?.settings || j || {};
-  } catch {
-    const r = await api("/api/admin/store-settings");
-    if (!r.ok) throw new Error("Failed to load settings");
-    const j = await r.json();
-    return j?.settings || j || {};
+  } catch (e) {
+    throw new Error(e?.message || "Failed to load settings");
   }
 }
 
@@ -84,15 +80,8 @@ async function saveSettings(settings) {
       body: { settings },
     });
     return j;
-  } catch {
-    const r = { const __opts = {
-      method: "POST",
-
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings }),
-    });
-    if (!r.ok) throw new Error("Failed to save settings");
-    return await r.json();
+  } catch (e) {
+    throw new Error(e?.message || "Failed to save settings");
   }
 }
 
@@ -110,7 +99,9 @@ export default function Settings() {
 
   React.useEffect(() => {
     (async () => {
-      setError(""); setOk(""); setLoading(true);
+      setError("");
+      setOk("");
+      setLoading(true);
       try {
         const raw = await getSettings();
         if (raw?.plan?.level) setPlanBadge(normalizeLevel(raw.plan.level));
@@ -126,7 +117,9 @@ export default function Settings() {
   }, []);
 
   async function handleSave() {
-    setBusy(true); setError(""); setOk("");
+    setBusy(true);
+    setError("");
+    setOk("");
     try {
       const payload = { ...settings, updatedAt: new Date().toISOString() };
       await saveSettings(payload);
