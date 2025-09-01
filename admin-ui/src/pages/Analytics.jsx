@@ -91,7 +91,7 @@ function normalizeEvent(e) {
   // Plan (for plan mix), tolerate multiple fields
   const planRaw = (e.plan || e.userPlan || e.meta?.plan || "").toString().toLowerCase();
   const plan = /premium|pro\+|pro plus/.test(planRaw)
-    ? "pro+"
+    ? "premium"
     : /pro/.test(planRaw)
     ? "pro"
     : /free/.test(planRaw)
@@ -116,7 +116,7 @@ function normalizeEvent(e) {
 function buildAggregates(events) {
   const concernCounts = new Map(); // lowercased label → count
   const uniqueProducts = new Set();
-  const planMix = { free: 0, pro: 0, "pro+": 0, unknown: 0 };
+  const planMix = { free: 0, pro: 0, "premium": 0, unknown: 0 };
 
   for (const ev of events) {
     const c = String(ev.concern || "").trim().toLowerCase();
@@ -125,8 +125,8 @@ function buildAggregates(events) {
     for (const pid of ev._productIds || []) uniqueProducts.add(pid);
 
     if (ev.plan === "free") planMix.free++;
-    else if (ev.plan === "pro") planMix.pro++;
-    else if (ev.plan === "pro+") planMix["pro+"]++;
+    else if (ev.plan === "pro") planMix.pro;
+    else if (ev.plan === "premium") planMix["premium"]++;
     else planMix.unknown++;
   }
 
@@ -168,7 +168,7 @@ export default function Analytics() {
   const [aggs, setAggs] = React.useState({
     uniqueConcerns: 0,
     uniqueProducts: 0,
-    planMix: { free: 0, pro: 0, "pro+": 0, unknown: 0 },
+    planMix: { free: 0, pro: 0, "premium": 0, unknown: 0 },
     topConcerns: [],
   });
 
@@ -268,7 +268,7 @@ export default function Analytics() {
                 <InlineStack gap="200" wrap blockAlign="center">
                   <Badge tone="subdued">Free {aggs.planMix.free}</Badge>
                   <Badge tone="attention">Pro {aggs.planMix.pro}</Badge>
-                  <Badge tone="success">Pro+ {aggs.planMix["pro+"]}</Badge>
+                  <Badge tone="success">Premium {aggs.planMix["premium"]}</Badge>
                   {aggs.planMix.unknown ? (
                     <Badge tone="critical">Unknown {aggs.planMix.unknown}</Badge>
                   ) : null}
