@@ -1,6 +1,15 @@
 // refina/admin-ui/src/pages/Analytics.jsx
 import * as React from "react";
-import { Page, Card, BlockStack, InlineStack, Text, Button, Divider, Spinner } from "@shopify/polaris";
+import {
+  Page,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  Button,
+  Divider,
+  Spinner,
+} from "@shopify/polaris";
 import { adminApi, getShop } from "../api/client.js";
 
 /**

@@ -1,6 +1,20 @@
 // admin-ui/src/pages/Home.jsx
 import * as React from "react";
-import { Card, BlockStack, InlineStack, Button, Tooltip, Badge, Text, Box, Divider, Banner, Icon, ProgressBar } from "@shopify/polaris";
+import {
+  Card,
+  BlockStack,
+  InlineStack,
+  Button,
+  Tooltip,
+  Badge,
+  Text,
+  Box,
+  Divider,
+  Banner,
+  Icon,
+  ProgressBar,
+} from "@shopify/polaris";
+import { CheckIcon } from "@shopify/polaris-icons";
 import { api, getShop } from "../api/client.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────
