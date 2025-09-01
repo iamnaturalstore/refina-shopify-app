@@ -972,6 +972,29 @@ app.post("/v1/recommend", async (req, res) => {
   }
 });
 
+/* ────────────────────────────────────────────────────────────────────
+ * App Proxy: storefront settings
+ * External (Shopify):  GET /apps/refina/v1/settings
+ * Internal (your app): GET /proxy/refina/v1/settings  (signature verified)
+ * Uses the same Firestore-backed loader as Admin to guarantee consistency.
+ * ──────────────────────────────────────────────────────────────────── */
+app.get("/proxy/refina/v1/settings", verifyAppProxy, async (req, res) => {
+  try {
+    // Shopify App Proxy supplies ?shop=<full>.myshopify.com (verified by middleware)
+    const shop = toMyshopifyDomain(req.query.shop || "");
+    if (!shop) return res.status(400).json({ error: "shop required" });
+
+    const settings = await getSettings(shop); // shared loader
+    // Short caching to keep storefront snappy; adjust as needed
+    res.set("Cache-Control", "public, max-age=60");
+    return res.json({ storeId: shop, settings: settings || {} });
+  } catch (e) {
+    console.error("GET /proxy/refina/v1/settings error", e);
+    // If signature failed, verifyAppProxy should have already returned 401
+    return res.status(500).json({ error: "internal_error" });
+  }
+});
+
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
   const raw = String((req.query.shop || req.query.storeId || "")).toLowerCase().trim();
@@ -996,6 +1019,7 @@ app.use("/api/admin", analyticsRouter); // /api/admin/analytics/* (overview, log
 app.use("/api/admin", adminSettingsRouter); // /api/admin/store-settings (GET/PUT)
 app.use("/api/admin", analyticsIngestRouter);
 app.use("/api", analyticsIngestRouter);
+
 
 // ─────────────────────────────────────────────────────────────
 /* Listen */

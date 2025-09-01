@@ -7,11 +7,14 @@ import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
 // light sanitize
 const sanitize = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, "");
 
-/** Canonicalize to "<shop>.myshopify.com" */
+/** Strict full-domain check: "<shop>.myshopify.com" */
+const FULL_SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+
+/** Canonicalize only when already full "<shop>.myshopify.com" */
 function toMyshopifyDomain(raw) {
   const s = sanitize(raw);
   if (!s) return "";
-  return s.endsWith(".myshopify.com") ? s : `${s}.myshopify.com`;
+  return s.endsWith(".myshopify.com") ? s : "";
 }
 
 /** host (base64) → "<shop>.myshopify.com" */
@@ -21,10 +24,16 @@ function shopFromHostB64(hostB64) {
     const decoded = Buffer.from(hostB64, "base64").toString("utf8");
     // admin.shopify.com/store/<store>
     const mAdmin = decoded.match(/^admin\.shopify\.com\/store\/([^\/?#]+)/i);
-    if (mAdmin?.[1]) return `${mAdmin[1].toLowerCase()}.myshopify.com`;
+    if (mAdmin?.[1]) {
+      const full = `${sanitize(mAdmin[1])}.myshopify.com`;
+      return FULL_SHOP_RE.test(full) ? full : "";
+    }
     // <shop>.myshopify.com/admin
     const mShop = decoded.match(/^([^\/?#]+)\.myshopify\.com\/admin/i);
-    if (mShop?.[1]) return `${mShop[1].toLowerCase()}.myshopify.com`;
+    if (mShop?.[1]) {
+      const full = `${sanitize(mShop[1])}.myshopify.com`;
+      return FULL_SHOP_RE.test(full) ? full : "";
+    }
   } catch {}
   return "";
 }
@@ -38,26 +47,40 @@ function shopFromIdToken(idToken) {
     const dest = payload?.dest; // e.g. "https://refina-demo.myshopify.com"
     if (dest) {
       const hostname = new URL(dest).hostname.toLowerCase();
-      if (hostname.endsWith(".myshopify.com")) return hostname;
+      return FULL_SHOP_RE.test(hostname) ? hostname : "";
     }
   } catch {}
   return "";
 }
 
-/** Resolve incoming store identifier from query/body and canonicalize */
+/** Resolve incoming store identifier from headers/query/body and canonicalize (full domain only) */
 function resolveShop(source = {}) {
-  // 1) explicit storeId | shop
-  const raw = source.storeId || source.shop;
-  if (raw) {
-    const dom = toMyshopifyDomain(raw);
-    if (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(dom)) return dom;
+  // 0) Prefer Shopify header if present
+  const headerShop =
+    source["x-shopify-shop-domain"] ||
+    source["X-Shopify-Shop-Domain"] ||
+    source.shopifyShop ||
+    "";
+  if (headerShop) {
+    const full = toMyshopifyDomain(headerShop);
+    if (FULL_SHOP_RE.test(full)) return full;
   }
+
+  // 1) Explicit query/body: only accept values that are already full domains
+  const raw = source.shop || source.storeId || "";
+  if (raw) {
+    const s = sanitize(raw);
+    if (FULL_SHOP_RE.test(s)) return s; // ❗ do NOT auto-append for bare handles
+  }
+
   // 2) host (base64)
   const fromHost = shopFromHostB64(source.host);
   if (fromHost) return fromHost;
+
   // 3) id_token (Shopify JWT)
   const fromJwt = shopFromIdToken(source.id_token || source.idToken);
   if (fromJwt) return fromJwt;
+
   return "";
 }
 
@@ -69,14 +92,16 @@ const router = Router();
  *  Returns { storeId, settings }. Never 500s on read.
  */
 router.get("/store-settings", async (req, res) => {
-  const shop = resolveShop(req.query);
+  const shop = resolveShop({ ...(req.query || {}), ...(req.headers || {}) });
   if (!shop) return res.status(400).json({ error: "shop required" });
 
   try {
     const ref = dbAdmin.collection("storeSettings").doc(shop);
     const snap = await ref.get();
-    // Keep minimal back-compat: default plan "free" if nothing there
+    // Minimal back-compat: default plan "free" if nothing there
     const settings = snap.exists ? (snap.data() || {}) : { plan: "free" };
+    // Optional caching headers (safe, short)
+    res.set("Cache-Control", "no-store");
     return res.json({ storeId: shop, settings });
   } catch (e) {
     console.error("GET /api/admin/store-settings error:", e?.message || e);
@@ -90,14 +115,16 @@ router.get("/store-settings", async (req, res) => {
  */
 router.put("/store-settings", async (req, res) => {
   try {
-    const shop = resolveShop({ ...(req.query || {}), ...(req.body || {}) });
+    const shop = resolveShop({ ...(req.query || {}), ...(req.body || {}), ...(req.headers || {}) });
     if (!shop) return res.status(400).json({ error: "shop required" });
 
     const settings = req.body?.settings || {};
     const ref = dbAdmin.collection("storeSettings").doc(shop);
+
     await ref.set({ ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
     const fresh = await ref.get();
+    res.set("Cache-Control", "no-store");
     return res.json({
       ok: true,
       storeId: shop,

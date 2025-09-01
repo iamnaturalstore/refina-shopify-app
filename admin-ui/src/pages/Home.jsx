@@ -15,7 +15,7 @@ import {
   ProgressBar,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { api, getShop } from "../api/client.js";
+import { api, adminApi, getShop } from "../api/client.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
@@ -73,17 +73,17 @@ export default function Home() {
     try {
       setLoadingOverview(true);
       setLoadingLogs(true);
-      const [over, j] = await Promise.all([
-        api(`/api/admin/analytics/overview?days=30`),
-        api(`/api/admin/analytics/logs?limit=5`),
+      const [over, ev] = await Promise.all([
+        adminApi.getAnalyticsSummary({ days: 30 }),
+        adminApi.getAnalyticsEvents({ limit: 5 }),
       ]);
       setOverview(over || {});
-      const items = Array.isArray(j?.rows)
-        ? j.rows
-        : Array.isArray(j?.logs)
-        ? j.logs
-        : Array.isArray(j)
-        ? j
+      const items = Array.isArray(ev?.rows)
+        ? ev.rows
+        : Array.isArray(ev?.logs)
+        ? ev.logs
+        : Array.isArray(ev)
+        ? ev
         : [];
       setLogs(items.slice(0, 5));
     } catch (e) {
@@ -139,7 +139,7 @@ export default function Home() {
     (async () => {
       try {
         setLoadingOverview(true);
-        const over = await api(`/api/admin/analytics/overview?days=30`);
+        const over = await adminApi.getAnalyticsSummary({ days: 30 });
         if (on) setOverview(over || {});
       } catch (e) {
         if (on) setErr(prev => prev || `Analytics error: ${e?.message || "failed to load"}`);
@@ -156,14 +156,14 @@ export default function Home() {
     (async () => {
       try {
         setLoadingLogs(true);
-        const j = await api(`/api/admin/analytics/logs?limit=5`);
-        // CHANGED: prefer `rows`, then `logs`, then array fallback (matches backend response)
-        const items = Array.isArray(j?.rows)
-          ? j.rows
-          : Array.isArray(j?.logs)
-          ? j.logs
-          : Array.isArray(j)
-          ? j
+        const ev = await adminApi.getAnalyticsEvents({ limit: 5 });
+        // prefer `rows`, then `logs`, then array fallback (matches backend response)
+        const items = Array.isArray(ev?.rows)
+          ? ev.rows
+          : Array.isArray(ev?.logs)
+          ? ev.logs
+          : Array.isArray(ev)
+          ? ev
           : [];
         if (on) setLogs(items.slice(0, 5));
       } catch {
@@ -209,9 +209,16 @@ export default function Home() {
 
   // overview shape tolerance
   const totals = overview?.totals || overview || {};
-  const interactions = Number(
-    totals.interactions ?? totals.queries ?? totals.sessions ?? totals.requests ?? 0
-  );
+  // Include backend totals.events as canonical interactions
+  const interactions =
+    Number(
+      totals.interactions ??
+        totals.events ??
+        totals.queries ??
+        totals.sessions ??
+        totals.requests ??
+        0
+    ) || 0;
   const productClicks = Number(
     totals.productClicks ?? totals.clicks ?? totals.cta ?? 0
   );

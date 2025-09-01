@@ -31,7 +31,9 @@ function normalizeSummary(sum) {
   if (!sum || typeof sum !== "object") return { totals: { interactions: 0, productClicks: 0 } };
   // Prefer explicit totals if present
   if (sum.totals && typeof sum.totals === "object") {
-    const interactions = Number(sum.totals.interactions ?? sum.totals.queries ?? 0) || 0;
+    // Map backend totals.events → interactions
+    const interactions =
+      Number(sum.totals.interactions ?? sum.totals.events ?? sum.totals.queries ?? 0) || 0;
     const productClicks = Number(sum.totals.productClicks ?? sum.totals.clicks ?? 0) || 0;
     return { ...sum, totals: { ...sum.totals, interactions, productClicks } };
   }
@@ -77,15 +79,10 @@ export default function Analytics() {
       try {
         setErr("");
         setLoading(true);
-        // 30-day window keys (server may ignore; safe to send)
-        const to = new Date();
-        const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-        const toKey = to.toISOString().slice(0, 10);
-        const fromKey = from.toISOString().slice(0, 10);
 
         const [sum, ev] = await Promise.all([
-          adminApi.getAnalyticsSummary({ shop, from: fromKey, to: toKey }),
-          adminApi.getAnalyticsEvents({ shop, limit: 25 }),
+          adminApi.getAnalyticsSummary({ days: 30 }),
+          adminApi.getAnalyticsEvents({ limit: 25 }),
         ]);
         if (!on) return;
 
@@ -110,7 +107,7 @@ export default function Analytics() {
   async function loadMore() {
     try {
       setLoadingMore(true);
-      const ev = await adminApi.getAnalyticsEvents({ shop, limit: 25, cursor });
+      const ev = await adminApi.getAnalyticsEvents({ limit: 25, cursor });
       const items = pickArray(ev).map(normalizeEvent);
       setEvents((prev) => prev.concat(items));
       const next = ev?.nextCursor ?? ev?.cursor ?? "";
