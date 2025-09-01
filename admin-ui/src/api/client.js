@@ -1,4 +1,4 @@
-// admin-ui/src/api/client.js — FINAL (production-hardened, now with adminApi & billingApi)
+// admin-ui/src/api/client.js — FINAL (named exports only)
 import createApp from "@shopify/app-bridge";
 import { authenticatedFetch } from "@shopify/app-bridge-utils";
 
@@ -18,7 +18,7 @@ import { authenticatedFetch } from "@shopify/app-bridge-utils";
       if (v) sessionStorage.setItem(storeKey, v);
     }
   } catch {
-    // Never crash the Admin UI over storage issues (private mode, etc.)
+    // Don't crash Admin UI over storage issues
   }
 })();
 
@@ -29,7 +29,7 @@ function getPersisted(key, storeKey) {
   return q.get(key) || h.get(key) || sessionStorage.getItem(storeKey) || "";
 }
 
-// Canonicalize to "<shop>.myshopify.com" (must already be full)
+// Canonicalize to "<shop>.myshopify.com"
 function toMyshopifyDomain(raw) {
   const s = String(raw || "").trim().toLowerCase();
   if (!s) return "";
@@ -40,18 +40,17 @@ function getHost() {
   return getPersisted("host", "shopify-host");
 }
 
-// ⬅️ Exported for use in pages; guarantees full domain (no short IDs)
+// ⬅️ Exported helpers
 export function getShop() {
   const raw = getPersisted("shop", "shopify-shop");
   return toMyshopifyDomain(raw);
 }
 
-// ⬅️ Deprecated: returns full shop only (kept for compatibility)
 export function getStoreIdFromUrl() {
   return (getShop() || "").toLowerCase();
 }
 
-// ⬅️ Always preserves existing params; sends FULL domains when missing
+// Attach host/shop to any relative Admin API path
 export function withContext(path) {
   const url = new URL(path, window.location.origin);
   const params = new URLSearchParams(url.search);
@@ -84,10 +83,10 @@ function getAppBridge() {
 }
 
 /**
- * Authenticated fetch with:
- * - Canonical shop in query (no short IDs leaking into APIs)
- * - Cache control: no-store (Admin pages should always reflect latest)
- * - Shopify reauth handling (401/403 with reauth headers)
+ * Authenticated fetch:
+ * - Adds host/shop query automatically
+ * - Sends JSON when `init.body` is an object
+ * - Handles Shopify reauth hints (401/403)
  */
 export async function api(path, init = {}) {
   getAppBridge(); // throws fast if misconfigured
@@ -99,17 +98,12 @@ export async function api(path, init = {}) {
   const baseInit = isJSON
     ? {
         ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...(init.headers || {}),
-        },
+        headers: { "Content-Type": "application/json", ...(init.headers || {}) },
         body: JSON.stringify(init.body),
       }
     : init;
 
-  // Encourage fresh reads in Admin; doesn’t affect server cache headers
   const fetchInit = { cache: "no-store", ...baseInit };
-
   const res = await _fetchFn(finalUrl, fetchInit);
 
   if (res.status === 401 || res.status === 403) {
@@ -117,7 +111,7 @@ export async function api(path, init = {}) {
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
       window.top.location.href = to;
-      return new Promise(() => {});
+      return new Promise(() => {}); // halt
     }
   }
 
@@ -136,18 +130,22 @@ export async function api(path, init = {}) {
 }
 
 /* ─────────────────────────────
- * Convenience wrappers expected by pages
- * (keep URLs minimal; api() adds host/shop automatically)
+ * Convenience wrappers for pages
  * ───────────────────────────── */
-
 export const adminApi = {
-  async getAnalyticsSummary({ from, to } = {}) {
+  // Accept either {from,to} or {days}; default to 30 days when not provided
+  async getAnalyticsSummary({ days = 30, from, to } = {}) {
     const qs = new URLSearchParams();
-    if (from) qs.set("from", from);
-    if (to) qs.set("to", to);
+    if (from && to) {
+      qs.set("from", from);
+      qs.set("to", to);
+    } else if (days != null) {
+      qs.set("days", String(days));
+    }
     const url = `/api/admin/analytics/overview${qs.toString() ? `?${qs.toString()}` : ""}`;
     return api(url);
   },
+
   async getAnalyticsEvents({ limit, cursor } = {}) {
     const qs = new URLSearchParams();
     if (limit) qs.set("limit", String(limit));
@@ -168,3 +166,5 @@ export const billingApi = {
     });
   },
 };
+
+// NOTE: No default export on purpose — use named imports everywhere.

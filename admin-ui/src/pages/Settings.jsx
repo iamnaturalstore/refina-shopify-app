@@ -1,19 +1,8 @@
 // admin-ui/src/pages/Settings.jsx
-import api from "../api/client";
 import * as React from "react";
-import {
-  Card,
-  BlockStack,
-  InlineStack,
-  Button,
-  Text,
-  TextField,
-  Select,
-  Checkbox,
-  Banner,
-  Divider,
-  Box,
-} from "@shopify/polaris";
+import { Card, BlockStack, InlineStack, Button, Text, TextField, Select, Checkbox, Banner, Divider, Box } from "@shopify/polaris";
+import { api } from "../api/client.js";
+
 
 // ---------- Defaults (edit as you like) ----------
 const DEFAULT_SETTINGS = {

@@ -1,21 +1,9 @@
-import api from "../api/client"
 // admin-ui/src/pages/Billing.jsx
 import * as React from "react";
-import { api } from "../api/client";
-import {
-  Card,
-  BlockStack,
-  InlineStack,
-  Button,
-  Tooltip,
-  Badge,
-  Text,
-  Box,
-  Divider,
-  Banner,
-  Icon,
-} from "@shopify/polaris";
+import { Card, BlockStack, InlineStack, Button, Tooltip, Badge, Text, Box, Divider, Banner, Icon } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
+import { api, billingApi, getShop } from "../api/client.js";
+
 
 const PENDING_KEY = "refina:billing:pending";
 
