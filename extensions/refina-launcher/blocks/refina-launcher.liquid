@@ -162,6 +162,10 @@ Refina Theme App Embed (launcher)
 })();
 </script>
 
+{%- assign ver = block.settings.asset_version | default: 'v3' -%}
+<link rel="stylesheet" href="/apps/refina/concierge.css?v={{ ver }}">
+<script type="module" src="/apps/refina/concierge.js?v={{ ver }}" defer></script>
+
 {% schema %}
 {
   "name": "Refina Concierge Launcher",
@@ -181,5 +185,6 @@ Refina Theme App Embed (launcher)
     { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false }
   ],
   "enabled_on": { "templates": ["*"] }
+  
 }
 {% endschema %}
