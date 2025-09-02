@@ -468,47 +468,69 @@ function rfMakeEtag(obj) {
   }
 }
 
-// ⬇️ SECURITY: protect settings with App Proxy HMAC + add rate limit
-app.get(
-  "/proxy/refina/v1/settings",
-  requireAppProxy,
-  rateLimitAppProxy,
-  async (req, res) => {
-    try {
-      const shop = req.storeId; // canonical <shop>.myshopify.com from App Proxy
-      const s = await getSettings(shop);
+// HMAC-protected App Proxy settings → returns Admin tokens over defaults
+app.get("/proxy/refina/v1/settings", requireAppProxy, rateLimitAppProxy, async (req, res) => {
+  try {
+    const shop = req.storeId; // verified <shop>.myshopify.com
 
-      // Merge Admin settings with theme defaults so the modal reflects Admin UI
-      const payload = {
+    // Read Admin-saved settings (canonical)
+    const snap = await db.doc(`storeSettings/${shop}`).get();
+    const doc = snap.exists ? (snap.data() || {}) : {};
+
+    // Back-compat: support legacy { theme:{...} } OR flat shape
+    const theme = (doc && typeof doc.theme === "object") ? doc.theme : doc;
+
+    // Merge defaults ← Admin tokens (Admin wins)
+    const mergedTokens = { ...RF_DEFAULT_THEME.tokens, ...(theme.tokens || {}) };
+
+    const payload = {
+      shop,
+      presetId: theme.presetId || RF_DEFAULT_THEME.presetId,
+      version: Number(theme.version || RF_DEFAULT_THEME.version),
+      tokens: mergedTokens,
+      tone: theme.tone || doc.tone || "expert",
+      category: theme.category || doc.category || "Beauty",
+      domain: theme.domain || doc.domain || "",
+      enabledPacks: theme.enabledPacks || doc.enabledPacks || [],
+      valid: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    // ── instrumentation to prove this handler served the response
+    res.set("X-RF-Handler", "settings-merged-20250902");
+    if (String(req.query.dbg || "") === "1") {
+      payload.debug = {
+        handler: "settings-merged-20250902",
         shop,
-        ...RF_DEFAULT_THEME,
-        tone: s.tone,
-        category: s.category,
-        domain: s.domain,
-        enabledPacks: s.enabledPacks,
-        valid: true,
-        updatedAt: new Date().toISOString()
+        tokenCount: Object.keys(mergedTokens).length,
+        tokenSample: {
+          "--rf-color-primary": mergedTokens["--rf-color-primary"] || null
+        },
+        docPath: `storeSettings/${shop}`,
+        hadLegacyThemeWrapper: !!(doc && doc.theme && typeof doc.theme === "object")
       };
+    }
 
-      const etag = rfMakeEtag(payload);
-      if (req.headers["if-none-match"] === etag) {
-        res.set("ETag", etag);
-        res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
-        return res.status(304).end();
-      }
-
+    const etag = rfMakeEtag(payload);
+    if (req.headers["if-none-match"] === etag) {
       res.set("ETag", etag);
       res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
-      res.type("application/json").status(200).send(rfStableStringify(payload));
-    } catch (err) {
-      const fallback = { ...RF_DEFAULT_THEME, valid: false, error: "theme_fetch_failed" };
-      const etag = rfMakeEtag(fallback);
-      res.set("ETag", etag);
-      res.set("Cache-Control", "public, max-age=60");
-      res.type("application/json").status(200).send(rfStableStringify(fallback));
+      return res.status(304).end();
     }
+    res.set("ETag", etag);
+    res.set("Cache-Control", "public, max-age=300, stale-while-revalidate=30");
+    return res.type("application/json").status(200).send(rfStableStringify(payload));
+  } catch (err) {
+    const fallback = { ...RF_DEFAULT_THEME, valid: false, error: "theme_fetch_failed" };
+    res.set("X-RF-Handler", "settings-fallback-20250902");
+    const etag = rfMakeEtag(fallback);
+    res.set("ETag", etag);
+    res.set("Cache-Control", "public, max-age=60");
+    return res.type("application/json").status(200).send(rfStableStringify(fallback));
   }
-);
+});
+
+
 // ────────────────────────── END Refina settings v1 ──────────────────────────
 
 // Webhooks (unchanged except validations)

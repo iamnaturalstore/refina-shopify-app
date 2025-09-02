@@ -1,6 +1,6 @@
 /* Refina storefront bootstrap: fetch settings and apply CSS variables */
 (function () {
-  var ASSET_VER = "v1";
+  var ASSET_VER = "v2";
 
   function $(sel) { return document.querySelector(sel); }
 
@@ -13,9 +13,13 @@
   }
 
   function applyTokens(el, tokens) {
-    var root = el || findRoot();
-    var style = root.style;
-    var t = tokens || {};
+  var root = el || findRoot();
+  var t = tokens || {};
+  var targets = [root, document.documentElement]; // set on modal root + document root
+
+  for (var i = 0; i < targets.length; i++) {
+    var style = targets[i] && targets[i].style;
+    if (!style) continue;
     for (var k in t) {
       if (!Object.prototype.hasOwnProperty.call(t, k)) continue;
       if (k && k.charAt(0) === "-") {
@@ -23,6 +27,10 @@
       }
     }
   }
+}
+
+
+
 
   function etagOf(obj) {
     try {
