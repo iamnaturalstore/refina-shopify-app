@@ -151,8 +151,20 @@ Refina Theme App Embed (launcher)
       if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus(); else btn.focus();
     }
 
-    btn.addEventListener('click', openModal);
-    if (openOnLoad) setTimeout(openModal, 0);
+    // Editor-safe: in Theme Editor/Admin, open App Proxy in a new tab instead of iframing (XFO)
+    const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
+    const IN_ADMIN = /(^|\.)admin\.shopify\.com$/.test((window.top && window.top.location && window.top.location.hostname) || "");
+
+    btn.addEventListener('click', () => {
+      if (IN_THEME_EDITOR || IN_ADMIN) {
+        const url = buildIframeUrl();
+        try { window.open(url, '_blank', 'noopener'); } catch (_) { location.href = url; }
+      } else {
+        openModal();
+      }
+    });
+
+    if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) setTimeout(openModal, 0);
 
     root.dataset.initialized = 'true';
   }
@@ -161,10 +173,6 @@ Refina Theme App Embed (launcher)
   else initAll();
 })();
 </script>
-
-{%- assign ver = block.settings.asset_version | default: 'v3' -%}
-<link rel="stylesheet" href="/apps/refina/concierge.css?v={{ ver }}">
-<script type="module" src="/apps/refina/concierge.js?v={{ ver }}" defer></script>
 
 {% schema %}
 {
@@ -185,6 +193,5 @@ Refina Theme App Embed (launcher)
     { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false }
   ],
   "enabled_on": { "templates": ["*"] }
-  
 }
 {% endschema %}
