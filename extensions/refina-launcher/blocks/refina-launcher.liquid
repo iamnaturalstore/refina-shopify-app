@@ -2,13 +2,35 @@
 Refina Theme App Embed (launcher)
 - Loads concierge assets via Shopify App Proxy (versioned for cache-busting)
 - Outputs a single launcher mount with data-* config
-- Runs a tiny IIFE to insert the button and open the App Proxy iframe
+- Applies Admin CSS tokens inline (so we’re not blocked by external JS)
+- Opens App Proxy in a new tab when inside Theme Editor (editor-safe)
 {%- endcomment -%}
 
 {%- assign ver = block.settings.asset_version | default: 'v3' -%}
 
 <link rel="stylesheet" href="/apps/refina/concierge.css?v={{ ver }}">
 <script type="module" src="/apps/refina/concierge.js?v={{ ver }}" defer></script>
+<div
+  data-refina-launcher
+  ...
+  data-embed-ver="{{ ver }}"
+></div>
+<script>
+(() => {
+  ...
+  const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
+  const IN_ADMIN = /(^|\.)admin\.shopify\.com$/.test((window.top && window.top.location && window.top.location.hostname) || "");
+  ...
+  const btn = document.createElement('button');
+  btn.className = 'refina-launcher-btn';
+  btn.type = 'button';
+  const VER = "{{ ver | escape }}";
+  btn.setAttribute('data-ver', VER);
+  btn.innerHTML = IN_THEME_EDITOR ? `<span>Refina <small style="opacity:.7">(${VER})</small></span>` : `<span>Refina</span>`;
+  ...
+})();
+</script>
+
 
 {%- comment -%} Launcher mount (data-* consumed by the IIFE below) {%- endcomment -%}
 {%- assign page_type = template.name | downcase -%}
@@ -28,7 +50,36 @@ Refina Theme App Embed (launcher)
 ></div>
 
 <script>
-/* Refina theme launcher (prod-only) — single IIFE, no HMR, opens App Proxy iframe */
+/* ──────────────────────────────────────────────────────────────
+ *  A) Apply Admin CSS tokens immediately (inline, no external deps)
+ * ────────────────────────────────────────────────────────────── */
+(() => {
+  async function fetchSettings() {
+    try {
+      const r = await fetch("/apps/refina/v1/settings", { headers: { "Accept": "application/json" } });
+      if (!r.ok) throw new Error("settings_fetch_failed:" + r.status);
+      return r.json();
+    } catch (_) { return null; }
+  }
+  function applyTokens(tokens) {
+    if (!tokens || typeof tokens !== "object") return;
+    const targets = [document.documentElement, (document.querySelector(".rf-root") || document.body)];
+    for (const el of targets) {
+      if (!el || !el.style) continue;
+      for (const k in tokens) {
+        if (!Object.prototype.hasOwnProperty.call(tokens, k)) continue;
+        if (k && k.charAt(0) === "-") {
+          try { el.style.setProperty(k, String(tokens[k])); } catch (_) {}
+        }
+      }
+    }
+  }
+  fetchSettings().then(s => applyTokens(s && s.tokens));
+})();
+
+/* ──────────────────────────────────────────────────────────────
+ *  B) Refina theme launcher — editor-safe
+ * ────────────────────────────────────────────────────────────── */
 (() => {
   const q = (s, r = document) => r.querySelector(s);
   const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -105,7 +156,6 @@ Refina Theme App Embed (launcher)
       // shop → (App Proxy /apps/refina) → backend /proxy/refina
       const base = new URL(`https://${shopDomain}/${proxyPath}`);
       base.searchParams.set('source', 'launcher');
-      // Optional dev toggle retained (no effect in prod)
       try { if (localStorage.getItem('refinaDev') === '1') base.searchParams.set('dev', '1'); } catch {}
       return base.toString();
     }
