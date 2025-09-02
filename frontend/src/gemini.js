@@ -1,4 +1,4 @@
-// src/gemini.js
+// frontend/src/gemini.js
 // Production-safe client wrapper: NO direct LLM calls from the browser.
 // Delegates to BFF at /proxy/refina/v1/recommend and adapts the response
 // to the legacy shape expected by callers of getGeminiResponse().
@@ -156,6 +156,20 @@ export async function getGeminiResponse({
 
     // Expecting: { productIds, products[], copy{why,rationale,extras}, enriched?, meta? }
     const productIds = Array.isArray(payload.productIds) ? payload.productIds.slice(0, Number(maxPicks) || 3) : [];
+
+    // 🔔 Report analytics to backend (non-blocking). Uses helper injected by storefront bootstrap.
+    try {
+      const idsFromProducts = Array.isArray(payload.products) ? payload.products.map(p => p.id) : [];
+      (window.RefinaAnalytics && window.RefinaAnalytics.report) && window.RefinaAnalytics.report({
+        type: "concern",
+        concern: String(concern || "").trim(),
+        productIds: idsFromProducts.length ? idsFromProducts : productIds,
+        plan: (window.__REFINA__ && window.__REFINA__.plan) || "unknown",
+        model: (payload && payload.meta && (payload.meta.model || payload.meta.provider)) || "",
+        explanation: ""
+      });
+    } catch (_) {}
+
     const enriched = payload.enriched || null;
 
     // Prefer enriched concierge paragraph; fall back to legacy copy.why or explanation
