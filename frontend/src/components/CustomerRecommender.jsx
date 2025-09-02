@@ -47,6 +47,18 @@ export default function CustomerRecommender() {
         const r = await fetch(`${API_PREFIX}/concerns`);
         if (!r.ok) throw new Error(`concerns ${r.status}`);
         const j = await r.json();
+
+        // NEW: emit a modal analytics event to Admin (non-blocking)
+        try {
+          window.RefinaAnalytics?.report({
+            type: "concern",
+            concern: q, // the shopper's input you already have
+            productIds: Array.isArray(j?.products) ? j.products.map(p => p.id) : [],
+            plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+            model: (j && j.meta && (j.meta.model || j.meta.source)) || ""
+          });
+        } catch {}
+
         if (!cancelled) setCommonConcerns(Array.isArray(j.chips) ? j.chips : []);
       } catch (_e) {
         if (!cancelled) setCommonConcerns([]);
