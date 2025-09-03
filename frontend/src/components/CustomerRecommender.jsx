@@ -7,12 +7,7 @@ const API_PREFIX = "/apps/refina/v1";
 
 // --- Helper Functions ---
 function decodeEntities(str = "") {
-  return String(str)
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return String(str).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 }
 function teaserFromHtml(html = "", max = 140) {
   const txt = decodeEntities(String(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
@@ -95,36 +90,39 @@ export default function CustomerRecommender() {
       const rbi = data?.reasonsById && typeof data.reasonsById === "object" ? data.reasonsById : {};
 
       setMatchedProducts(products);
-      setCopy({
-        why: String(cpy.why || ""),
-        rationale: String(cpy.rationale || ""),
-        extras: String(cpy.extras || "")
-      });
+      setCopy({ why: String(cpy.why || ""), rationale: String(cpy.rationale || ""), extras: String(cpy.extras || "") });
       setReasonsById(rbi);
 
-      // FINAL FIX: Send analytics event directly to the secure App Proxy endpoint.
+      // FINAL FIX: Use a standard fetch with the correct Content-Type header.
       try {
         console.log("[Recommender] Reporting analytics event for concern:", q);
         const analyticsPayload = {
           type: "concern",
+          event: "recommendation_received", // Added for clarity
           concern: q,
           productIds: products.map(p => p.id),
-          plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
-          model: (data?.meta?.model || data?.meta?.source) || ""
+          meta: {
+             plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+             model: (data?.meta?.model || data?.meta?.source) || ""
+          }
         };
-        // Use navigator.sendBeacon for reliable background sending
-        navigator.sendBeacon(`${API_PREFIX}/analytics/ingest`, JSON.stringify(analyticsPayload));
+        
+        // Using fetch guarantees the Content-Type header is set correctly.
+        // `keepalive: true` ensures the request completes even if the user navigates away.
+        fetch(`${API_PREFIX}/analytics/ingest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(analyticsPayload),
+          keepalive: true
+        });
+
       } catch (analyticsError) {
         console.warn("[Recommender] Analytics reporting failed:", analyticsError);
       }
 
     } catch (_e) {
       setMatchedProducts([]);
-      setCopy({
-        why: "Gentle, low-foam cleansing preserves your skin barrier.",
-        rationale: "I couldn’t fetch smart picks just now, so I’ve kept things simple.",
-        extras: "Use lukewarm water and pat dry—no scrubbing."
-      });
+      setCopy({ why: "Gentle, low-foam cleansing preserves your skin barrier.", rationale: "I couldn’t fetch smart picks just now, so I’ve kept things simple.", extras: "Use lukewarm water and pat dry—no scrubbing." });
       setReasonsById({});
     } finally {
       setLoading(false);
@@ -146,15 +144,11 @@ export default function CustomerRecommender() {
     <div className={styles.container}>
       <h1 className={styles.heading}>{headingText}</h1>
       <p className={styles.subtext}>{subheadingText}</p>
-      
-      {/* ... rest of the JSX is unchanged ... */}
 
       {commonConcerns.length > 0 && (
         <div className={styles.concernButtons}>
           {commonConcerns.slice(0, 6).map((item) => (
-            <button key={item} className={styles.chip} onClick={() => { setConcern(item); handleRecommend(item); }} aria-label={`Use suggestion: ${item}`}>
-              {item}
-            </button>
+            <button key={item} className={styles.chip} onClick={() => { setConcern(item); handleRecommend(item); }} aria-label={`Use suggestion: ${item}`}>{item}</button>
           ))}
         </div>
       )}
