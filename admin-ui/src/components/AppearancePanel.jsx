@@ -120,7 +120,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
 
         {saveSuccess && (
           <Banner title="Success" tone="success" onDismiss={() => setSaveSuccess(false)}>
-            <p>Your settings have been saved successfully.</p>
+            <p>Your settings and choices have been saved successfully.</p>
           </Banner>
         )}
         {saveError && (
