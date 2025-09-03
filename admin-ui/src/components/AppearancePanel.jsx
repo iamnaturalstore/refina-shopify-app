@@ -102,6 +102,22 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   return (
     <Card>
       <BlockStack gap="400">
+        {/* STRUCTURAL TEST: Moved buttons to the top */}
+        <InlineStack gap="200" distribution="trailing">
+          <Button
+            onClick={() => {
+              console.log('[AppearancePanel] "Save draft" button was clicked.');
+              saveDraft();
+            }}
+            variant="primary"
+            loading={saving}
+          >
+            Save draft
+          </Button>
+          <Button onClick={applyTheme}>Apply to storefront</Button>
+        </InlineStack>
+        <Divider />
+
         {saveSuccess && (
           <Banner title="Success" tone="success" onDismiss={() => setSaveSuccess(false)}>
             <p>Your settings have been saved successfully.</p>
@@ -155,26 +171,13 @@ export default function AppearancePanel({ planLevel, planStatus }) {
               <TextField label="Text" value={tokens.text || ""} onChange={v => updateTokens({text:v})} disabled={!isProPlus}/>
               <TextField label="Muted" value={tokens.muted || ""} onChange={v => updateTokens({muted:v})} disabled={!isProPlus}/>
               <TextField label="Border" value={tokens.border || ""} onChange={v => updateTokens({border:v})} disabled={!isProPlus}/>
-              <TextField label="Radius" value={tokens.radius || ""} onChange={v => updateTokens({radius:v})} disabled={!isProPlus} placeholder="e.g., 14px"/>
+              <TextField label="Radius" value={tokens.radius || ""} onChange={v => updateTokens({radius:v})} disabled={!is-pro-plus} placeholder="e.g., 14px"/>
               <TextField label="Shadow" value={tokens.shadow || ""} onChange={v => updateTokens({shadow:v})} disabled={!isProPlus} placeholder="CSS box-shadow"/>
               <TextField label="Gap" value={tokens.gap || ""} onChange={v => updateTokens({gap:v})} disabled={!isProPlus}/>
               <TextField label="Padding" value={tokens.pad || ""} onChange={v => updateTokens({pad:v})} disabled={!isProPlus}/>
             </InlineGrid>
-
-            <InlineStack gap="200">
-              {/* FINAL DIAGNOSTIC: Added a console.log directly to the onClick */}
-              <Button
-                onClick={() => {
-                  console.log('[AppearancePanel] "Save draft" button was clicked.');
-                  saveDraft();
-                }}
-                variant="secondary"
-                loading={saving}
-              >
-                Save draft
-              </Button>
-              <Button onClick={applyTheme} variant="primary">Apply to storefront</Button>
-            </InlineStack>
+            
+            {/* BUTTONS ARE NO LONGER HERE */}
           </BlockStack>
         </Card>
 
