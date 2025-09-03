@@ -1,4 +1,3 @@
-// admin-ui/src/pages/Billing.jsx
 import * as React from "react";
 import {
   Card,
@@ -12,9 +11,10 @@ import {
   Divider,
   Banner,
   Icon,
+  Spinner,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { billingApi } from "../api/client.js";
+import { api, billingApi } from "../api/client.js";
 
 
 const PENDING_KEY = "refina:billing:pending";
@@ -59,8 +59,9 @@ function labelFromLevel(level) {
   if (v === "pro") return "Pro";
   return "Free";
 }
-function parsePlanResponse(j) {
-  const p = j?.plan || j || {};
+function parsePlanResponse(jsonResponse) {
+  // The actual plan data is nested in the response
+  const p = jsonResponse?.plan || jsonResponse || {};
   return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
 }
 
@@ -77,14 +78,16 @@ export default function Billing() {
   const proMeta = PLAN_DETAILS.pro;
   const premiumMeta = PLAN_DETAILS.premium;
 
-  // Load plan (with fallback path)
   const loadPlan = React.useCallback(async () => {
     setError("");
     setLoading(true);
     try {
-      const j = await billingApi.getPlan();
-      setPlan(parsePlanResponse(j));
+      // CORRECTED: Use the new api.get method and destructure the 'data' property
+      const { data: json } = await api.get("/api/billing/plan");
+      console.log("[Billing] Fetched plan data:", json);
+      setPlan(parsePlanResponse(json));
     } catch (e) {
+      console.error("[Billing] Failed to load current plan:", e);
       setError("Failed to load current plan.");
       setPlan(null);
     } finally {
@@ -99,7 +102,6 @@ export default function Billing() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
 
-  // Auto-refresh after returning from checkout
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
   React.useEffect(() => {
@@ -136,8 +138,9 @@ export default function Billing() {
   async function subscribe(which /* "pro" | "premium" */) {
     try {
       setBusy(true); setError("");
-      const j = await billingApi.subscribe({ plan: which });
-      const url = j?.confirmationUrl || j?.url || j?.confirmation_url || j?.redirectUrl;
+      // CORRECTED: The billingApi wrapper still works, but we need its 'data' property
+      const { data: json } = await billingApi.subscribe({ plan: which });
+      const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
       try { window.top.location.href = url; } catch { window.location.href = url; }
@@ -148,14 +151,18 @@ export default function Billing() {
     }
   }
 
-  // Derived UI state
   const currentLevel = plan ? normalizeLevel(plan.level) : null;
   const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
   const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
   const isPro = currentLevel === "pro";
   const isPremium = currentLevel === "premium";
 
-  // Tile helper
+  if (loading) {
+    return (
+      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading billing details...</Text></InlineStack></Box>
+    );
+  }
+
   function PlanTile({ id, meta, current, onChoose }) {
     const isCurrent = current === id;
     return (
@@ -196,7 +203,7 @@ export default function Billing() {
               disabled={busy || isCurrent || loading}
               onClick={() => onChoose(id)}
             >
-              {isCurrent ? `Current: ${meta.label}` : busy ? "Opening…" : `Choose ${meta.label}`}
+              {isCurrent ? `Current Plan` : busy ? "Opening…" : `Choose ${meta.label}`}
             </Button>
           </InlineStack>
         </BlockStack>
@@ -208,49 +215,31 @@ export default function Billing() {
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
       <Card>
         <BlockStack gap="400">
-          {/* Header */}
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Billing</Text>
-            {!loading ? (
-              <Tooltip
-                content={
-                  currentLevel === "pro"
-                    ? proMeta.tooltip
-                    : currentLevel === "premium"
-                    ? premiumMeta.tooltip
-                    : ""
-                }
-              >
-                <Badge tone={isPro || isPremium ? "success" : "subdued"}>
-                  {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
-                </Badge>
-              </Tooltip>
-            ) : (
-              <Text as="span" tone="subdued">Loading…</Text>
-            )}
+            <Tooltip content={currentLevel === "pro" ? proMeta.tooltip : currentLevel === "premium" ? premiumMeta.tooltip : ""}>
+              <Badge tone={isPro || isPremium ? "success" : "subdued"}>
+                {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
+              </Badge>
+            </Tooltip>
           </InlineStack>
 
           <InlineStack align="space-between" blockAlign="center">
             <BlockStack gap="100">
               <Text as="p" variant="bodyMd" fontWeight="semibold">
-                {loading ? "Loading…" : `You’re on ${currentLabel || "—"}`}
+                {`You’re on the ${currentLabel || "Free"} plan`}
               </Text>
               <Text as="p" tone="subdued">
                 After approving a charge, click “Refresh” or wait for the billing webhook to update your plan.
               </Text>
             </BlockStack>
-            <Button onClick={loadPlan} disabled={loading || busy}>
-              {busy ? "Refreshing…" : "Refresh"}
+            <Button onClick={loadPlan} loading={loading || busy}>
+              Refresh
             </Button>
           </InlineStack>
 
-          {error && (
-            <Banner tone="critical" title="Billing error">
-              <p>{error}</p>
-            </Banner>
-          )}
+          {error && <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
 
-          {/* Side-by-side tiles */}
           <InlineStack gap="400" wrap>
             <Box minWidth="320px" maxWidth="520px" width="100%">
               <PlanTile id="pro" meta={proMeta} current={currentLevel} onChoose={subscribe} />
@@ -262,7 +251,6 @@ export default function Billing() {
 
           <Divider />
 
-          {/* Sync status + toast */}
           {syncing && !toast && (
             <Text tone="subdued" as="p" variant="bodySm">
               Syncing billing status…
@@ -270,15 +258,7 @@ export default function Billing() {
           )}
         </BlockStack>
       </Card>
-
-      {/* Helper note for future you / merchants */}
-      <Box paddingBlockStart="200">
-        <Text tone="subdued" as="p" variant="bodySm">
-          Edit pricing & blurbs in <code>PLAN_DETAILS</code> inside this file.
-        </Text>
-      </Box>
-
-      {/* Simple toast */}
+      
       {toast && (
         <Box
           position="fixed"
