@@ -584,39 +584,46 @@ app.post("/webhooks/shop/redact", rawJson, verifyWebhookHmac, (req, res) => {
   res.status(200).send("ok");
 });
 
-// (A) Shopify App Proxy HTML shell (CORRECTED WITH CACHE BUSTING AND CROSSORIGIN)
-app.get("/proxy/refina", (_req, res) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    [
-      "default-src 'self' https: data: blob:",
-      "frame-ancestors https://*.myshopify.com https://admin.shopify.com",
-      "connect-src 'self' https: wss:",
-      "img-src 'self' https: data: blob:",
-      "style-src 'self' 'unsafe-inline' https:",
-      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'"
-    ].join("; ")
-  );
-  res.setHeader("Cache-Control", "no-store");
+// HMAC-protected App Proxy settings → returns Admin tokens over defaults
+app.get("/proxy/refina/v1/settings", requireAppProxy, rateLimitAppProxy, async (req, res) => {
+  try {
+    const shop = req.storeId;
+    const snap = await db.doc(`storeSettings/${shop}`).get();
+    const savedSettings = snap.exists ? (snap.data() || {}) : {};
 
-  const cacheBust = `v=${Date.now()}`;
+    // FINAL FIX: Use the same reliable merging logic as the Admin UI
+    // to ensure the storefront gets the complete, correct data structure.
+    const DEFAULT_SETTINGS = {
+      category: "Beauty",
+      aiTone: "professional",
+      theme: { primaryColor: "#111827", accentColor: "#10B981", borderRadius: "lg", gridColumns: 3, buttonStyle: "solid" },
+      ui: { showBadges: true, showPrices: true, enableModal: true },
+      copy: { heading: "Find the perfect routine", subheading: "Tell Refina your concern and we’ll match expert picks.", ctaText: "Ask Refina" },
+    };
+    const mergeDefaults = (current = {}) => {
+        const out = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        const deepMerge = (target, source) => {
+            for (const key in source) {
+                if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                    if (!target[key]) Object.assign(target, { [key]: {} });
+                    deepMerge(target[key], source[key]);
+                } else {
+                    Object.assign(target, { [key]: source[key] });
+                }
+            }
+        };
+        deepMerge(out, current);
+        return out;
+    };
+    const payload = mergeDefaults(savedSettings);
 
-  res
-    .type("html")
-    .send(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Refina Concierge</title>
-  <link rel="stylesheet" href="/apps/refina/concierge.css?${cacheBust}" crossorigin="anonymous"/>
-  <link rel="preload" as="script" href="/apps/refina/concierge.js?${cacheBust}" crossorigin="anonymous"/>
-</head>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/apps/refina/concierge.js?${cacheBust}" defer crossorigin="anonymous"></script>
-</body>
-</html>`);
+    res.set("Cache-Control", "public, max-age=60"); // Short cache for storefront
+    return res.status(200).json(payload);
+  } catch (err) {
+    console.error(`[BFF] Error fetching settings for ${req.storeId}:`, err);
+    res.set("Cache-Control", "no-store");
+    return res.status(500).json({ error: "settings_fetch_failed" });
+  }
 });
 
 // (B) App Proxy APIs — authoritative for storefront
