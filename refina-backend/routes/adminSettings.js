@@ -7,7 +7,7 @@ import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
 const sanitize = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, "");
 
 /** Strict full-domain check: "<shop>.myshopify.com" */
-const FULL_SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
+const FULL_SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify.com$/;
 
 /** Canonicalize only when already full "<shop>.myshopify.com" */
 function toMyshopifyDomain(raw) {
@@ -57,7 +57,7 @@ function resolveShop(source = {}) {
   // 0) Prefer Shopify header if present
   const headerShop =
     source["x-shopify-shop-domain"] ||
-    source["X-Shopify-Shop-Domain"] ||
+    source["X-Shop-Domain"] ||
     source.shopifyShop ||
     "";
   if (headerShop) {
@@ -97,11 +97,14 @@ router.get("/store-settings", async (req, res) => {
   }
 
   try {
-    // This is the newly added line for diagnostics
-    console.log("[GET /store-settings] Resolved shop:", shop, "|| Checking dbAdmin object:", !!dbAdmin);
-
+    console.log(`[GET /store-settings] Shop: ${shop}, dbAdmin valid: ${!!dbAdmin}. Attempting DB read...`);
     const ref = dbAdmin.collection("storeSettings").doc(shop);
+    
+    // ADDED LOGS AROUND THE DATABASE CALL
+    console.log(`[GET /store-settings] Getting document: ${ref.path}`);
     const snap = await ref.get();
+    console.log(`[GET /store-settings] DB read complete. Document exists: ${snap.exists}`);
+
     const settings = snap.exists ? (snap.data() || {}) : { plan: "free" };
     res.set("Cache-Control", "no-store");
     return res.json({ storeId: shop, settings });
@@ -121,13 +124,12 @@ router.put("/store-settings", async (req, res) => {
       return res.status(400).json({ error: "shop required" });
     }
     
-    // This is the newly added line for diagnostics
-    console.log("[PUT /store-settings] Resolved shop:", shop, "|| Checking dbAdmin object:", !!dbAdmin);
-
+    console.log(`[PUT /store-settings] Shop: ${shop}, dbAdmin valid: ${!!dbAdmin}. Attempting DB write...`);
     const settings = req.body?.settings || {};
     const ref = dbAdmin.collection("storeSettings").doc(shop);
 
     await ref.set({ ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    console.log(`[PUT /store-settings] DB write for ${ref.path} complete.`);
 
     const fresh = await ref.get();
     res.set("Cache-Control", "no-store");
