@@ -13,6 +13,7 @@ import {
   Banner,
   Icon,
   ProgressBar,
+  Spinner,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
 import { api, adminApi, getShop } from "../api/client.js";
@@ -47,214 +48,117 @@ function fmt(n) {
 }
 
 export default function Home() {
-  // Always a FULL domain, e.g. "refina-demo.myshopify.com"
   const shop = React.useMemo(() => getShop(), []);
-  const shopQS = React.useMemo(
-    () => (shop ? `?shop=${encodeURIComponent(shop)}` : ""),
-    [shop]
-  );
+  const shopQS = React.useMemo(() => (shop ? `?shop=${encodeURIComponent(shop)}` : ""), [shop]);
 
-  // state
   const [err, setErr] = React.useState("");
   const [plan, setPlan] = React.useState({ level: "free", status: "unknown" });
   const [settings, setSettings] = React.useState(null);
   const [overview, setOverview] = React.useState(null);
   const [logs, setLogs] = React.useState([]);
-  const [health, setHealth] = React.useState({ ok: false, now: "" });
+  const [loading, setLoading] = React.useState(true);
 
-  const [loadingPlan, setLoadingPlan] = React.useState(true);
-  const [loadingSettings, setLoadingSettings] = React.useState(true);
-  const [loadingOverview, setLoadingOverview] = React.useState(true);
-  const [loadingLogs, setLoadingLogs] = React.useState(true);
-  const [checkingHealth, setCheckingHealth] = React.useState(true);
-
-  // NEW: refresh both overview + logs on-demand (used by event listener below)
-  async function refreshAnalytics() {
+  const refreshAnalytics = React.useCallback(async () => {
     try {
-      setLoadingOverview(true);
-      setLoadingLogs(true);
-      const [over, ev] = await Promise.all([
+      console.log("[Home] Refreshing analytics...");
+      // CORRECTED: Destructure the 'data' property
+      const [{ data: over }, { data: ev }] = await Promise.all([
         adminApi.getAnalyticsSummary({ days: 30 }),
         adminApi.getAnalyticsEvents({ limit: 5 }),
       ]);
       setOverview(over || {});
-      const items = Array.isArray(ev?.rows)
-        ? ev.rows
-        : Array.isArray(ev?.logs)
-        ? ev.logs
-        : Array.isArray(ev)
-        ? ev
-        : [];
+      const items = Array.isArray(ev?.rows) ? ev.rows : Array.isArray(ev?.logs) ? ev.logs : Array.isArray(ev) ? ev : [];
       setLogs(items.slice(0, 5));
+      console.log("[Home] Analytics refresh successful.");
     } catch (e) {
-      // keep this quiet; initial load already reports errors
       console.warn("Home: refreshAnalytics failed:", e?.message || e);
-    } finally {
-      setLoadingOverview(false);
-      setLoadingLogs(false);
     }
-  }
-
-  // fetch: plan
-  React.useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        setLoadingPlan(true);
-        // api() appends host/shop/storeId context; no need to pass ?shop=
-        const j = await api(`/api/billing/plan`);
-        if (on) setPlan(parsePlanResponse(j));
-      } catch (e) {
-        if (on) setErr(`Plan error: ${e?.message || "failed to load"}`);
-      } finally {
-        if (on) setLoadingPlan(false);
-      }
-    })();
-    return () => { on = false; };
-  }, [shop]);
-
-  // fetch: settings
-  React.useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        setLoadingSettings(true);
-        // api() injects context; do not send short IDs
-        const j = await api(`/api/admin/store-settings`);
-        if (on) setSettings(j?.settings || {});
-      } catch (e) {
-        // Non-blocking: fall back silently so Home doesn’t show a red banner for settings alone
-        console.warn("Home: settings load failed", e?.message || e);
-        if (on) setSettings({});
-      } finally {
-        if (on) setLoadingSettings(false);
-      }
-    })();
-    return () => { on = false; };
-  }, [shop]);
-
-  // fetch: analytics overview (30d)
-  React.useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        setLoadingOverview(true);
-        const over = await adminApi.getAnalyticsSummary({ days: 30 });
-        if (on) setOverview(over || {});
-      } catch (e) {
-        if (on) setErr(prev => prev || `Analytics error: ${e?.message || "failed to load"}`);
-      } finally {
-        if (on) setLoadingOverview(false);
-      }
-    })();
-    return () => { on = false; };
-  }, [shop]);
-
-  // fetch: recent logs (limit 5)
-  React.useEffect(() => {
-    let on = true;
-    (async () => {
-      try {
-        setLoadingLogs(true);
-        const ev = await adminApi.getAnalyticsEvents({ limit: 5 });
-        // prefer `rows`, then `logs`, then array fallback (matches backend response)
-        const items = Array.isArray(ev?.rows)
-          ? ev.rows
-          : Array.isArray(ev?.logs)
-          ? ev.logs
-          : Array.isArray(ev)
-          ? ev
-          : [];
-        if (on) setLogs(items.slice(0, 5));
-      } catch {
-        // silently ignore
-      } finally {
-        if (on) setLoadingLogs(false);
-      }
-    })();
-    return () => { on = false; };
-  }, [shop]);
-
-  // NEW: auto-refresh the dashboard after a successful ingest (from anywhere in the UI)
-  React.useEffect(() => {
-    function onIngest() {
-      refreshAnalytics();
-    }
-    window.addEventListener("rf:analytics:ingested", onIngest);
-    return () => window.removeEventListener("rf:analytics:ingested", onIngest);
   }, []);
 
-  // health
   React.useEffect(() => {
     let on = true;
     (async () => {
+      setLoading(true);
+      setErr("");
       try {
-        setCheckingHealth(true);
-        const r = await fetch("/v1/health");
-        const j = r.ok ? await r.json() : {};
-        if (on) setHealth({ ok: !!j?.ok, now: j?.now || "" });
-      } catch {
-        if (on) setHealth({ ok: false, now: "" });
+        console.log("[Home] Fetching initial data...");
+        // CORRECTED: Fetch all data concurrently and destructure 'data' from each response
+        const [
+          { data: planData },
+          { data: settingsData },
+          { data: overviewData },
+          { data: logsData }
+        ] = await Promise.all([
+          api.get(`/api/billing/plan`),
+          api.get(`/api/admin/store-settings`),
+          adminApi.getAnalyticsSummary({ days: 30 }),
+          adminApi.getAnalyticsEvents({ limit: 5 }),
+        ]);
+
+        console.log("[Home] Fetched Plan:", planData);
+        console.log("[Home] Fetched Settings:", settingsData);
+        console.log("[Home] Fetched Overview:", overviewData);
+        console.log("[Home] Fetched Logs:", logsData);
+
+        if (on) {
+          setPlan(parsePlanResponse(planData));
+          setSettings(settingsData?.settings || {});
+          setOverview(overviewData || {});
+          const items = Array.isArray(logsData?.rows) ? logsData.rows : Array.isArray(logsData?.logs) ? logsData.logs : Array.isArray(logsData) ? logsData : [];
+          setLogs(items.slice(0, 5));
+        }
+        console.log("[Home] Initial data load successful.");
+      } catch (e) {
+        console.error("[Home] Initial data load failed:", e);
+        if (on) setErr(`Failed to load dashboard: ${e?.message || "Unknown error"}`);
       } finally {
-        if (on) setCheckingHealth(false);
+        if (on) setLoading(false);
       }
     })();
-    return () => { on = false; };
-  }, []);
 
-  // derived
+    // Setup event listener for analytics updates
+    window.addEventListener("rf:analytics:ingested", refreshAnalytics);
+    return () => {
+      on = false;
+      window.removeEventListener("rf:analytics:ingested", refreshAnalytics);
+    };
+  }, [shop, refreshAnalytics]);
+
+
+  // derived values
   const level = normalizeLevel(plan?.level);
   const levelLabel = labelFromLevel(level);
   const badgeTone = level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
 
-  // overview shape tolerance
   const totals = overview?.totals || overview || {};
-  // Include backend totals.events as canonical interactions
-  const interactions =
-    Number(
-      totals.interactions ??
-        totals.events ??
-        totals.queries ??
-        totals.sessions ??
-        totals.requests ??
-        0
-    ) || 0;
-  const productClicks = Number(
-    totals.productClicks ?? totals.clicks ?? totals.cta ?? 0
-  );
-  // usage (fallback based on plan)
+  const interactions = Number(totals.interactions ?? totals.events ?? totals.queries ?? 0) || 0;
+  const productClicks = Number(totals.productClicks ?? totals.clicks ?? 0);
+  
   const usage = overview?.usage || {};
-  const used = Number(usage.used ?? usage.monthUsed ?? 0);
-  const limit =
-    usage.limit ??
-    (level === "free" ? 0 : level === "pro" ? 1000 : level === "premium" ? 10000 : 0);
+  const used = Number(usage.used ?? 0);
+  const limit = usage.limit ?? (level === "free" ? 0 : level === "pro" ? 1000 : level === "premium" ? 10000 : 0);
+  const ctr = interactions ? (100 * productClicks) / interactions : 0;
 
-  const ctr = interactions ? (100 * (productClicks || 0)) / interactions : 0;
-
-  // checklist derived
-  const hasTone = Boolean(settings?.tone);
+  const hasTone = Boolean(settings?.aiTone);
   const hasCategory = Boolean(settings?.category);
-  const hasDomain = Boolean(settings?.domain);
-  const checklistDone = [hasTone, hasCategory, hasDomain].filter(Boolean).length;
+  const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
 
-  // links
-  const qsParam = shop ? `?shop=${encodeURIComponent(shop)}` : "";
+  if (loading) {
+    return (
+      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading dashboard...</Text></InlineStack></Box>
+    );
+  }
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
-      {/* header */}
       <Card>
         <Box padding="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Welcome to Refina</Text>
             <InlineStack gap="200" blockAlign="center">
-              <Tooltip content={levelLabel}>
-                <Badge tone={badgeTone}>{levelLabel}</Badge>
-              </Tooltip>
-              {plan?.status && (
-                <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>
-              )}
-              <Button url={`#/billing${qsParam}`}>Manage billing</Button>
+              <Tooltip content={levelLabel}><Badge tone={badgeTone}>{levelLabel}</Badge></Tooltip>
+              {plan?.status && <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>}
+              <Button url={`#/billing${shopQS}`}>Manage billing</Button>
             </InlineStack>
           </InlineStack>
         </Box>
@@ -268,221 +172,104 @@ export default function Home() {
         </Box>
       </Card>
 
-      {/* errors */}
       {err && (
         <Box paddingBlockStart="400">
-          <Banner tone="critical" title="Something went wrong">
+          <Banner tone="critical" title="Something went wrong" onDismiss={() => setErr("")}>
             <p>{err}</p>
           </Banner>
         </Box>
       )}
 
-      {/* month at a glance */}
       <Box paddingBlockStart="400">
         <Card>
           <Box padding="400">
             <BlockStack gap="400">
               <InlineStack align="space-between" blockAlign="center">
                 <Text as="h3" variant="headingSm">Your month at a glance</Text>
-                <Text as="span" tone="subdued" variant="bodySm">
-                  {loadingOverview ? "Loading…" : "Last 30 days"}
-                </Text>
+                <Text as="span" tone="subdued" variant="bodySm">Last 30 days</Text>
               </InlineStack>
-
-              {/* usage meter */}
               <BlockStack gap="150">
                 <InlineStack align="space-between" blockAlign="center">
                   <Text as="span" tone="subdued">Smart queries</Text>
-                  <Text as="span" tone="subdued">
-                    {level === "free"
-                      ? "Locked on Free"
-                      : `${fmt(used)} / ${fmt(limit)}${limit ? "" : ""}`}
-                  </Text>
+                  <Text as="span" tone="subdued">{level === "free" ? "Locked on Free" : `${fmt(used)} / ${fmt(limit)}`}</Text>
                 </InlineStack>
                 <ProgressBar progress={level === "free" ? 0 : pct(used, limit)} size="small" />
                 {level === "free" && (
                   <InlineStack gap="200" blockAlign="center">
-                    <Icon source={CheckIcon} tone="success" />
-                    <Text as="span" tone="subdued">
-                      Upgrade to Pro to unlock AI-powered recommendations & analytics
-                    </Text>
+                    <Icon source={CheckIcon} tone="success" /><Text as="span" tone="subdued">Upgrade to Pro to unlock AI-powered recommendations & analytics</Text>
                   </InlineStack>
                 )}
               </BlockStack>
-
-              {/* impact tiles */}
               <InlineStack gap="400" wrap>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">Customer interactions</Text>
-                        <Text as="h4" variant="headingLg">
-                          {loadingOverview ? "—" : fmt(interactions)}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">Product clicks</Text>
-                        <Text as="h4" variant="headingLg">
-                          {loadingOverview ? "—" : fmt(productClicks)}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">CTR</Text>
-                        <Text as="h4" variant="headingLg">
-                          {loadingOverview ? "—" : `${ctr ? ctr.toFixed(1) : "0.0"}%`}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
+                <Box minWidth="220px" maxWidth="340px" width="100%"><Card><Box padding="300"><BlockStack gap="050"><Text as="span" tone="subdued" variant="bodySm">Customer interactions</Text><Text as="h4" variant="headingLg">{fmt(interactions)}</Text></BlockStack></Box></Card></Box>
+                <Box minWidth="220px" maxWidth="340px" width="100%"><Card><Box padding="300"><BlockStack gap="050"><Text as="span" tone="subdued" variant="bodySm">Product clicks</Text><Text as="h4" variant="headingLg">{fmt(productClicks)}</Text></BlockStack></Box></Card></Box>
+                <Box minWidth="220px" maxWidth="340px" width="100%"><Card><Box padding="300"><BlockStack gap="050"><Text as="span" tone="subdued" variant="bodySm">CTR</Text><Text as="h4" variant="headingLg">{`${ctr ? ctr.toFixed(1) : "0.0"}%`}</Text></BlockStack></Box></Card></Box>
               </InlineStack>
             </BlockStack>
           </Box>
         </Card>
       </Box>
 
-      {/* unlock more with your plan */}
       <Box paddingBlockStart="400">
         <Card>
           <Box padding="400">
             <InlineStack align="space-between" blockAlign="center">
               <BlockStack gap="100">
                 <Text as="h3" variant="headingSm">Unlock more with your plan</Text>
-                <Text as="p" tone="subdued">
-                  {level === "free"
-                    ? "Pro unlocks AI recommendations, analytics, and styling controls."
-                    : level === "pro"
-                    ? "Premium unlocks higher limits and advanced analytics."
-                    : "You’re on Premium — thanks for supporting Refina!"}
-                </Text>
+                <Text as="p" tone="subdued">{level === "free" ? "Pro unlocks AI recommendations, analytics, and styling controls." : level === "pro" ? "Premium unlocks higher limits and advanced analytics." : "You’re on Premium — thanks for supporting Refina!"}</Text>
               </BlockStack>
-              {level === "premium" ? (
-                <Badge tone="success">Premium</Badge>
-              ) : (
-                <Button variant="primary" url={`#/billing${shopQS}`}>
-                  {level === "free" ? "Upgrade to Pro" : "Upgrade to Premium"}
-                </Button>
-              )}
+              {level === "premium" ? (<Badge tone="success">Premium</Badge>) : (<Button variant="primary" url={`#/billing${shopQS}`}>{level === "free" ? "Upgrade to Pro" : "Upgrade to Premium"}</Button>)}
             </InlineStack>
           </Box>
         </Card>
       </Box>
 
-      {/* onboarding checklist + recent activity */}
       <Box paddingBlockStart="400">
         <InlineStack gap="400" wrap>
-          {/* checklist */}
           <Box minWidth="320px" maxWidth="520px" width="100%">
             <Card>
               <Box padding="400">
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
                     <Text as="h3" variant="headingSm">Recommended next steps</Text>
-                    <Badge tone={checklistDone === 3 ? "success" : "attention"}>
-                      {checklistDone}/3
-                    </Badge>
+                    <Badge tone={checklistDone === 2 ? "success" : "attention"}>{checklistDone}/2</Badge>
                   </InlineStack>
-
                   <InlineStack gap="150" blockAlign="center">
-                    <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
-                    <Text as="span">
-                      Set your <strong>tone</strong> in{" "}
-                      <a href={`#/settings${shopQS}`}>Settings</a>
-                    </Text>
+                    <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} /><Text as="span">Set your <strong>tone</strong> in <a href={`#/settings${shopQS}`}>Settings</a></Text>
                   </InlineStack>
-
                   <InlineStack gap="150" blockAlign="center">
-                    <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
-                    <Text as="span">
-                      Choose your <strong>category</strong> in{" "}
-                      <a href={`#/settings${shopQS}`}>Settings</a>
-                    </Text>
-                  </InlineStack>
-
-                  <InlineStack gap="150" blockAlign="center">
-                    <Icon source={CheckIcon} tone={hasDomain ? "success" : "subdued"} />
-                    <Text as="span">
-                      Connect your <strong>domain</strong> in{" "}
-                      <a href={`#/settings${shopQS}`}>Settings</a>
-                    </Text>
+                    <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} /><Text as="span">Choose your <strong>category</strong> in <a href={`#/settings${shopQS}`}>Settings</a></Text>
                   </InlineStack>
                 </BlockStack>
               </Box>
             </Card>
           </Box>
-
-          {/* recent activity */}
           <Box minWidth="320px" maxWidth="520px" width="100%">
             <Card>
               <Box padding="400">
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingSm">Recent activity</Text>
-                  {loadingLogs ? (
-                    <Text tone="subdued">Loading…</Text>
-                  ) : logs.length ? (
+                  {logs.length ? (
                     <BlockStack gap="200">
                       {logs.map((row, i) => {
-                        const concern = row?.concern || row?.query || row?.question || "Customer asked…";
-                        const productTitle =
-                          row?.topProduct?.title ||
-                          row?.productTitle ||
-                          (Array.isArray(row?.products) ? row.products[0]?.title : "") ||
-                          "";
-                        const when =
-                          row?.createdAt ||
-                          row?.ts ||
-                          row?.timestamp ||
-                          "";
+                        const concern = row?.concern || row?.query || "Customer asked…";
+                        const productTitle = row?.topProduct?.title || "";
+                        const when = row?.createdAt || row?.ts || "";
                         return (
                           <Box key={i} paddingBlock="150" borderBlockEndWidth={i < logs.length - 1 ? "025" : "0"}>
                             <Text as="p"><strong>{concern}</strong></Text>
-                            <Text as="p" tone="subdued">
-                              {productTitle ? `→ ${productTitle}` : " "}
-                              {when ? ` • ${new Date(when).toLocaleString()}` : ""}
-                            </Text>
+                            <Text as="p" tone="subdued">{productTitle ? `→ ${productTitle}` : " "}{when ? ` • ${new Date(when).toLocaleString()}` : ""}</Text>
                           </Box>
                         );
                       })}
                       <Button url={`#/analytics${shopQS}`} plain>See full log</Button>
                     </BlockStack>
-                  ) : (
-                    <Text tone="subdued">No activity yet — check back after some traffic.</Text>
-                  )}
+                  ) : (<Text tone="subdued">No activity yet — check back after some traffic.</Text>)}
                 </BlockStack>
               </Box>
             </Card>
           </Box>
         </InlineStack>
-      </Box>
-
-      {/* health */}
-      <Box paddingBlockStart="400" paddingBlockEnd="200">
-        <Card>
-          <Box padding="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="h3" variant="headingSm">System health</Text>
-              <Badge tone={health.ok ? "success" : "critical"}>
-                {checkingHealth ? "Checking…" : health.ok ? "OK" : "Issue"}
-              </Badge>
-            </InlineStack>
-            <Text as="p" tone="subdued">
-              {health.ok ? `Last check: ${health.now || "—"}` : "If issues persist, open Settings or contact support."}
-            </Text>
-          </Box>
-        </Card>
       </Box>
     </Box>
   );
