@@ -389,12 +389,16 @@ function verifyAppProxy(req) {
   const expected = crypto.createHmac("sha256", SHOPIFY_APP_SECRET).update(message).digest("hex");
   const provided = signature;
 
-  const ok =
-    expected.length === provided.length &&
-    crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
-
   const shop = String(req.query.shop || req.headers["x-shopify-shop-domain"] || "").toLowerCase();
-  return ok ? { ok: true, shop } : { ok: false, reason: "bad_signature", shop };
+  return okSafeCompareHex(expected, provided) ? { ok: true, shop } : { ok: false, reason: "bad_signature", shop };
+}
+function okSafeCompareHex(aHex, bHex) {
+  try {
+    return aHex.length === bHex.length &&
+      crypto.timingSafeEqual(Buffer.from(aHex, "hex"), Buffer.from(bHex, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 function requireAppProxy(req, res, next) {
@@ -496,7 +500,6 @@ app.get("/proxy/refina/v1/settings", requireAppProxy, rateLimitAppProxy, async (
       updatedAt: new Date().toISOString()
     };
 
-    // ── instrumentation to prove this handler served the response
     res.set("X-RF-Handler", "settings-merged-20250902");
     if (String(req.query.dbg || "") === "1") {
       payload.debug = {
@@ -779,42 +782,40 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       };
     });
 
-    // Deterministic copy first
-    let copy = shapeCopy({
-      products: allProducts.filter((p) => used.includes(p.id)),
-      concern: normalizedConcern,
-      tone,
-      category
-    });
-
-    // Override copy ONLY when Gemini truly picked items (meta.source === "gemini")
-    if (enriched && meta.source === "gemini") {
-      const ex = enriched.explanation || {};
-      const primary = enriched.primary || {};
-      copy = {
-        why: (ex.friendlyParagraph || ex.oneLiner || copy.why || "").trim(),
-        rationale:
-          (Array.isArray(ex.expertBullets) && ex.expertBullets.length
-            ? ex.expertBullets.join(" • ")
-            : (copy.rationale || "")
-          ).trim(),
-        extras:
-          (
-            (Array.isArray(primary.howToUse) && primary.howToUse.length
-              ? primary.howToUse.join(" • ")
-              : (Array.isArray(ex.usageTips) && ex.usageTips.length
-                ? ex.usageTips.join(" • ")
-                : (copy.extras || "")
-              )
-            )
-          ).trim()
-      };
-    }
-
     const payload = {
       productIds: used,
       products: hydrate,
-      copy,
+      copy: (function shape() {
+        let copy = shapeCopy({
+          products: allProducts.filter((p) => used.includes(p.id)),
+          concern: normalizedConcern,
+          tone,
+          category
+        });
+        if (enriched && meta.source === "gemini") {
+          const ex = enriched.explanation || {};
+          const primary = enriched.primary || {};
+          copy = {
+            why: (ex.friendlyParagraph || ex.oneLiner || copy.why || "").trim(),
+            rationale:
+              (Array.isArray(ex.expertBullets) && ex.expertBullets.length
+                ? ex.expertBullets.join(" • ")
+                : (copy.rationale || "")
+              ).trim(),
+            extras:
+              (
+                (Array.isArray(primary.howToUse) && primary.howToUse.length
+                  ? primary.howToUse.join(" • ")
+                  : (Array.isArray(ex.usageTips) && ex.usageTips.length
+                    ? ex.usageTips.join(" • ")
+                    : (copy.extras || "")
+                  )
+                )
+              ).trim()
+          };
+        }
+        return copy;
+      })(),
       ...(enriched ? { explanation: enriched.explanationFlat || "", enriched } : {}),
       meta: {
         ...meta,
@@ -1017,14 +1018,59 @@ function canonicalizeShopParam(req, _res, next) {
 app.use("/api/admin", canonicalizeShopParam);
 app.use("/api/billing", canonicalizeShopParam); // ensure billing sees full-domain
 
+// ── Admin Settings POST alias (UI posts here; provide handler to avoid 404)
+// Accepts POST /api/admin/store-settings and upserts storeSettings/{shop}.
+// Keeps schema minimal and defers reads to GET /proxy/refina/v1/settings.
+app.post("/api/admin/store-settings", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-RF-Handler", "admin-store-settings-alias-20250903");
+
+  const shop = toMyshopifyDomain(req.query.shop || req.body?.shop || "");
+  if (!shop) return res.status(400).json({ error: "shop_required" });
+
+  // sanitize tokens: only CSS custom properties (start with --)
+  const rawTokens = (req.body && typeof req.body.tokens === "object") ? req.body.tokens : {};
+  const tokens = {};
+  for (const [k, v] of Object.entries(rawTokens)) {
+    if (typeof k === "string" && k.startsWith("--")) tokens[k] = String(v);
+  }
+
+  const toneRaw = String(req.body?.tone || "").toLowerCase();
+  const tone =
+    /bestie|friendly|warm|helpful/.test(toneRaw) ? "bestie" :
+    /expert|pro|concise|direct/.test(toneRaw) ? "expert" : undefined;
+
+  const payload = {
+    ...(Object.keys(tokens).length ? { tokens } : {}),
+    ...(tone ? { tone } : {}),
+    ...(req.body?.category ? { category: String(req.body.category) } : {}),
+    ...(req.body?.presetId ? { presetId: String(req.body.presetId) } : {}),
+    ...(Number.isFinite(Number(req.body?.version)) ? { version: Number(req.body.version) } : {}),
+    ...(Array.isArray(req.body?.enabledPacks) ? { enabledPacks: req.body.enabledPacks.slice(0, 24).map(String) } : {}),
+    ...(req.body?.domain ? { domain: String(req.body.domain).replace(/^https?:\/\//, "").replace(/\/+$/, "") } : {})
+  };
+
+  try {
+    await db.doc(`storeSettings/${shop}`).set(payload, { merge: true });
+    return res.status(200).json({ ok: true, shop, updated: Object.keys(payload) });
+  } catch (e) {
+    console.error("POST /api/admin/store-settings failed:", e?.message || e);
+    return res.status(500).json({ error: "persist_failed" });
+  }
+});
+
 // Billing APIs used by Home + Billing page
 app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
 
 // Admin APIs used by Home/Settings/Analytics
 app.use("/api/admin", analyticsRouter); // /api/admin/analytics/* (overview, logs)
-app.use("/api/admin", adminSettingsRouter); // /api/admin/store-settings (GET/PUT)
+app.use("/api/admin", adminSettingsRouter); // /api/admin/* (existing GET/PUT etc.)
 app.use("/api/admin", analyticsIngestRouter);
 app.use("/api", analyticsIngestRouter);
+
+// ALSO expose storefront analytics ingest on the App Proxy base
+// (Shopify forwards /apps/refina/v1/analytics/ingest → /proxy/refina/v1/analytics/ingest)
+app.use("/proxy/refina/v1/analytics/ingest", requireAppProxy, rateLimitAppProxy, analyticsIngestRouter);
 
 // ─────────────────────────────────────────────────────────────
 /* Listen */

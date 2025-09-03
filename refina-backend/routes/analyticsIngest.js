@@ -1,146 +1,145 @@
 // refina-backend/routes/analyticsIngest.js
-import express from "express";
+// PROD-CHECKLIST:
+// - Enforce full-domain shop only (toMyshopifyDomain); no short IDs
+// - No wildcards; no renames; keep aliases so storefront posts don't miss
+// - Security: HMAC for App Proxy path handled upstream; here we canonicalize & bound inputs
+// - Telemetry headers set; Cache-Control no-store
+// - Do NOT persist storeId or createdAt fields
+
+import { Router } from "express";
 import { db, nowTs } from "../bff/lib/firestore.js";
-import {
-  toMyshopifyDomain,
-  shopFromHostB64,
-  shopFromIdToken,
-} from "../utils/resolveStore.js";
+import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
-const router = express.Router();
+const router = Router({ caseSensitive: false });
 
-console.log("[analyticsIngest] router loaded");
-
-
-/**
- * Resolve full "<shop>.myshopify.com" ONLY (no bare handles, no short IDs).
- * Sources, in order (more tolerant to Admin requests):
- *  - res.locals.shop  (set by your canonicalize middleware)
- *  - X-Shopify-Shop-Domain header
- *  - ?shop= (must be full-domain)
- *  - ?host= (Shopify Admin base64)
- *  - id_token / idToken (JWT with .dest)
- *  - Origin / Referer (storefront)
- */
-  function resolveShopStrict(req, res) {
-  const q = req.query || {};
-  const b = req.body || {};
-
-  // 0) from middleware (preferred) or Shopify header
-  const localsShop = toMyshopifyDomain((res?.locals?.shop) || "");
-  if (localsShop) return localsShop;
-
-  const headerShop = toMyshopifyDomain(req.get("X-Shopify-Shop-Domain") || "");
-  if (headerShop) return headerShop;
-
-  // 1) explicit ?shop
-  const s1 = toMyshopifyDomain(q.shop);
-  if (s1) return s1;
-
-  // 2) Shopify Admin host (base64)
-  const s2 = shopFromHostB64(q.host || q.h);
-  if (s2) return s2;
-
-  // 3) JWT with dest
-  const s3 = shopFromIdToken(q.id_token || q.idToken || b.id_token || b.idToken);
-  if (s3) return s3;
-
-  // 4) storefront origin / referer
-  try {
-    const origin = req.headers.origin || "";
-    const host = new URL(origin).hostname.toLowerCase();
-    if (host.endsWith(".myshopify.com")) return host;
-  } catch {}
-  try {
-    const ref = req.headers.referer || "";
-    const host = new URL(ref).hostname.toLowerCase();
-    if (host.endsWith(".myshopify.com")) return host;
-  } catch {}
-
-  const e = new Error("shop is required");
-  e.status = 400;
-  throw e;
+function canonShopFrom(req) {
+  // Prefer explicit query param, then header, then body
+  const raw =
+    (req.query && (req.query.shop || req.query.storeId)) ||
+    req.get("x-shopify-shop-domain") ||
+    (req.body && (req.body.shop || req.body.storeId)) ||
+    "";
+  return toMyshopifyDomain(String(raw || "").toLowerCase().trim());
 }
 
-/** Coerce various timestamp shapes → Date, else null */
-function coerceDateMaybe(v) {
-  try {
-    if (!v) return null;
-    if (v && typeof v.toDate === "function") return v.toDate();
-    if (v instanceof Date) return v;
-    if (typeof v === "number") return new Date(v);
-    if (typeof v === "string") {
-      const d = new Date(v);
-      return Number.isNaN(d.getTime()) ? null : d;
+function sanitizeEventBody(body = {}) {
+  const out = {};
+  // Only allow a few top-level fields
+  if (typeof body.event === "string") out.event = body.event.slice(0, 64);
+  if (typeof body.uid === "string") out.uid = body.uid.slice(0, 128);
+  if (body.meta && typeof body.meta === "object") {
+    // shallow copy, cap size
+    const m = {};
+    for (const [k, v] of Object.entries(body.meta)) {
+      if (mSize(m) > 4096) break;
+      if (typeof k !== "string") continue;
+      const key = k.slice(0, 40);
+      const val = typeof v === "string" ? v.slice(0, 256) : (isJsonable(v) ? v : String(v));
+      m[key] = val;
     }
-  } catch {}
-  return null;
-}
-
-async function ingestHandler(req, res) {
-  try {
-    const shop = resolveShopStrict(req, res);
-    const body = req.body || {};
-
-    // Timestamp: accept client ts if valid; else server ts
-    const clientTs = coerceDateMaybe(body.ts);
-  
-
-    // Normalize/guard inputs
-    const productIds = Array.isArray(body.productIds) ? body.productIds : [];
-    let plan = (body.plan || "unknown").toString().toLowerCase();
-    if (plan === "premuim") plan = "premium"; // typo backstop
-
-    const doc = {
-      // Canonical fields only (no legacy storeId/createdAt)
-      // (We do NOT redundantly persist storeId; shop is encoded in the path.)
-      ts: clientTs || nowTs(),      // Date or Firestore Timestamp
-      plan,                         // "free" | "pro" | "premium" | "unknown"
-
-      // Event details (kept simple and safe for UI)
-      type: body.type || body.event || "concern",
-      concern: body.concern ?? body.query ?? null,
-      product: body.product ?? null,
-      productIds,
-      summary: typeof body.summary === "string" ? body.summary : "",
-
-      // Optional extras that UI might use later
-      sessionId: body.sessionId ?? null,
-      model: body.model ?? null,
-      explanation: body.explanation ?? null,
-
-      // Server timestamp for last-write-wins
-      updatedAt: nowTs(),
-    };
-
-    // Write where readers look: conversations/{shop}/logs
-    const ref = await db
-      .collection("conversations")
-      .doc(shop)
-      .collection("logs")
-      .add(doc);
-
-    // Helpful prod telemetry
-    res.set("X-Firebase-Project", db.app?.options?.projectId || "(unknown)");
-    res.set("X-Shop", shop);
-
-    return res.json({ ok: true, id: ref.id });
-  } catch (e) {
-    console.error("[analytics ingest] error:", e);
-    const code = e.status || 500;
-    return res
-      .status(code)
-      .json({ ok: false, error: e.message || "ingest failed" });
+    out.meta = m;
   }
+  if (body.payload && typeof body.payload === "object") {
+    // retain small safe payloads only
+    const p = {};
+    for (const [k, v] of Object.entries(body.payload)) {
+      if (mSize(p) > 8192) break;
+      if (typeof k !== "string") continue;
+      const key = k.slice(0, 40);
+      const val = typeof v === "string" ? v.slice(0, 512) : (isJsonable(v) ? v : String(v));
+      p[key] = val;
+    }
+    out.payload = p;
+  }
+  return out;
 }
 
-/**
- * Routes (exact, no wildcards):
- * We register both so it works whether mounted at /api or /api/admin:
- *  - /analytics/ingest
- *  - /admin/analytics/ingest
- */
-router.post("/analytics/ingest", ingestHandler);
-router.post("/admin/analytics/ingest", ingestHandler);
+function mSize(obj) {
+  try { return Buffer.byteLength(JSON.stringify(obj)); } catch { return 0; }
+}
+function isJsonable(v) {
+  try { JSON.stringify(v); return true; } catch { return false; }
+}
+
+// Core write: analytics/{shop}/events/<autoId>
+async function writeEvent(shop, data) {
+  const ref = db.collection(`analytics/${shop}/events`).doc();
+  // Explicitly avoid persisting storeId or createdAt (use ts)
+  const toWrite = {
+    ...data,
+    ts: nowTs()
+  };
+  await ref.set(toWrite);
+  return ref.id;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Routes (no wildcards). We keep aliases so callers don't miss.
+// Mounted in server.js at:
+//   - /api/admin            (→ expects /analytics/ingest)
+//   - /api                  (→ expects /analytics/ingest)
+//   - /proxy/refina/v1/analytics/ingest  (→ expects "/")
+// ─────────────────────────────────────────────────────────────
+
+// Storefront (App Proxy mount): server mounts router at /proxy/refina/v1/analytics/ingest
+router.post("/", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-RF-Handler", "analytics-ingest-20250903");
+  const shop = canonShopFrom(req);
+  if (!shop) return res.status(400).json({ error: "shop_required" });
+
+  try {
+    const clean = sanitizeEventBody(req.body || {});
+    const id = await writeEvent(shop, {
+      ...clean,
+      // telemetry only (not persisted as storeId/createdAt)
+      source: "storefront"
+    });
+    res.status(200).json({ ok: true, id });
+  } catch (e) {
+    console.error("[analyticsIngest] storefront write failed:", e?.message || e);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// Admin/API alias: /api/analytics/ingest
+router.post("/analytics/ingest", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-RF-Handler", "analytics-ingest-20250903");
+  const shop = canonShopFrom(req);
+  if (!shop) return res.status(400).json({ error: "shop_required" });
+
+  try {
+    const clean = sanitizeEventBody(req.body || {});
+    const id = await writeEvent(shop, {
+      ...clean,
+      source: "admin"
+    });
+    res.status(200).json({ ok: true, id });
+  } catch (e) {
+    console.error("[analyticsIngest] admin write failed:", e?.message || e);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
+
+// Additional alias for back-compat (if any caller uses /v1/analytics/ingest under /api)
+router.post("/v1/analytics/ingest", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-RF-Handler", "analytics-ingest-20250903");
+  const shop = canonShopFrom(req);
+  if (!shop) return res.status(400).json({ error: "shop_required" });
+
+  try {
+    const clean = sanitizeEventBody(req.body || {});
+    const id = await writeEvent(shop, {
+      ...clean,
+      source: "alias"
+    });
+    res.status(200).json({ ok: true, id });
+  } catch (e) {
+    console.error("[analyticsIngest] alias write failed:", e?.message || e);
+    res.status(500).json({ error: "internal_error" });
+  }
+});
 
 export default router;

@@ -1,41 +1,20 @@
 {%- comment -%}
-Refina Theme App Embed (launcher)
+Refina Theme App Embed (Launcher, production)
 - Loads concierge assets via Shopify App Proxy (versioned for cache-busting)
 - Outputs a single launcher mount with data-* config
-- Applies Admin CSS tokens inline (so we’re not blocked by external JS)
-- Opens App Proxy in a new tab when inside Theme Editor (editor-safe)
+- Applies Admin CSS tokens inline so colors reflect Settings immediately
+- Editor-safe: opens App Proxy in a new tab inside Theme Editor/Admin
 {%- endcomment -%}
 
 {%- assign ver = block.settings.asset_version | default: 'v3' -%}
 
 <link rel="stylesheet" href="/apps/refina/concierge.css?v={{ ver }}">
 <script type="module" src="/apps/refina/concierge.js?v={{ ver }}" defer></script>
-<div
-  data-refina-launcher
-  ...
-  data-embed-ver="{{ ver }}"
-></div>
-<script>
-(() => {
-  ...
-  const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
-  const IN_ADMIN = /(^|\.)admin\.shopify\.com$/.test((window.top && window.top.location && window.top.location.hostname) || "");
-  ...
-  const btn = document.createElement('button');
-  btn.className = 'refina-launcher-btn';
-  btn.type = 'button';
-  const VER = "{{ ver | escape }}";
-  btn.setAttribute('data-ver', VER);
-  btn.innerHTML = IN_THEME_EDITOR ? `<span>Refina <small style="opacity:.7">(${VER})</small></span>` : `<span>Refina</span>`;
-  ...
-})();
-</script>
 
-
-{%- comment -%} Launcher mount (data-* consumed by the IIFE below) {%- endcomment -%}
 {%- assign page_type = template.name | downcase -%}
 <div
   data-refina-launcher
+  data-embed-ver="{{ ver }}"
   data-side="{{ block.settings.side | default: 'right' }}"
   data-offset="{{ block.settings.offset | default: 24 }}"
   data-brand-color="{{ block.settings.brand_color | default: '#d10000' }}"
@@ -50,47 +29,38 @@ Refina Theme App Embed (launcher)
 ></div>
 
 <script>
-/* ──────────────────────────────────────────────────────────────
- *  A) Apply Admin CSS tokens immediately (inline, no external deps)
- * ────────────────────────────────────────────────────────────── */
+/* A) Apply Admin CSS tokens immediately so CSS vars reflect Admin Settings */
 (() => {
   async function fetchSettings() {
     try {
-      const r = await fetch("/apps/refina/v1/settings", { headers: { "Accept": "application/json" } });
-      if (!r.ok) throw new Error("settings_fetch_failed:" + r.status);
+      const r = await fetch("/apps/refina/v1/settings", { headers: { "Accept":"application/json" }});
+      if (!r.ok) throw new Error("settings_fetch_failed:"+r.status);
       return r.json();
-    } catch (_) { return null; }
+    } catch { return null; }
   }
   function applyTokens(tokens) {
     if (!tokens || typeof tokens !== "object") return;
     const targets = [document.documentElement, (document.querySelector(".rf-root") || document.body)];
     for (const el of targets) {
       if (!el || !el.style) continue;
-      for (const k in tokens) {
-        if (!Object.prototype.hasOwnProperty.call(tokens, k)) continue;
-        if (k && k.charAt(0) === "-") {
-          try { el.style.setProperty(k, String(tokens[k])); } catch (_) {}
-        }
+      for (const k in tokens) if (Object.prototype.hasOwnProperty.call(tokens, k) && k[0]==='-') {
+        try { el.style.setProperty(k, String(tokens[k])); } catch {}
       }
     }
   }
   fetchSettings().then(s => applyTokens(s && s.tokens));
 })();
 
-/* ──────────────────────────────────────────────────────────────
- *  B) Refina theme launcher — editor-safe
- * ────────────────────────────────────────────────────────────── */
+/* B) Launcher (editor-safe) */
 (() => {
-  const q = (s, r = document) => r.querySelector(s);
-  const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
-
-  // prevent double-initialization if this asset is included twice
+  const q = (s, r=document) => r.querySelector(s);
+  const qa = (s, r=document) => Array.from(r.querySelectorAll(s));
   if (window.__REFINA_LAUNCHER_LOADED__) return;
   window.__REFINA_LAUNCHER_LOADED__ = true;
 
-  function initAll() { qa('[data-refina-launcher]').forEach(initOne); }
+  function initAll(){ qa('[data-refina-launcher]').forEach(initOne); }
 
-  function initOne(root) {
+  function initOne(root){
     if (!root || root.dataset.initialized === 'true') return;
 
     const side = root.dataset.side === 'left' ? 'left' : 'right';
@@ -105,7 +75,6 @@ Refina Theme App Embed (launcher)
     const zIndex = parseInt(root.dataset.zIndex || '2147483646', 10);
     const openOnLoad = String(root.dataset.openOnLoad).toLowerCase() === 'true';
 
-    // basic guards
     if (!shopDomain) { root.dataset.initialized = 'true'; return; }
     if ((hideOnProduct && pageType === 'product') || (hideOnCart && pageType === 'cart')) {
       root.dataset.initialized = 'true'; return;
@@ -114,7 +83,6 @@ Refina Theme App Embed (launcher)
     const isMobile = () => window.matchMedia('(max-width: 640px)').matches;
     if (!showMobile && isMobile()) { root.dataset.initialized = 'true'; return; }
 
-    // lazy insert CSS once
     if (!q('#refina-launcher-style')) {
       const style = document.createElement('style');
       style.id = 'refina-launcher-style';
@@ -153,7 +121,6 @@ Refina Theme App Embed (launcher)
     let overlay = null, lastFocus = null;
 
     function buildIframeUrl() {
-      // shop → (App Proxy /apps/refina) → backend /proxy/refina
       const base = new URL(`https://${shopDomain}/${proxyPath}`);
       base.searchParams.set('source', 'launcher');
       try { if (localStorage.getItem('refinaDev') === '1') base.searchParams.set('dev', '1'); } catch {}
@@ -185,7 +152,6 @@ Refina Theme App Embed (launcher)
       overlay.appendChild(modal); document.body.appendChild(overlay);
       setTimeout(() => close.focus(), 0);
 
-      // light focus trap between Close and iframe
       overlay.addEventListener('keydown', (e) => {
         if (e.key !== 'Tab') return;
         const focusables = [close, iframe];
