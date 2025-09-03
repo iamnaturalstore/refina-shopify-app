@@ -74,7 +74,7 @@ function getAppBridge() {
 }
 
 export async function api(path, init = {}) {
-  getAppBridge(); // throws fast if misconfigured
+  getAppBridge();
   const finalUrl = withContext(path);
   const isJSON = init.body && typeof init.body === "object" && !(init.body instanceof FormData);
   const baseInit = isJSON
@@ -96,13 +96,50 @@ export async function api(path, init = {}) {
     const msg = (data && (data.error || data.message)) || (typeof data === "string" ? data : "") || "Request failed";
     throw new Error(msg);
   }
-  return { data, status: res.status, ok: res.ok }; // Return a consistent object
+  // Return a consistent object shape for easier use
+  return { data, status: res.status, ok: res.ok };
 }
 
-// NEW: Add convenience wrappers to the main 'api' function object
+// RESTORED: Add convenience wrappers to the main 'api' function object
 api.get = (path, init) => api(path, { ...init, method: "GET" });
 api.post = (path, body, init) => api(path, { ...init, method: "POST", body });
 api.put = (path, body, init) => api(path, { ...init, method: "PUT", body });
 api.delete = (path, init) => api(path, { ...init, method: "DELETE" });
+
+/* ─────────────────────────────
+ * RESTORED: Convenience wrappers for pages
+ * ───────────────────────────── */
+export const adminApi = {
+  async getAnalyticsSummary({ days = 30, from, to } = {}) {
+    const qs = new URLSearchParams();
+    if (from && to) {
+      qs.set("from", from);
+      qs.set("to", to);
+    } else if (days != null) {
+      qs.set("days", String(days));
+    }
+    const url = `/api/admin/analytics/overview${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return api(url);
+  },
+  async getAnalyticsEvents({ limit, cursor } = {}) {
+    const qs = new URLSearchParams();
+    if (limit) qs.set("limit", String(limit));
+    if (cursor) qs.set("cursor", cursor);
+    const url = `/api/admin/analytics/logs${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return api(url);
+  },
+};
+
+export const billingApi = {
+  async getPlan() {
+    return api(`/api/billing/plan`);
+  },
+  async subscribe({ plan }) {
+    return api(`/api/billing/subscribe`, {
+      method: "POST",
+      body: { plan },
+    });
+  },
+};
 
 export default api;
