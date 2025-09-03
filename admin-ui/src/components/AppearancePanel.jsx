@@ -70,8 +70,6 @@ export default function AppearancePanel({ planLevel, planStatus }) {
     setSaveSuccess(false);
     console.log("[AppearancePanel] Saving draft...", { themeDraft });
     try {
-      // FINAL FIX: Using the new api.put and a simplified payload.
-      // The client's `withContext` function now handles adding the shop parameter automatically.
       const response = await api.put("/api/admin/store-settings", {
         settings: { themeDraft }
       });
@@ -164,7 +162,17 @@ export default function AppearancePanel({ planLevel, planStatus }) {
             </InlineGrid>
 
             <InlineStack gap="200">
-              <Button onClick={saveDraft} variant="secondary" loading={saving}>Save draft</Button>
+              {/* FINAL DIAGNOSTIC: Added a console.log directly to the onClick */}
+              <Button
+                onClick={() => {
+                  console.log('[AppearancePanel] "Save draft" button was clicked.');
+                  saveDraft();
+                }}
+                variant="secondary"
+                loading={saving}
+              >
+                Save draft
+              </Button>
               <Button onClick={applyTheme} variant="primary">Apply to storefront</Button>
             </InlineStack>
           </BlockStack>
