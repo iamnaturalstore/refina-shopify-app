@@ -66,7 +66,7 @@ function normalizeLevel(v) {
 // Try preferred /api route
 async function getSettings() {
   try {
-    const j = await api("/api/admin/store-settings");
+    const { data: j } = await api.get("/api/admin/store-settings");
     return j?.settings || j || {};
   } catch (e) {
     throw new Error(e?.message || "Failed to load settings");
@@ -75,10 +75,8 @@ async function getSettings() {
 
 async function saveSettings(settings) {
   try {
-    const j = await api("/api/admin/store-settings", {
-      method: "POST", // This is likely incorrect, should be PUT. We'll fix this next.
-      body: { settings },
-    });
+    // FINAL FIX: Changed method to PUT to match the backend API
+    const { data: j } = await api.put("/api/admin/store-settings", { settings });
     return j;
   } catch (e) {
     throw new Error(e?.message || "Failed to save settings");
@@ -90,7 +88,7 @@ export default function Settings() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [ok, setOk] = React.useState("");
-  const [planBadge, setPlanBadge] = React.useState(""); // optional: show current plan if backend attaches it
+  const [planBadge, setPlanBadge] = React.useState("");
 
   const [settings, setSettings] = React.useState(DEFAULT_SETTINGS);
   const [initial, setInitial] = React.useState(DEFAULT_SETTINGS);
@@ -231,3 +229,4 @@ export default function Settings() {
     </Box>
   );
 }
+
