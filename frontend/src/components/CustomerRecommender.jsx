@@ -3,6 +3,9 @@
 import React, { useEffect, useState, useCallback } from "react";
 import styles from "./CustomerRecommender.module.css";
 
+// THIS IS OUR UNIQUE NEEDLE. WE WILL SEARCH FOR THIS TEXT.
+console.log("Refina Storefront Component Version: HAYSTACK_TEST_V3");
+
 const API_PREFIX = "/apps/refina/v1";
 
 // --- Helper Functions ---
@@ -234,4 +237,3 @@ export default function CustomerRecommender() {
     </div>
   );
 }
-
