@@ -584,7 +584,7 @@ app.post("/webhooks/shop/redact", rawJson, verifyWebhookHmac, (req, res) => {
   res.status(200).send("ok");
 });
 
-// (A) Shopify App Proxy HTML shell (CORRECTED WITH CACHE BUSTING)
+// (A) Shopify App Proxy HTML shell (CORRECTED WITH CACHE BUSTING AND CROSSORIGIN)
 app.get("/proxy/refina", (_req, res) => {
   res.setHeader(
     "Content-Security-Policy",
@@ -599,7 +599,6 @@ app.get("/proxy/refina", (_req, res) => {
   );
   res.setHeader("Cache-Control", "no-store");
 
-  // FINAL FIX: Add a unique timestamp to the asset URLs to break any caches.
   const cacheBust = `v=${Date.now()}`;
 
   res
@@ -610,12 +609,13 @@ app.get("/proxy/refina", (_req, res) => {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Refina Concierge</title>
-  <link rel="stylesheet" href="/apps/refina/concierge.css?${cacheBust}"/>
-  <link rel="preload" as="script" href="/apps/refina/concierge.js?${cacheBust}"/>
+  {/* FINAL FIX: Added crossorigin="anonymous" to resolve the preload error */}
+  <link rel="stylesheet" href="/apps/refina/concierge.css?${cacheBust}" crossorigin="anonymous"/>
+  <link rel="preload" as="script" href="/apps/refina/concierge.js?${cacheBust}" crossorigin="anonymous"/>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/apps/refina/concierge.js?${cacheBust}" defer></script>
+  <script type="module" src="/apps/refina/concierge.js?${cacheBust}" defer crossorigin="anonymous"></script>
 </body>
 </html>`);
 });
