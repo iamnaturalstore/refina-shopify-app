@@ -143,3 +143,4 @@ router.post("/v1/analytics/ingest", async (req, res) => {
 });
 
 export default router;
+
