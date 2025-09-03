@@ -1,11 +1,10 @@
-# Shopify App config (prod + dev)
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
 client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
-handle = "refina"
-
-# The embedded Admin entry — our backend serves /embedded → /admin-ui
 application_url = "https://refina-shopify-app.onrender.com/embedded"
 embedded = true
+handle = "refina"
 
 [build]
 automatically_update_urls_on_dev = false
@@ -15,18 +14,29 @@ include_config_on_deploy = true
 [webhooks]
 api_version = "2024-10"
 
+  [[webhooks.subscriptions]]
+  uri = "https://refina-shopify-app.onrender.com/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "https://refina-shopify-app.onrender.com/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "https://refina-shopify-app.onrender.com/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
 [access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products"
 
-# OAuth callback(s). Keep dev ngrok + prod Render so either works.
 [auth]
-redirect_urls = [
-  "https://refina-shopify-app.onrender.com/api/auth/callback",
-  "https://refina.ngrok.app/api/auth/callback"
-]
+redirect_urls = [ "https://refina-shopify-app.onrender.com/auth/callback" ]
 
-# ✅ App Proxy mapping used by the storefront to load /apps/refina/*
 [app_proxy]
-prefix = "apps"
-subpath = "refina"
 url = "https://refina-shopify-app.onrender.com/proxy/refina"
+subpath = "refina"
+prefix = "apps"
+
+[pos]
+embedded = false
