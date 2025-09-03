@@ -1,25 +1,33 @@
 import { Router } from "express";
 import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
 
-/* ───────── Store resolution (WITH DEBUG LOGGING) ───────── */
+/* ───────── Store resolution ───────── */
+
+// light sanitize
 const sanitize = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9\-_.]/g, "");
+
+/** Strict full-domain check: "<shop>.myshopify.com" */
 const FULL_SHOP_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 
+/** Canonicalize only when already full "<shop>.myshopify.com" */
 function toMyshopifyDomain(raw) {
   const s = sanitize(raw);
   if (!s) return "";
   return s.endsWith(".myshopify.com") ? s : "";
 }
 
+/** host (base64) → "<shop>.myshopify.com" */
 function shopFromHostB64(hostB64) {
   if (!hostB64) return "";
   try {
     const decoded = Buffer.from(hostB64, "base64").toString("utf8");
+    // admin.shopify.com/store/<store>
     const mAdmin = decoded.match(/^admin\.shopify\.com\/store\/([^\/?#]+)/i);
     if (mAdmin?.[1]) {
       const full = `${sanitize(mAdmin[1])}.myshopify.com`;
       return FULL_SHOP_RE.test(full) ? full : "";
     }
+    // <shop>.myshopify.com/admin
     const mShop = decoded.match(/^([^\/?#]+)\.myshopify\.com\/admin/i);
     if (mShop?.[1]) {
       const full = `${sanitize(mShop[1])}.myshopify.com`;
@@ -29,12 +37,13 @@ function shopFromHostB64(hostB64) {
   return "";
 }
 
+/** id_token (JWT) → "<shop>.myshopify.com" via payload.dest */
 function shopFromIdToken(idToken) {
   if (!idToken || !idToken.includes(".")) return "";
   try {
     const base64 = idToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     const payload = JSON.parse(Buffer.from(base64, "base64").toString("utf8"));
-    const dest = payload?.dest;
+    const dest = payload?.dest; // e.g. "https://refina-demo.myshopify.com"
     if (dest) {
       const hostname = new URL(dest).hostname.toLowerCase();
       return FULL_SHOP_RE.test(hostname) ? hostname : "";
@@ -43,51 +52,34 @@ function shopFromIdToken(idToken) {
   return "";
 }
 
+/** Resolve incoming store identifier from headers/query/body and canonicalize (full domain only) */
 function resolveShop(source = {}) {
-  console.log("[resolveShop] Starting resolution with source:", source);
-
-  // 0) Prefer Shopify header
-  const headerShop = source["x-shopify-shop-domain"] || source["X-Shopify-Shop-Domain"] || source.shopifyShop || "";
-  console.log(`[resolveShop] 0. Header check: found raw value '${headerShop}'`);
+  // 0) Prefer Shopify header if present
+  const headerShop =
+    source["x-shopify-shop-domain"] ||
+    source["X-Shopify-Shop-Domain"] ||
+    source.shopifyShop ||
+    "";
   if (headerShop) {
     const full = toMyshopifyDomain(headerShop);
-    if (FULL_SHOP_RE.test(full)) {
-      console.log(`[resolveShop] 0. SUCCESS from header: '${full}'`);
-      return full;
-    }
+    if (FULL_SHOP_RE.test(full)) return full;
   }
 
-  // 1) Explicit query/body
+  // 1) Explicit query/body: only accept values that are already full domains
   const raw = source.shop || source.storeId || "";
-  console.log(`[resolveShop] 1. Query/Body check: found raw value '${raw}'`);
   if (raw) {
     const s = sanitize(raw);
-    console.log(`[resolveShop] 1. Sanitized value: '${s}'`);
-    const isMatch = FULL_SHOP_RE.test(s);
-    console.log(`[resolveShop] 1. Regex test result: ${isMatch}`);
-    if (isMatch) {
-      console.log(`[resolveShop] 1. SUCCESS from query/body: '${s}'`);
-      return s;
-    }
+    if (FULL_SHOP_RE.test(s)) return s; // ❗ do NOT auto-append for bare handles
   }
 
   // 2) host (base64)
   const fromHost = shopFromHostB64(source.host);
-  console.log(`[resolveShop] 2. Host (b64) check: resolved to '${fromHost}'`);
-  if (fromHost) {
-    console.log(`[resolveShop] 2. SUCCESS from host: '${fromHost}'`);
-    return fromHost;
-  }
+  if (fromHost) return fromHost;
 
   // 3) id_token (Shopify JWT)
   const fromJwt = shopFromIdToken(source.id_token || source.idToken);
-  console.log(`[resolveShop] 3. JWT check: resolved to '${fromJwt}'`);
-  if (fromJwt) {
-    console.log(`[resolveShop] 3. SUCCESS from JWT: '${fromJwt}'`);
-    return fromJwt;
-  }
+  if (fromJwt) return fromJwt;
 
-  console.log("[resolveShop] FAILED: No shop could be resolved.");
   return "";
 }
 
@@ -95,15 +87,19 @@ function resolveShop(source = {}) {
 
 const router = Router();
 
+/** GET /api/admin/store-settings?storeId|shop|host|id_token
+ * Returns { storeId, settings }.
+ */
 router.get("/store-settings", async (req, res) => {
-  console.log("GET /api/admin/store-settings request received.");
   const shop = resolveShop({ ...(req.query || {}), ...(req.headers || {}) });
   if (!shop) {
-    console.error("[GET /store-settings] Failed to resolve shop. Responding with 400.");
     return res.status(400).json({ error: "shop required" });
   }
 
   try {
+    // This is the newly added line for diagnostics
+    console.log("[GET /store-settings] Resolved shop:", shop, "|| Checking dbAdmin object:", !!dbAdmin);
+
     const ref = dbAdmin.collection("storeSettings").doc(shop);
     const snap = await ref.get();
     const settings = snap.exists ? (snap.data() || {}) : { plan: "free" };
@@ -115,18 +111,24 @@ router.get("/store-settings", async (req, res) => {
   }
 });
 
+/** PUT /api/admin/store-settings
+ * Body: { storeId|shop|host|id_token, settings: { ... } }
+ */
 router.put("/store-settings", async (req, res) => {
-  console.log("PUT /api/admin/store-settings request received.");
   try {
     const shop = resolveShop({ ...(req.query || {}), ...(req.body || {}), ...(req.headers || {}) });
     if (!shop) {
-      console.error("[PUT /store-settings] Failed to resolve shop. Responding with 400.");
       return res.status(400).json({ error: "shop required" });
     }
+    
+    // This is the newly added line for diagnostics
+    console.log("[PUT /store-settings] Resolved shop:", shop, "|| Checking dbAdmin object:", !!dbAdmin);
 
     const settings = req.body?.settings || {};
     const ref = dbAdmin.collection("storeSettings").doc(shop);
+
     await ref.set({ ...settings, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+
     const fresh = await ref.get();
     res.set("Cache-Control", "no-store");
     return res.json({
@@ -135,7 +137,7 @@ router.put("/store-settings", async (req, res) => {
       settings: fresh.exists ? fresh.data() : settings,
     });
   } catch (e) {
-    console.error("PUT /api/admin/store-settings DB error:", e?.message || e);
+    console.error("PUT /api/admin/store-settings error:", e?.message || e);
     return res.status(500).json({ error: "update_failed" });
   }
 });
