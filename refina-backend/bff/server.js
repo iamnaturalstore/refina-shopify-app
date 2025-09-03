@@ -609,7 +609,6 @@ app.get("/proxy/refina", (_req, res) => {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Refina Concierge</title>
-  {/* FINAL FIX: Added crossorigin="anonymous" to resolve the security error */}
   <link rel="stylesheet" href="/apps/refina/concierge.css?${cacheBust}" crossorigin="anonymous"/>
   <link rel="preload" as="script" href="/apps/refina/concierge.js?${cacheBust}" crossorigin="anonymous"/>
 </head>
