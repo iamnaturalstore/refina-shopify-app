@@ -3,9 +3,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import styles from "./CustomerRecommender.module.css";
 
-// THIS IS OUR UNIQUE NEEDLE. WE WILL SEARCH FOR THIS TEXT.
-console.log("Refina Storefront Component Version: HAYSTACK_TEST_V3");
-
 const API_PREFIX = "/apps/refina/v1";
 
 // --- Helper Functions ---
@@ -41,6 +38,7 @@ export default function CustomerRecommender() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // useEffect to fetch settings on initial load
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -53,12 +51,13 @@ export default function CustomerRecommender() {
         if (!cancelled) setSettings(settingsJson);
       } catch (e) {
         console.error("[Recommender] Could not load settings:", e);
-        if (!cancelled) setSettings({});
+        if (!cancelled) setSettings({}); // Set to empty object on failure to avoid render errors
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
+  // useEffect to load chips (common concerns)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -105,8 +104,10 @@ export default function CustomerRecommender() {
       });
       setReasonsById(rbi);
 
+      // FINAL FIX: Emit analytics event AFTER a successful recommendation
       try {
         console.log("[Recommender] Reporting analytics event for concern:", q);
+        // This relies on an analytics script being available on the window object
         window.RefinaAnalytics?.report({
           type: "concern",
           concern: q,
@@ -137,7 +138,8 @@ export default function CustomerRecommender() {
       if (!loading) handleRecommend(concern);
     }
   };
-
+  
+  // Use dynamic copy from settings, with fallbacks
   const headingText = settings?.copy?.heading || "Let’s find your perfect pick";
   const subheadingText = settings?.copy?.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
   const ctaText = settings?.copy?.ctaText || "Get picks";
