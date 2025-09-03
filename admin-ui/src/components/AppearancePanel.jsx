@@ -8,27 +8,18 @@ import {
 const PRESETS = {
   Classic: {
     preset: "Classic", version: 1,
-    tokens: {
-      bg:"#FFFFFF", surface:"#FFFFFF", text:"#111827", muted:"#6B7280",
-      primary:"#2563EB", accent:"#10B981", border:"#E5E7EB",
-      radius:"12px", shadow:"0 4px 14px rgba(0,0,0,0.05)",
-      gap:"16px", pad:"16px",
-      fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif",
-      fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif",
-      fontSize:"16px", lineHeight:"1.55",
-    }
+    tokens: { bg:"#FFFFFF", surface:"#FFFFFF", text:"#111827", muted:"#6B7280", primary:"#2563EB", accent:"#10B981", border:"#E5E7EB", radius:"12px", shadow:"0 4px 14px rgba(0,0,0,0.05)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55" }
   },
-  Minimal: { preset: "Minimal", version: 1, tokens: { bg:"#FAFAFA", surface:"#FFFFFF", text:"#111827", muted:"#6B7280", primary:"#111827", accent:"#9CA3AF", border:"#E5E7EB", radius:"10px", shadow:"0 2px 10px rgba(0,0,0,0.04)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55", } },
-  Luxe: { preset: "Luxe", version: 1, tokens: { bg:"#FFFFFF", surface:"#F7F5F2", text:"#1F2328", muted:"#5F6B76", primary:"#2E2A24", accent:"#D4AF37", border:"#E7E1D0", radius:"14px", shadow:"0 6px 20px rgba(0,0,0,0.06)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55", } },
-  Playful: { preset: "Playful", version: 1, tokens: { bg:"#FFFFFF", surface:"#F8F7FF", text:"#1F2937", muted:"#6B7280", primary:"#7C3AED", accent:"#22C55E", border:"#E5E7EB", radius:"14px", shadow:"0 8px 24px rgba(0,0,0,0.08)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55", } }
+  Minimal: { preset: "Minimal", version: 1, tokens: { bg:"#FAFAFA", surface:"#FFFFFF", text:"#111827", muted:"#6B7280", primary:"#111827", accent:"#9CA3AF", border:"#E5E7EB", radius:"10px", shadow:"0 2px 10px rgba(0,0,0,0.04)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55" } },
+  Luxe: { preset: "Luxe", version: 1, tokens: { bg:"#FFFFFF", surface:"#F7F5F2", text:"#1F2328", muted:"#5F6B76", primary:"#2E2A24", accent:"#D4AF37", border:"#E7E1D0", radius:"14px", shadow:"0 6px 20px rgba(0,0,0,0.06)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55" } },
+  Playful: { preset: "Playful", version: 1, tokens: { bg:"#FFFFFF", surface:"#F8F7FF", text:"#1F2937", muted:"#6B7280", primary:"#7C3AED", accent:"#22C55E", border:"#E5E7EB", radius:"14px", shadow:"0 8px 24px rgba(0,0,0,0.08)", gap:"16px", pad:"16px", fontBody:"-apple-system, Inter, Segoe UI, Roboto, Arial, sans-serif", fontHeadings:"system-ui, Inter, Segoe UI, Roboto, Arial, sans-serif", fontSize:"16px", lineHeight:"1.55" } }
 };
 
 export default function AppearancePanel({ planLevel, planStatus }) {
-  const [shop, setShop] = useState(""); // NEW: State to hold the shop domain
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  const [saveSuccess, setSaveSuccess] = useState(false); // NEW: State for success banner
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [featureFlags, setFeatureFlags] = useState({ enableTheming:false });
   const [themeDraft, setThemeDraft] = useState(null);
   const [liveTheme, setLiveTheme] = useState(null);
@@ -37,21 +28,11 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   const isProPlus = planLevel === "pro+";
 
   useEffect(() => {
-    // NEW: Extract shop from URL when the component loads
-    const params = new URLSearchParams(window.location.search);
-    const shopDomain = params.get("shop");
-    if (shopDomain) {
-      setShop(shopDomain);
-    } else {
-      console.error("[AppearancePanel] CRITICAL: Could not find 'shop' in URL parameters!");
-    }
-
     (async () => {
       setLoading(true);
       console.log("[AppearancePanel] Fetching store settings...");
       try {
-        const res = await api.get("/api/admin/store-settings");
-        const json = typeof res.data === 'object' ? res.data : JSON.parse(res.data);
+        const { data: json } = await api.get("/api/admin/store-settings");
         console.log("[AppearancePanel] Received settings payload:", json);
         
         const settings = json.settings || {};
@@ -84,25 +65,22 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   };
 
   async function saveDraft() {
-    if (!shop) {
-      setSaveError("Cannot save settings: Shop domain is missing. Please reload the page.");
-      return;
-    }
     setSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
-    console.log(`[AppearancePanel] Saving draft for shop: ${shop}`, { themeDraft });
+    console.log("[AppearancePanel] Saving draft...", { themeDraft });
     try {
-      // FIXED: Added the 'shop' query parameter to the URL
-      const response = await api.put(`/api/admin/store-settings?shop=${shop}`, {
+      // FINAL FIX: Using the new api.put and a simplified payload.
+      // The client's `withContext` function now handles adding the shop parameter automatically.
+      const response = await api.put("/api/admin/store-settings", {
         settings: { themeDraft }
       });
 
-      if (response.status !== 200) {
+      if (!response.ok) {
         throw new Error(`Failed to save. Server responded with ${response.status}`);
       }
       console.log("[AppearancePanel] Save successful!");
-      setSaveSuccess(true); // Trigger success banner
+      setSaveSuccess(true);
 
     } catch (error) {
       console.error("[AppearancePanel] Save failed:", error);
@@ -126,7 +104,6 @@ export default function AppearancePanel({ planLevel, planStatus }) {
   return (
     <Card>
       <BlockStack gap="400">
-        {/* NEW: Banners for success and error states */}
         {saveSuccess && (
           <Banner title="Success" tone="success" onDismiss={() => setSaveSuccess(false)}>
             <p>Your settings have been saved successfully.</p>
@@ -141,9 +118,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
         <InlineStack align="space-between" blockAlign="center">
           <Text as="h2" variant="headingMd">Appearance</Text>
           <InlineStack gap="200">
-            <Badge tone={isProPlus ? "success" : isPro ? "attention" : "critical"}>
-              {isProPlus ? "Pro+" : isPro ? (planStatus === "trial" ? "Pro (trial)" : "Pro") : "Free"}
-            </Badge>
+            <Badge tone={isProPlus ? "success" : isPro ? "attention" : "critical"}>{isProPlus ? "Pro+" : isPro ? (planStatus === "trial" ? "Pro (trial)" : "Pro") : "Free"}</Badge>
           </InlineStack>
         </InlineStack>
 
@@ -161,13 +136,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
                     <div style={{width:16,height:16,background:PRESETS[name].tokens.surface,borderRadius:4,border:"1px solid #E5E7EB"}}/>
                   </InlineStack>
                   <InlineStack>
-                    <Button
-                      disabled={disabled}
-                      variant={selected ? "primary" : "plain"}
-                      onClick={() => resetToPreset(name)}
-                    >
-                      {selected ? "Selected" : disabled ? "Locked" : "Choose"}
-                    </Button>
+                    <Button disabled={disabled} variant={selected ? "primary" : "plain"} onClick={() => resetToPreset(name)}>{selected ? "Selected" : disabled ? "Locked" : "Choose"}</Button>
                   </InlineStack>
                 </BlockStack>
               </Card>
@@ -204,12 +173,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
         <Card>
           <BlockStack gap="200" padding="300">
             <Text as="h3" variant="headingSm">Preview</Text>
-            <div
-              style={{
-                "--rf-bg": tokens.bg, "--rf-surface": tokens.surface, "--rf-text": tokens.text, "--rf-muted": tokens.muted, "--rf-primary": tokens.primary, "--rf-accent": tokens.accent, "--rf-border": tokens.border, "--rf-radius": tokens.radius, "--rf-shadow": tokens.shadow, "--rf-gap": tokens.gap, "--rf-pad": tokens.pad,
-                fontFamily: tokens.fontBody, background: "var(--rf-bg)", padding: "var(--rf-gap)", borderRadius: "var(--rf-radius)",
-              }}
-            >
+            <div style={{ "--rf-bg": tokens.bg, "--rf-surface": tokens.surface, "--rf-text": tokens.text, "--rf-muted": tokens.muted, "--rf-primary": tokens.primary, "--rf-accent": tokens.accent, "--rf-border": tokens.border, "--rf-radius": tokens.radius, "--rf-shadow": tokens.shadow, "--rf-gap": tokens.gap, "--rf-pad": tokens.pad, fontFamily: tokens.fontBody, background: "var(--rf-bg)", padding: "var(--rf-gap)", borderRadius: "var(--rf-radius)"}}>
               <div style={{display:"grid", gap:"var(--rf-gap)", gridTemplateColumns:"repeat(3, minmax(0,1fr))"}}>
                 {[1,2,3].map((i) => (
                   <div key={i} style={{ background:"var(--rf-surface)", border:`1px solid var(--rf-border)`, borderRadius:"var(--rf-radius)", boxShadow:"var(--rf-shadow)", padding:"var(--rf-pad)" }}>
@@ -224,9 +188,7 @@ export default function AppearancePanel({ planLevel, planStatus }) {
                 ))}
               </div>
             </div>
-            {!featureFlags.enableTheming && (
-              <Text tone="subdued">This is an admin-only preview. It won’t affect your storefront until theming is enabled.</Text>
-            )}
+            {!featureFlags.enableTheming && (<Text tone="subdued">This is an admin-only preview. It won’t affect your storefront until theming is enabled.</Text>)}
           </BlockStack>
         </Card>
       </BlockStack>
