@@ -144,7 +144,7 @@ export default function CustomerRecommender() {
     <div className={styles.container}>
       <h1 className={styles.heading}>{headingText}</h1>
       <p className={styles.subtext}>{subheadingText}</p>
-
+      
       {commonConcerns.length > 0 && (
         <div className={styles.concernButtons}>
           {commonConcerns.slice(0, 6).map((item) => (
