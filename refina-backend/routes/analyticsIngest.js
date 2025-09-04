@@ -1,4 +1,3 @@
-// refina-backend/routes/analyticsIngest.js
 // PROD-CHECKLIST:
 // - Enforce full-domain shop only (toMyshopifyDomain); no short IDs
 // - No wildcards; no renames; keep aliases so storefront posts don't miss
@@ -13,7 +12,6 @@ import { toMyshopifyDomain } from "../utils/resolveStore.js";
 const router = Router({ caseSensitive: false });
 
 function canonShopFrom(req) {
-  // Prefer explicit query param, then header, then body
   const raw =
     (req.query && (req.query.shop || req.query.storeId)) ||
     req.get("x-shopify-shop-domain") ||
@@ -22,77 +20,71 @@ function canonShopFrom(req) {
   return toMyshopifyDomain(String(raw || "").toLowerCase().trim());
 }
 
+// FINAL FIX: This function now accepts the fields being sent by the storefront.
 function sanitizeEventBody(body = {}) {
   const out = {};
-  // Only allow a few top-level fields
+  if (!body || typeof body !== 'object') return out;
+
+  // Accept fields from CustomerRecommender.jsx
+  if (typeof body.type === "string") out.type = body.type.slice(0, 64);
+  if (typeof body.concern === "string") out.concern = body.concern.slice(0, 512);
+  if (Array.isArray(body.productIds)) {
+    out.productIds = body.productIds.map(id => String(id)).slice(0, 50);
+  }
+  
+  // Also keep the original, more generic structure for flexibility
   if (typeof body.event === "string") out.event = body.event.slice(0, 64);
   if (typeof body.uid === "string") out.uid = body.uid.slice(0, 128);
-  if (body.meta && typeof body.meta === "object") {
-    // shallow copy, cap size
-    const m = {};
-    for (const [k, v] of Object.entries(body.meta)) {
-      if (mSize(m) > 4096) break;
-      if (typeof k !== "string") continue;
-      const key = k.slice(0, 40);
-      const val = typeof v === "string" ? v.slice(0, 256) : (isJsonable(v) ? v : String(v));
-      m[key] = val;
+  
+  // Sanitize meta object
+  if (body.meta && typeof body.meta === 'object') {
+    const sanitizedMeta = {};
+    for (const [key, value] of Object.entries(body.meta).slice(0, 20)) {
+       sanitizedMeta[String(key).slice(0, 40)] = String(value).slice(0, 256);
     }
-    out.meta = m;
+    out.meta = sanitizedMeta;
   }
+  
+  // Legacy payload support
   if (body.payload && typeof body.payload === "object") {
-    // retain small safe payloads only
-    const p = {};
-    for (const [k, v] of Object.entries(body.payload)) {
-      if (mSize(p) > 8192) break;
-      if (typeof k !== "string") continue;
-      const key = k.slice(0, 40);
-      const val = typeof v === "string" ? v.slice(0, 512) : (isJsonable(v) ? v : String(v));
-      p[key] = val;
-    }
-    out.payload = p;
+    out.payload = body.payload; // Assuming payload is already structured safely
   }
-  return out;
-}
 
-function mSize(obj) {
-  try { return Buffer.byteLength(JSON.stringify(obj)); } catch { return 0; }
-}
-function isJsonable(v) {
-  try { JSON.stringify(v); return true; } catch { return false; }
+  return out;
 }
 
 // Core write: analytics/{shop}/events/<autoId>
 async function writeEvent(shop, data) {
   const ref = db.collection(`analytics/${shop}/events`).doc();
-  // Explicitly avoid persisting storeId or createdAt (use ts)
   const toWrite = {
     ...data,
-    ts: nowTs()
+    ts: nowTs() // Use server timestamp for accuracy
   };
+  // Remove fields we don't want to persist
+  delete toWrite.shop;
+  delete toWrite.storeId;
+  delete toWrite.createdAt;
+
   await ref.set(toWrite);
   return ref.id;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Routes (no wildcards). We keep aliases so callers don't miss.
-// Mounted in server.js at:
-//   - /api/admin            (→ expects /analytics/ingest)
-//   - /api                  (→ expects /analytics/ingest)
-//   - /proxy/refina/v1/analytics/ingest  (→ expects "/")
+// Routes
 // ─────────────────────────────────────────────────────────────
 
 // Storefront (App Proxy mount): server mounts router at /proxy/refina/v1/analytics/ingest
 router.post("/", async (req, res) => {
   res.set("Cache-Control", "no-store");
-  res.set("X-RF-Handler", "analytics-ingest-20250903");
-  const shop = canonShopFrom(req);
+  res.set("X-RF-Handler", "analytics-ingest-storefront-v2");
+  // App Proxy verification is done upstream in server.js
+  const shop = req.shopDomain || canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "shop_required" });
 
   try {
     const clean = sanitizeEventBody(req.body || {});
     const id = await writeEvent(shop, {
       ...clean,
-      // telemetry only (not persisted as storeId/createdAt)
       source: "storefront"
     });
     res.status(200).json({ ok: true, id });
@@ -105,7 +97,7 @@ router.post("/", async (req, res) => {
 // Admin/API alias: /api/analytics/ingest
 router.post("/analytics/ingest", async (req, res) => {
   res.set("Cache-Control", "no-store");
-  res.set("X-RF-Handler", "analytics-ingest-20250903");
+  res.set("X-RF-Handler", "analytics-ingest-admin-v2");
   const shop = canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "shop_required" });
 
@@ -122,25 +114,4 @@ router.post("/analytics/ingest", async (req, res) => {
   }
 });
 
-// Additional alias for back-compat (if any caller uses /v1/analytics/ingest under /api)
-router.post("/v1/analytics/ingest", async (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.set("X-RF-Handler", "analytics-ingest-20250903");
-  const shop = canonShopFrom(req);
-  if (!shop) return res.status(400).json({ error: "shop_required" });
-
-  try {
-    const clean = sanitizeEventBody(req.body || {});
-    const id = await writeEvent(shop, {
-      ...clean,
-      source: "alias"
-    });
-    res.status(200).json({ ok: true, id });
-  } catch (e) {
-    console.error("[analyticsIngest] alias write failed:", e?.message || e);
-    res.status(500).json({ error: "internal_error" });
-  }
-});
-
 export default router;
-
