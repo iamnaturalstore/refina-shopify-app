@@ -2,7 +2,7 @@
 
 client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
-application_url = "https://refina-shopify-app.onrender.com/embedded"
+application_url = "https://refina-app.onrender.com/embedded"
 embedded = true
 handle = "refina"
 
@@ -15,15 +15,15 @@ include_config_on_deploy = true
 api_version = "2024-10"
 
   [[webhooks.subscriptions]]
-  uri = "https://refina-shopify-app.onrender.com/webhooks/customers/data_request"
+  uri = "https://refina-app.onrender.com/webhooks/customers/data_request"
   compliance_topics = [ "customers/data_request" ]
 
   [[webhooks.subscriptions]]
-  uri = "https://refina-shopify-app.onrender.com/webhooks/customers/redact"
+  uri = "https://refina-app.onrender.com/webhooks/customers/redact"
   compliance_topics = [ "customers/redact" ]
 
   [[webhooks.subscriptions]]
-  uri = "https://refina-shopify-app.onrender.com/webhooks/shop/redact"
+  uri = "https://refina-app.onrender.com/webhooks/shop/redact"
   compliance_topics = [ "shop/redact" ]
 
 [access_scopes]
@@ -31,10 +31,10 @@ api_version = "2024-10"
 scopes = "read_products"
 
 [auth]
-redirect_urls = [ "https://refina-shopify-app.onrender.com/auth/callback" ]
+redirect_urls = [ "https://refina-app.onrender.com/auth/callback" ]
 
 [app_proxy]
-url = "https://refina-shopify-app.onrender.com/proxy/refina"
+url = "https://refina-app.onrender.com/proxy/refina"
 subpath = "refina"
 prefix = "apps"
 

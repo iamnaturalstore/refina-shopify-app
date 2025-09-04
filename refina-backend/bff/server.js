@@ -32,7 +32,7 @@ const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.ne
 const PUBLIC_BACKEND_ORIGIN = String(
   process.env.PUBLIC_BACKEND_ORIGIN ||
     process.env.APP_PUBLIC_URL ||
-    "https://refina-shopify-app.onrender.com"
+    "https://refina-app.onrender.com"
 ).replace(/\/+$/, "");
 
 // Shopify App Proxy secret (used to verify /proxy/refina/v1/*)
