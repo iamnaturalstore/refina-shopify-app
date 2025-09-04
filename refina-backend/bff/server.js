@@ -793,24 +793,31 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       category,
     });
 
-    if (enriched && meta.source === "gemini") {
-      const ex = enriched.explanation || {};
-      const primary = enriched.primary || {};
+
+    // …then override when Gemini enriched text exists (so the modal shows concierge tone)
+    if (req._enriched) {
+      const ex = req._enriched.explanation || {};
+      const primary = req._enriched.primary || {};
       copy = {
         why: (ex.friendlyParagraph || ex.oneLiner || copy.why || "").trim(),
-        rationale: (Array.isArray(ex.expertBullets) && ex.expertBullets.length
+        rationale: (
+          Array.isArray(ex.expertBullets) && ex.expertBullets.length
             ? ex.expertBullets.join(" • ")
             : (copy.rationale || "")
-          ).trim(),
-        extras: ((Array.isArray(primary.howToUse) && primary.howToUse.length
+        ).trim(),
+        extras: (
+          (Array.isArray(primary.howToUse) && primary.howToUse.length
             ? primary.howToUse.join(" • ")
             : (Array.isArray(ex.usageTips) && ex.usageTips.length
               ? ex.usageTips.join(" • ")
               : (copy.extras || "")
-            ))
-          ).trim(),
+            )
+          )
+        ).trim()
       };
     }
+
+    // ... continues with the `const payload = { ... };` block
     
     const disclaimer = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
       ? "Skincare guidance only — not medical advice."
