@@ -793,27 +793,20 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       category,
     });
 
-
     // …then override when Gemini enriched text exists (so the modal shows concierge tone)
-    if (req._enriched) {
-      const ex = req._enriched.explanation || {};
-      const primary = req._enriched.primary || {};
+    if (enriched && meta.source === "gemini") {
+      const ex = enriched.explanation || {};
+      const primary = enriched.primary || {};
+      // Helper to safely join arrays into sentences, removing bullet points
+      const toPara = (v) => {
+        if (Array.isArray(v)) return v.join(" ").replace(/\s*•\s*/g, " ").trim();
+        return String(v || "").replace(/\s*•\s*/g, " ").trim();
+      };
+
       copy = {
         why: (ex.friendlyParagraph || ex.oneLiner || copy.why || "").trim(),
-        rationale: (
-          Array.isArray(ex.expertBullets) && ex.expertBullets.length
-            ? ex.expertBullets.join(" • ")
-            : (copy.rationale || "")
-        ).trim(),
-        extras: (
-          (Array.isArray(primary.howToUse) && primary.howToUse.length
-            ? primary.howToUse.join(" • ")
-            : (Array.isArray(ex.usageTips) && ex.usageTips.length
-              ? ex.usageTips.join(" • ")
-              : (copy.extras || "")
-            )
-          )
-        ).trim()
+        rationale: toPara(ex.expertBullets || copy.rationale),
+        extras: toPara(primary.howToUse || ex.usageTips || copy.extras),
       };
     }
 
