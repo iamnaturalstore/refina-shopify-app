@@ -265,6 +265,32 @@ function shapeCopy({ products, concern, tone, category }) {
   return { why, rationale, extras };
 }
 
+function detectProductTypeFromQuery(allProducts, query) {
+  const q = String(query || "").toLowerCase();
+  // derive candidate type terms from the catalog to avoid hard-coding
+  const types = new Set(
+    allProducts
+      .map(p => String(p.productTypeNormalized || p.productType || "").toLowerCase())
+      .filter(Boolean)
+  );
+  // common synonyms map (extend as needed)
+  const syn = new Map([
+    ["cleanser","cleanser"],["face wash","cleanser"],
+    ["serum","serum"],["essence","essence"],
+    ["moisturiser","moisturizer"],["moisturizer","moisturizer"],["cream","moisturizer"],
+    ["sunscreen","sunscreen"],["spf","sunscreen"],
+    ["retinol","retinol"],["retinoid","retinol"],["bakuchiol","retinol"],
+    ["toner","toner"],["eye cream","eye cream"],["mask","mask"],
+    ["exfoliant","exfoliant"],["aha","exfoliant"],["bha","exfoliant"]
+  ]);
+  for (const [k,v] of syn.entries()) {
+    if (q.includes(k)) return v;
+  }
+  for (const t of types) {
+    if (t && q.includes(t)) return t;
+  }
+  return "";
+}
 async function getSettings(storeId) {
   const ref = db.doc(`storeSettings/${storeId}`);
   const snap = await ref.get();
