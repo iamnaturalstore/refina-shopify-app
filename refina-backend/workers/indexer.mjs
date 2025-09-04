@@ -29,7 +29,7 @@ if (!MODE || !STORE) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Minimal response schemas (Gemini REST subset)
+// JSON Schemas for model compliance (Gemini REST subset)
 // ─────────────────────────────────────────────────────────────
 const MIN_SCHEMA = {
   type: "OBJECT",
@@ -37,7 +37,7 @@ const MIN_SCHEMA = {
     product: {
       type: "OBJECT",
       properties: { id: { type: "STRING" } },
-      required: ["id"]
+      required: ["id"],
     },
     entities: {
       type: "ARRAY",
@@ -48,10 +48,10 @@ const MIN_SCHEMA = {
           type: { type: "STRING" },
           synonyms: { type: "ARRAY", items: { type: "STRING" } },
           fact: { type: "STRING" },
-          cautions: { type: "STRING" }
+          cautions: { type: "STRING" },
         },
-        required: ["name", "type"]
-      }
+        required: ["name", "type"],
+      },
     },
     specs: {
       type: "ARRAY",
@@ -60,16 +60,15 @@ const MIN_SCHEMA = {
         properties: {
           name: { type: "STRING" },
           value: { type: "NUMBER" },
-          unit: { type: "STRING" }
+          unit: { type: "STRING" },
         },
-        required: ["name"]
-      }
+        required: ["name"],
+      },
     },
-    flags: { type: "ARRAY", items: { type: "STRING" } }
+    flags: { type: "ARRAY", items: { type: "STRING" } },
   },
-  required: ["product", "entities", "specs", "flags"]
+  required: ["product", "entities", "specs", "flags"],
 };
-
 const TINY_SCHEMA = {
   type: "OBJECT",
   properties: {
@@ -79,11 +78,11 @@ const TINY_SCHEMA = {
       items: {
         type: "OBJECT",
         properties: { name: { type: "STRING" }, type: { type: "STRING" } },
-        required: ["name", "type"]
-      }
-    }
+        required: ["name", "type"],
+      },
+    },
   },
-  required: ["product", "entities"]
+  required: ["product", "entities"],
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -93,12 +92,12 @@ const MAX_CONCURRENCY = Number(process.env.REFINA_INDEXER_CONCURRENCY || 6);
 const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.3),
-  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024), // ↑ default to avoid truncation
+  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024),
   model: process.env.REFINA_INDEXER_MODEL || "gemini-1.5-flash",
-  responseMimeType: "application/json"
+  responseMimeType: "application/json",
 };
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 14000);
-const BATCH_SIZE = 400; // Firestore batch cap
+const BATCH_SIZE = 400;
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -118,11 +117,10 @@ function uniq(arr) { return Array.from(new Set(arr.filter(Boolean))); }
 function withTimeout(promise, ms, tag = "timeout") {
   return Promise.race([
     promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error(tag)), ms))
+    new Promise((_, rej) => setTimeout(() => rej(new Error(tag)), ms)),
   ]);
 }
 
-// Tolerant JSON repair
 function repairJson(text = "") {
   let s = String(text || "");
   const m = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -156,7 +154,6 @@ function extractJson(text = "") {
   throw new Error("invalid_json");
 }
 
-// FINAL RESORT: salvage truncated entity list from partial text
 function salvageEntities(raw = "") {
   const out = [];
   const seen = new Set();
@@ -196,11 +193,10 @@ function productToPromptInput(p, cap = 900) {
     title: p.title || p.name || "",
     description: desc,
     tags: tags.slice(0, 16),
-    specs: p.specs || p.metafields || {}
+    specs: p.specs || p.metafields || {},
   };
 }
 
-// Heuristic baseline extractor (used only if LLM fails with no salvage)
 function baselineExtractFromText(product) {
   const text = [String(product.description || ""), (product.tags || []).join(", ")].join("\n");
   const entities = [];
@@ -212,19 +208,20 @@ function baselineExtractFromText(product) {
     for (const part of parts.slice(0, 20)) {
       if (/^\d/.test(part)) continue;
       const name = part.replace(/\s{2,}/g," ").trim();
-      if (name) entities.push({ name, type: "ingredient", synonyms: [], fact: "", cautions: "" });
+      if (name) entities.push({ name, type: "ingredient", synonyms: [], evidence: [], fact: "", cautions: "" });
     }
   }
   const mBattery = text.match(/(\d{2,4})\s*(Wh|W|mAh)\b/i);
   if (mBattery) {
     const val = Number(mBattery[1]); const unit = mBattery[2];
     specs.push({ name: "battery", value: val, unit });
-    entities.push({ name: unit.toUpperCase() === "WH" ? "Battery (Wh)" : "Power", type: "spec", synonyms: [], fact: "", cautions: "" });
+    entities.push({ name: unit.toUpperCase() === "WH" ? "Battery (Wh)" : "Power", type: "spec", synonyms: [], evidence: [], fact: "", cautions: "" });
   }
   return { entities: dedupeEntities(entities).slice(0, 24), specs, flags: [] };
 }
 function dedupeEntities(list) {
-  const seen = new Set(); const out = [];
+  const seen = new Set();
+  const out = [];
   for (const e of list) { const key = slugify(e.name); if (key && !seen.has(key)) { seen.add(key); out.push(e); } }
   return out;
 }
@@ -234,23 +231,19 @@ function dedupeEntities(list) {
 // ─────────────────────────────────────────────────────────────
 async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
   const batch = db.batch();
-
-  // Link doc (product → entity slugs + optional evidence)
   const linkRef = db.doc(`stores/${storeId}/entityIndex/${productId}`);
   const slugs = uniq(extraction.entities.map(e => slugify(e.name)));
   const evidence = (extraction.entities || []).map(e => ({
     slug: slugify(e.name),
-    evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2)
+    evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
   }));
   batch.set(linkRef, {
     productId,
     entities: slugs.slice(0, 64),
     evidence,
     updatedAt: nowTs(),
-    schemaVersion: 1
+    schemaVersion: 1,
   }, { merge: true });
-
-  // Entity docs (store-scoped)
   for (const ent of extraction.entities) {
     const slug = slugify(ent.name);
     if (!slug) continue;
@@ -265,11 +258,9 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
       confidence: 0.8,
       examples: db.FieldValue?.arrayUnion?.(productId) ?? productId,
       updatedAt: nowTs(),
-      schemaVersion: 1
+      schemaVersion: 1,
     }, { merge: true });
   }
-
-  // Commit with chunking safeguard
   await batch.commit().catch(async (e) => {
     if (/arrayUnion/i.test(String(e?.message || ""))) {
       const batch2 = db.batch();
@@ -286,7 +277,7 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
           status: String(ent.fact ? "llm" : "stub"),
           confidence: 0.8,
           updatedAt: nowTs(),
-          schemaVersion: 1
+          schemaVersion: 1,
         }, { merge: true });
       }
       await batch2.commit();
@@ -304,7 +295,6 @@ async function extractForProduct({ storeId, product }) {
     const started = Date.now();
     const prompt = buildExtractEntitiesPrompt({ product: productToPromptInput(product, cap) });
     const cfg = { ...GENCFG, ...(schema ? { responseSchema: schema } : {}), ...(systemHint ? { system: systemHint } : {}) };
-
     let text;
     try {
       text = await withTimeout(callGemini(prompt, cfg), LLM_TIMEOUT_MS, "timeout");
@@ -312,43 +302,32 @@ async function extractForProduct({ storeId, product }) {
       const reason = /timeout/i.test(String(e?.message)) ? "timeout" : "error";
       return { ok: false, reason, ms: Date.now() - started, raw: "" };
     }
-
     let parsed;
     try { parsed = extractJson(text); }
     catch { return { ok: false, reason: "invalid_json", ms: Date.now() - started, raw: String(text || "").slice(0, 400) }; }
-
     const v = validateExtractionOutput(parsed);
     if (!v.ok) return { ok: false, reason: "schema_invalid", errors: v.errors, ms: Date.now() - started, raw: "" };
-
     if (v.value.product.id !== String(product.id)) v.value.product.id = String(product.id);
     v.value.specs = Array.isArray(v.value.specs) ? v.value.specs : [];
     v.value.flags = Array.isArray(v.value.flags) ? v.value.flags : [];
     return { ok: true, value: v.value, ms: Date.now() - started };
   }
-
-  // A) No schema
   let r = await tryOnce(900, null, null);
   if (r.ok) return r;
-
-  // B) Minimal schema
   if (["invalid_json","timeout","error","schema_invalid"].includes(r.reason)) {
     await new Promise(res => setTimeout(res, 400));
     const r2 = await tryOnce(600, MIN_SCHEMA, 'Output STRICT JSON matching the provided schema. Use double quotes, no comments, no trailing commas.');
     if (r2.ok) return r2;
-
-    // C) Tiny schema
     await new Promise(res => setTimeout(res, 400));
     const r3 = await tryOnce(450, TINY_SCHEMA, 'Output STRICT JSON matching the schema only. No extra fields.');
     if (r3.ok) return r3;
-
-    // D) Salvage from any partial raw text
     const raw = r3.raw || r2.raw || r.raw || "";
     const ents = salvageEntities(raw);
     if (ents.length) {
       return {
         ok: true,
         value: { product: { id: String(product.id) }, entities: ents, specs: [], flags: [] },
-        ms: (r3.ms || r2.ms || r.ms || 0)
+        ms: (r3.ms || r2.ms || r.ms || 0),
       };
     }
     return r3.ms ? r3 : r2.ms ? r2 : r;
@@ -378,7 +357,6 @@ function pLimit(n) {
 (async function main() {
   console.log(`[Indexer] start mode=${MODE} store=${STORE} commit=${COMMIT} limit=${LIMIT}`);
   const t0 = Date.now();
-
   try {
     if (MODE === "bootstrap") {
       const products = await fetchProducts(STORE, LIMIT);
@@ -390,11 +368,9 @@ function pLimit(n) {
       let processed = 0, wrote = 0, failures = 0, llmMsSum = 0;
       const reasonCounts = {};
       const failedSamples = [];
-
       const tasks = products.map((p) => limit(async () => {
         const r = await extractForProduct({ storeId: STORE, product: p });
         llmMsSum += r.ms || 0;
-
         if (!r.ok) {
           failures++;
           reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1;
@@ -402,32 +378,28 @@ function pLimit(n) {
             failedSamples.push({
               id: p.id,
               reason: r.reason,
-              raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined
+              raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined,
             });
           }
-
-          // Heuristic fallback
           if (COMMIT) {
             const base = baselineExtractFromText(productToPromptInput(p));
             if (base.entities.length || base.specs.length) {
               await upsertEntitiesAndLinks({
                 storeId: STORE,
                 productId: p.id,
-                extraction: { product: { id: String(p.id) }, ...base }
+                extraction: { product: { id: String(p.id) }, ...base },
               });
               processed++; wrote++;
             }
           }
           return;
         }
-
         processed++;
         if (COMMIT) {
           await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value });
           wrote++;
         }
       }));
-
       await Promise.all(tasks);
       const ms = Date.now() - t0;
       console.log(JSON.stringify({
@@ -436,7 +408,7 @@ function pLimit(n) {
         reasons: reasonCounts,
         samples: VERBOSE ? failedSamples : undefined,
         avgLlmMs: processed ? Math.round(llmMsSum / processed) : 0,
-        totalMs: ms
+        totalMs: ms,
       }, null, 2));
     } else if (MODE === "index") {
       const pid = ARGS.product || ARGS.p;
@@ -444,7 +416,6 @@ function pLimit(n) {
       const doc = await db.doc(`products/${STORE}/items/${pid}`).get();
       if (!doc.exists) throw new Error(`product not found: ${pid}`);
       const product = { id: doc.id, ...doc.data() };
-
       const r = await extractForProduct({ storeId: STORE, product });
       if (!r.ok) {
         if (COMMIT) {
@@ -453,7 +424,7 @@ function pLimit(n) {
             await upsertEntitiesAndLinks({
               storeId: STORE,
               productId: product.id,
-              extraction: { product: { id: String(product.id) }, ...base }
+              extraction: { product: { id: String(product.id) }, ...base },
             });
             console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
             process.exit(0);
@@ -462,7 +433,6 @@ function pLimit(n) {
         console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
         process.exit(2);
       }
-
       if (COMMIT) await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value });
       console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));
     } else {

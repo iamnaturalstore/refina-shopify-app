@@ -1,4 +1,5 @@
-// PROD-CHECKLIST:
+//refina-backend/routes/analyticsIngest.js
+// // PROD-CHECKLIST:
 // - Enforce full-domain shop only (toMyshopifyDomain); no short IDs
 // - No wildcards; no renames; keep aliases so storefront posts don't miss
 // - Security: HMAC for App Proxy path handled upstream; here we canonicalize & bound inputs

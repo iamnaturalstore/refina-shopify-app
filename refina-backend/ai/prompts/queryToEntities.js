@@ -1,8 +1,12 @@
 // refina-backend/ai/prompts/queryToEntities.js
 // Maps a user's free-text query to a subset of the store's entity vocabulary.
 
+/**
+ * Builds the prompt to map a user query to a list of entity slugs.
+ * @param {{ query: string, vocab: { slug: string, name: string, synonyms: string[] }[] }} params
+ * @returns {string} The complete prompt string.
+ */
 export function buildQueryToEntitiesPrompt({ query, vocab }) {
-  // vocab: [{ slug, name, synonyms[] }]
   const prunedVocab = (Array.isArray(vocab) ? vocab : []).slice(0, 2000).map(v => ({
     slug: String(v.slug || ""),
     name: String(v.name || ""),

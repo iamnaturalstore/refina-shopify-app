@@ -1,4 +1,4 @@
-// BFF-first UI: fetches settings, uses dynamic copy, and reports analytics correctly.
+// frontend/src/components/CustomerRecommender.jsx  BFF-first UI: fetches settings, uses dynamic copy, and reports analytics correctly.
 
 import React, { useEffect, useState, useCallback } from "react";
 import styles from "./CustomerRecommender.module.css";
