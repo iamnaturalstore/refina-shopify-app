@@ -7,8 +7,8 @@ Refina Theme App Embed (Launcher, production)
 
 {%- assign ver = block.settings.asset_version | default: 'v3' -%}
 
-<link rel="stylesheet" href="/apps/refina/concierge.css?v={{ ver }}">
-<script type="module" src="/apps/refina/concierge.js?v={{ ver }}" defer></script>
+{{ 'concierge.css' | asset_url | stylesheet_tag }}
+<script type="module" src="{{ 'concierge.js' | asset_url }}" defer></script>
 
 {%- assign page_type = template.name | downcase -%}
 <div
@@ -195,7 +195,7 @@ Refina Theme App Embed (Launcher, production)
 
 {% schema %}
 {
-  "name": "Refina Concierge Launcher",
+  "name": "Refina Launcher",
   "target": "body",
   "settings": [
     { "type": "header", "content": "Content" },
