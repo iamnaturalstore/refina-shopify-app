@@ -16,6 +16,7 @@ import {
   DataTable,
 } from "@shopify/polaris";
 import { adminApi, getShop } from "../api/client.js";
+import styles from "./Analytics.module.css";
 
 /**
  * Guardrails:
