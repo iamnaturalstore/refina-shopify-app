@@ -1,4 +1,5 @@
 //admin-ui/src/pages/Settings.jsx
+// force a fresh build
 import * as React from "react";
 import {
   Page,
@@ -10,7 +11,9 @@ import {
   Text,
   TextField,
   Select,
+  Checkbox,
   Banner,
+  Divider,
   Box,
   Spinner,
   PageActions,
@@ -18,17 +21,21 @@ import {
 import styles from "./Analytics.module.css";
 import { api } from "../api/client.js";
 
-// ---------- Defaults and Helpers (Unchanged) ----------
+
+// ---------- Defaults (edit as you like) ----------
 const DEFAULT_SETTINGS = {
   category: "Beauty",
   aiTone: "professional",
+  // New "Intelligence" settings
   aiConstraints: "Prefer vegan products. Avoid products containing fragrance.",
-  productExclusions: "",
+  productExclusions: "", // e.g. "tag:clearance, id:12345"
   updatedAt: null,
 };
 
+// Normalize shallow + partials safely
 function mergeDefaults(current = {}) {
   const out = structuredClone(DEFAULT_SETTINGS);
+  // Deeply merge properties from current into the default structure
   const deepMerge = (target, source) => {
     for (const key in source) {
       if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
@@ -43,12 +50,19 @@ function mergeDefaults(current = {}) {
   return out;
 }
 
+function normalizeLevel(v) {
+  const s = String(v || "").toLowerCase().trim();
+  if (/\bpremium\b/.test(s) || /\bpro\s*\+|\bpro\W*plus\b/.test(s)) return "premium";
+  if (/\bpro\b/.test(s)) return "pro";
+  return "free";
+}
+
 // Correctly use the new api client methods
 async function getSettings() {
   try {
-    // Use the direct api() call, which correctly handles the request
-    const json = await api("/api/admin/store-settings");
-    return json || {};
+    const { data: json } = await api.get("/api/admin/store-settings");
+    console.log("[Settings] Fetched data:", json);
+    return json || {}; // Return the full payload
   } catch (e) {
     throw new Error(e?.message || "Failed to load settings");
   }
@@ -56,10 +70,8 @@ async function getSettings() {
 
 async function saveSettings(settingsToSave) {
   try {
-    // Use the direct api() call with method and body options
-    const json = await api("/api/admin/store-settings", {
-      method: "PUT", // Use PUT to match your backend router
-      body: { settings: settingsToSave }
+    const { data: json } = await api.put("/api/admin/store-settings", {
+      settings: settingsToSave
     });
     return json;
   } catch (e) {
@@ -72,6 +84,8 @@ export default function Settings() {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [ok, setOk] = React.useState("");
+  const [planBadge, setPlanBadge] = React.useState("");
+
   const [settings, setSettings] = React.useState(DEFAULT_SETTINGS);
   const [initial, setInitial] = React.useState(DEFAULT_SETTINGS);
 
@@ -79,11 +93,16 @@ export default function Settings() {
 
   React.useEffect(() => {
     (async () => {
-      setLoading(true);
       setError("");
+      setOk("");
+      setLoading(true);
       try {
         const rawPayload = await getSettings();
+        // The actual settings are nested inside the 'settings' key
         const fetchedSettings = rawPayload.settings || {};
+        if (fetchedSettings?.plan?.level) {
+          setPlanBadge(normalizeLevel(fetchedSettings.plan.level));
+        }
         const merged = mergeDefaults(fetchedSettings);
         setSettings(merged);
         setInitial(merged);
@@ -102,10 +121,10 @@ export default function Settings() {
     try {
       const payload = { ...settings, updatedAt: new Date().toISOString() };
       await saveSettings(payload);
-      setInitial(payload);
-      setSettings(payload);
+      setInitial(payload); // Set the new baseline for "dirty" checking
+      setSettings(payload); // Ensure UI reflects the exact saved state
       setOk("Settings saved successfully.");
-      setTimeout(() => setOk(""), 3000);
+      setTimeout(() => setOk(""), 3000); // Clear success message after 3s
     } catch (e) {
       setError(e?.message || "Failed to save settings");
     } finally {
@@ -114,7 +133,8 @@ export default function Settings() {
   }
 
   function handleResetDefaults() {
-    setSettings(mergeDefaults({}));
+    const next = mergeDefaults({});
+    setSettings(next);
   }
 
   const set = (path, value) => {
@@ -130,55 +150,14 @@ export default function Settings() {
     });
   };
 
-  const pageContent = loading ? (
-    <div className={styles.spinnerContainer}>
-      <Spinner accessibilityLabel="Loading settings" size="large" />
-    </div>
-  ) : (
-    <BlockStack gap="400">
-      {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
-      {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">General</Text>
-              <InlineStack gap="300" wrap>
-                <Box minWidth="280px" width="100%">
-                  <TextField label="Store category" value={settings.category} onChange={(v) => set("category", v)} autoComplete="off" placeholder="e.g. Beauty, Fishing Gear" />
-                </Box>
-                <Box minWidth="280px" width="100%">
-                  <Select label="AI tone" options={[{ label: "Professional", value: "professional" }, { label: "Friendly", value: "friendly" }, { label: "Playful", value: "playful" }, { label: "Scientific", value: "scientific" },]} onChange={(v) => set("aiTone", v)} value={settings.aiTone} />
-                </Box>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">AI Behavior</Text>
-              <TextField
-                label="AI Constraints"
-                value={settings.aiConstraints}
-                onChange={(v) => set("aiConstraints", v)}
-                multiline={4}
-                autoComplete="off"
-                helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
-              />
-              <TextField
-                label="Product Exclusions"
-                value={settings.productExclusions}
-                onChange={(v) => set("productExclusions", v)}
-                autoComplete="off"
-                helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
-              />
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </BlockStack>
-  );
+  if (loading) {
+    // Show a full-page spinner inside the Page component for a better loading experience
+    return (
+        <div className={styles.spinnerContainer}>
+          <Spinner accessibilityLabel="Loading settings" size="large" />
+        </div>
+    );
+  }
 
   return (
     <Page>
@@ -189,7 +168,50 @@ export default function Settings() {
         <Text as="p" tone="subdued">
           Control the core intelligence and behavior of your AI concierge.
         </Text>
-        {pageContent}
+
+        {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
+        {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
+
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingSm">General</Text>
+                <InlineStack gap="300" wrap>
+                  <Box minWidth="280px" width="100%">
+                    <TextField label="Store category" value={settings.category} onChange={(v) => set("category", v)} autoComplete="off" placeholder="e.g. Beauty, Fishing Gear" />
+                  </Box>
+                  <Box minWidth="280px" width="100%">
+                    <Select label="AI tone" options={[{ label: "Professional", value: "professional" }, { label: "Friendly", value: "friendly" }, { label: "Playful", value: "playful" }, { label: "Scientific", value: "scientific" },]} onChange={(v) => set("aiTone", v)} value={settings.aiTone} />
+                  </Box>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingSm">AI Behavior</Text>
+                <TextField
+                  label="AI Constraints"
+                  value={settings.aiConstraints}
+                  onChange={(v) => set("aiConstraints", v)}
+                  multiline={4}
+                  autoComplete="off"
+                  helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
+                />
+                <TextField
+                  label="Product Exclusions"
+                  value={settings.productExclusions}
+                  onChange={(v) => set("productExclusions", v)}
+                  autoComplete="off"
+                  helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
+                />
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
       </BlockStack>
 
       <PageActions
