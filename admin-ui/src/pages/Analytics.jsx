@@ -23,17 +23,19 @@ function pickArray(ev) {
   return [];
 }
 
-function buildAggregates(events) {
-  const concernCounts = new Map();
-  for (const ev of events) {
-    const c = String(ev.concern || "").trim().toLowerCase();
-    if (c) concernCounts.set(c, (concernCounts.get(c) || 0) + 1);
+function findTopConcern(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return "N/A";
   }
-  const topConcerns = Array.from(concernCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([label, count]) => ({ label, count }));
-  return { topConcerns };
+  const concernCounts = events.reduce((acc, event) => {
+    const concern = event.concern || "Unknown";
+    acc[concern] = (acc[concern] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.keys(concernCounts).reduce((a, b) =>
+    concernCounts[a] > concernCounts[b] ? a : b
+  );
 }
 
 function titleCase(s) {
@@ -52,12 +54,14 @@ export default function Analytics() {
     try {
       const [summaryData, eventsData] = await Promise.all([
         adminApi.getAnalyticsSummary({ days: 30 }),
-        adminApi.getAnalyticsEvents({ limit: 100 }), // Fetch more events to get a good top concern
+        adminApi.getAnalyticsEvents({ limit: 100 }),
       ]);
 
       const normalizedSum = normalizeSummary(summaryData);
       const eventList = pickArray(eventsData);
-      const aggs = buildAggregates(eventList);
+      const aggs = {
+          topConcerns: buildAggregates(eventList).topConcerns
+      };
       
       setSummary(normalizedSum);
       setAggregates(aggs);
