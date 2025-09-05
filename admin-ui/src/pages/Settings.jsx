@@ -150,81 +150,86 @@ export default function Settings() {
   };
 
   if (loading) {
+    // Show a full-page spinner inside the Page component for a better loading experience
     return (
-      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading settings...</Text></InlineStack></Box>
+      <Page>
+        <div className={styles.spinnerContainer}>
+          <Spinner accessibilityLabel="Loading settings" size="large" />
+        </div>
+      </Page>
     );
   }
 
   return (
-  <Page>
-    <BlockStack gap="400">
-      <Text as="h1" variant="headingLg" className={styles.pageTitle}>
-      Settings
-     </Text>
-      <Text as="p" tone="subdued">
-        Control the core intelligence and behavior of your AI concierge.
-      </Text>
+    <Page>
+      <BlockStack gap="400">
+        <Text as="h1" variant="headingLg" className={styles.pageTitle}>
+          Settings
+        </Text>
+        <Text as="p" tone="subdued">
+          Control the core intelligence and behavior of your AI concierge.
+        </Text>
 
-      {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
-      {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
+        {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
+        {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
 
-      <Layout>
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">General</Text>
-              <InlineStack gap="300" wrap>
-                <Box minWidth="280px" width="100%">
-                  <TextField label="Store category" value={settings.category} onChange={(v) => set("category", v)} autoComplete="off" placeholder="e.g. Beauty, Fishing Gear" />
-                </Box>
-                <Box minWidth="280px" width="100%">
-                  <Select label="AI tone" options={[{ label: "Professional", value: "professional" }, { label: "Friendly", value: "friendly" }, { label: "Playful", value: "playful" }, { label: "Scientific", value: "scientific" },]} onChange={(v) => set("aiTone", v)} value={settings.aiTone} />
-                </Box>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingSm">General</Text>
+                <InlineStack gap="300" wrap>
+                  <Box minWidth="280px" width="100%">
+                    <TextField label="Store category" value={settings.category} onChange={(v) => set("category", v)} autoComplete="off" placeholder="e.g. Beauty, Fishing Gear" />
+                  </Box>
+                  <Box minWidth="280px" width="100%">
+                    <Select label="AI tone" options={[{ label: "Professional", value: "professional" }, { label: "Friendly", value: "friendly" }, { label: "Playful", value: "playful" }, { label: "Scientific", value: "scientific" },]} onChange={(v) => set("aiTone", v)} value={settings.aiTone} />
+                  </Box>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
 
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">AI Behavior</Text>
-              <TextField
-                label="AI Constraints"
-                value={settings.aiConstraints}
-                onChange={(v) => set("aiConstraints", v)}
-                multiline={4}
-                autoComplete="off"
-                helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
-              />
-              <TextField
-                label="Product Exclusions"
-                value={settings.productExclusions}
-                onChange={(v) => set("productExclusions", v)}
-                autoComplete="off"
-                helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
-              />
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </BlockStack>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingSm">AI Behavior</Text>
+                <TextField
+                  label="AI Constraints"
+                  value={settings.aiConstraints}
+                  onChange={(v) => set("aiConstraints", v)}
+                  multiline={4}
+                  autoComplete="off"
+                  helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
+                />
+                <TextField
+                  label="Product Exclusions"
+                  value={settings.productExclusions}
+                  onChange={(v) => set("productExclusions", v)}
+                  autoComplete="off"
+                  helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
+                />
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </BlockStack>
 
-    <PageActions
-      primaryAction={{
-        content: "Save changes",
-        loading: busy,
-        disabled: !dirty || busy || loading,
-        onAction: handleSave,
-      }}
-      secondaryActions={[
-        {
-          content: "Reset to defaults",
-          disabled: busy || loading,
-          onAction: handleResetDefaults,
-        },
-      ]}
-    />
-  </Page>
-);
+      <PageActions
+        primaryAction={{
+          content: "Save changes",
+          loading: busy,
+          disabled: !dirty || busy,
+          onAction: handleSave,
+        }}
+        secondaryActions={[
+          {
+            content: "Reset to defaults",
+            disabled: busy || loading,
+            onAction: handleResetDefaults,
+          },
+        ]}
+      />
+    </Page>
+  );
 }
