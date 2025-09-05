@@ -43,9 +43,11 @@ function mergeDefaults(current = {}) {
   return out;
 }
 
+// Correctly use the new api client methods
 async function getSettings() {
   try {
-    const { data: json } = await api.get("/api/admin/store-settings");
+    // Use the direct api() call, which correctly handles the request
+    const json = await api("/api/admin/store-settings");
     return json || {};
   } catch (e) {
     throw new Error(e?.message || "Failed to load settings");
@@ -54,8 +56,10 @@ async function getSettings() {
 
 async function saveSettings(settingsToSave) {
   try {
-    const { data: json } = await api.put("/api/admin/store-settings", {
-      settings: settingsToSave
+    // Use the direct api() call with method and body options
+    const json = await api("/api/admin/store-settings", {
+      method: "PUT", // Use PUT to match your backend router
+      body: { settings: settingsToSave }
     });
     return json;
   } catch (e) {
