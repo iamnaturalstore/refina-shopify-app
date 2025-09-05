@@ -185,6 +185,7 @@ export default function Analytics() {
   }
 
   const totals = summary?.totals || { interactions: 0, productClicks: 0 };
+  const maxConcernCount = aggs.topConcerns.length > 0 ? aggs.topConcerns[0].count : 0;
   const recentEventsRows = events.map(e => [
     e.tsServerIso ? new Date(e.tsServerIso).toLocaleString() : "—",
     e.type || "—",
@@ -232,8 +233,8 @@ export default function Analytics() {
               <Layout.Section variant="oneThird">
                 <Card>
                   <BlockStack gap="200">
-                    <Text as="h2" variant="headingSm" tone="subdued">Unique Products Suggested</Text>
-                    <p className={styles.metricNumber}>{aggs.uniqueProducts}</p>
+                    <Text as="h2" variant="headingSm" tone="subdued">AI-Powered Sessions</Text>
+                    <p className={styles.metricNumber}>{summary?.totals?.aiSessions || 0}</p>
                   </BlockStack>
                 </Card>
               </Layout.Section>
