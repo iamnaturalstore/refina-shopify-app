@@ -1,4 +1,5 @@
 //admin-ui/src/pages/Settings.jsx
+// force a fresh build
 import * as React from "react";
 import {
   Page,
@@ -17,7 +18,7 @@ import {
   Spinner,
   PageActions,
 } from "@shopify/polaris";
-import styles from "./Analytics.module.css"; // Add this line to reuse our theme
+import styles from "./Analytics.module.css";
 import { api } from "../api/client.js";
 
 
