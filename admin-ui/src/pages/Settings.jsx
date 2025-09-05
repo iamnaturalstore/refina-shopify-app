@@ -1,6 +1,8 @@
 //admin-ui/src/pages/Settings.jsx
 import * as React from "react";
 import {
+  Page,
+  Layout,
   Card,
   BlockStack,
   InlineStack,
@@ -13,7 +15,10 @@ import {
   Divider,
   Box,
   Spinner,
+  PageActions,
 } from "@shopify/polaris";
+import { api } from "../api/client.js";
+import styles from "./Analytics.module.css"; // Add this line to reuse our theme
 import { api } from "../api/client.js";
 
 
@@ -152,21 +157,20 @@ export default function Settings() {
   }
 
   return (
-    <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
-      <Card>
-        <BlockStack gap="400">
-          <InlineStack align="space-between" blockAlign="center">
-            <Text as="h2" variant="headingMd">Settings</Text>
-            {planBadge && (
-              <Text as="span" tone="subdued" variant="bodySm">
-                Plan: <b>{planBadge}</b>
-              </Text>
-            )}
-          </InlineStack>
+  <Page>
+    <BlockStack gap="400">
+      <Text as="h1" variant="headingLg" className={styles.pageTitle}>
+        Settings
+      </Text>
+      <Text as="p" tone="subdued">
+        Customize the AI's behavior and intelligence for your store.
+      </Text>
 
-          {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
-          {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
+      {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
+      {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
 
+      <Layout>
+        <Layout.Section>
           <Card>
             <BlockStack gap="300">
               <Text as="h3" variant="headingSm">General</Text>
@@ -180,7 +184,9 @@ export default function Settings() {
               </InlineStack>
             </BlockStack>
           </Card>
+        </Layout.Section>
 
+        <Layout.Section>
           <Card>
             <BlockStack gap="300">
               <Text as="h3" variant="headingSm">AI Behavior</Text>
@@ -201,22 +207,25 @@ export default function Settings() {
               />
             </BlockStack>
           </Card>
+        </Layout.Section>
+      </Layout>
+    </BlockStack>
 
-          <Divider />
-
-          <InlineStack align="space-between">
-            <Button onClick={handleResetDefaults} disabled={busy || loading}>Reset to defaults</Button>
-            <InlineStack gap="300">
-              <Text tone="subdued" as="span" variant="bodySm">
-                {dirty ? "Unsaved changes" : "All changes saved"}
-              </Text>
-              <Button variant="primary" onClick={handleSave} disabled={!dirty || busy || loading}>
-                {busy ? "Saving…" : "Save changes"}
-              </Button>
-            </InlineStack>
-          </InlineStack>
-        </BlockStack>
-      </Card>
-    </Box>
-  );
+    <PageActions
+      primaryAction={{
+        content: "Save changes",
+        loading: busy,
+        disabled: !dirty || busy || loading,
+        onAction: handleSave,
+      }}
+      secondaryActions={[
+        {
+          content: "Reset to defaults",
+          disabled: busy || loading,
+          onAction: handleResetDefaults,
+        },
+      ]}
+    />
+  </Page>
+);
 }

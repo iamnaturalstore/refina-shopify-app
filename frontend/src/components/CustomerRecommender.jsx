@@ -1,5 +1,4 @@
-// frontend/src/components/CustomerRecommender.jsx  BFF-first UI: fetches settings, uses dynamic copy, and reports analytics correctly.
-
+// frontend/src/components/CustomerRecommender.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import styles from "./CustomerRecommender.module.css";
 
@@ -20,12 +19,30 @@ function formatPrice(val) {
   return `$${n.toFixed(2)}`;
 }
 
+// New helper hook to read settings from URL parameters
+function useUrlSettings() {
+  const [settings, setSettings] = useState({});
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlSettings = {};
+    for (const [key, value] of params.entries()) {
+      // Convert kebab-case (e.g., 'primary-color') to camelCase (e.g., 'primaryColor')
+      const camelCaseKey = key.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+      urlSettings[camelCaseKey] = value;
+    }
+    setSettings(urlSettings);
+  }, []);
+
+  return settings;
+}
+
 export default function CustomerRecommender() {
+  const settings = useUrlSettings();
   const [concern, setConcern] = useState("");
   const [lastQuery, setLastQuery] = useState("");
   const [loading, setLoading] = useState(false);
-  const [settings, setSettings] = useState(null);
-
+  
   const [commonConcerns, setCommonConcerns] = useState([]);
   const [matchedProducts, setMatchedProducts] = useState([]);
   const [copy, setCopy] = useState({ why: "", rationale: "", extras: "" });
@@ -33,22 +50,25 @@ export default function CustomerRecommender() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // useEffect to fetch settings on initial load
+  // useEffect to apply theme settings from URL
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch(`${API_PREFIX}/settings`);
-        if (!r.ok) throw new Error(`settings fetch failed with status ${r.status}`);
-        const settingsJson = await r.json();
-        if (!cancelled) setSettings(settingsJson);
-      } catch (e) {
-        console.error("[Recommender] Could not load settings:", e);
-        if (!cancelled) setSettings({});
+    const root = document.documentElement;
+    if (!root || !settings) return;
+
+    // Map URL settings to CSS variables
+    const stylesToApply = {
+      '--rf-primary-color': settings.primaryColor,
+      '--rf-accent-color': settings.accentColor,
+      // Simple mapping for border-radius. Assumes you have CSS classes/vars for sm, md, lg, 2xl.
+      '--rf-border-radius': settings.borderRadius?.replace(/^(sm|md|lg|2xl)$/, 'var(--rf-radius-$1)'),
+    };
+
+    for (const [key, value] of Object.entries(stylesToApply)) {
+      if (value) {
+        root.style.setProperty(key, value);
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    }
+  }, [settings]);
 
   // useEffect to load chips (common concerns)
   useEffect(() => {
@@ -93,12 +113,11 @@ export default function CustomerRecommender() {
       setCopy({ why: String(cpy.why || ""), rationale: String(cpy.rationale || ""), extras: String(cpy.extras || "") });
       setReasonsById(rbi);
 
-      // FINAL FIX: Use a standard fetch with the correct Content-Type header.
       try {
         console.log("[Recommender] Reporting analytics event for concern:", q);
         const analyticsPayload = {
           type: "concern",
-          event: "recommendation_received", // Added for clarity
+          event: "recommendation_received",
           concern: q,
           productIds: products.map(p => p.id),
           meta: {
@@ -107,8 +126,6 @@ export default function CustomerRecommender() {
           }
         };
         
-        // Using fetch guarantees the Content-Type header is set correctly.
-        // `keepalive: true` ensures the request completes even if the user navigates away.
         fetch(`${API_PREFIX}/analytics/ingest`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -136,9 +153,9 @@ export default function CustomerRecommender() {
     }
   };
   
-  const headingText = settings?.copy?.heading || "Let’s find your perfect pick";
-  const subheadingText = settings?.copy?.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
-  const ctaText = settings?.copy?.ctaText || "Get picks";
+  const headingText = settings.heading || "Let’s find your perfect pick";
+  const subheadingText = settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
+  const ctaText = settings.ctaText || "Get picks";
 
   return (
     <div className={styles.container}>
