@@ -1,9 +1,25 @@
 // admin-ui/src/pages/Analytics.jsx
 
 import React, { useEffect, useState } from "react";
-import { Page, Layout, Card, BlockStack, InlineStack, Text, Spinner, Banner, DataTable } from "@shopify/polaris";
+import { Page, Layout, Card, BlockStack, Text, Spinner, Banner, DataTable } from "@shopify/polaris";
 import { adminApi } from "../api/client.js";
 import styles from "./Analytics.module.css";
+
+// Helper function to find the most frequent concern from the logs
+function findTopConcern(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return "N/A";
+  }
+  const concernCounts = events.reduce((acc, event) => {
+    const concern = event.concern || "Unknown";
+    acc[concern] = (acc[concern] || 0) + 1;
+    return acc;
+  }, {});
+
+  return Object.keys(concernCounts).reduce((a, b) =>
+    concernCounts[a] > concernCounts[b] ? a : b
+  );
+}
 
 export default function Analytics() {
   const [loading, setLoading] = useState(true);
@@ -17,23 +33,21 @@ export default function Analytics() {
         setLoading(true);
         setError("");
         
-        // Fetch both summary and recent logs in parallel
         const [summaryData, eventsData] = await Promise.all([
           adminApi.getAnalyticsSummary({ days: 30 }),
-          adminApi.getAnalyticsEvents({ limit: 20 })
+          adminApi.getAnalyticsEvents({ limit: 50 })
         ]);
 
-        // Process summary data for the metric cards
         const totals = summaryData?.totals || {};
-        const topConcern = summaryData?.rows?.[0]?.concern || "N/A";
+        const events = eventsData?.rows || [];
+        
         setSummary({
           totalQueries: totals.events || 0,
           aiSessions: totals.aiEvents || 0,
-          topConcern: topConcern,
+          topConcern: findTopConcern(events),
         });
 
-        // Process recent events for the log table
-        setRecentEvents(eventsData?.rows || []);
+        setRecentEvents(events);
 
       } catch (e) {
         setError(e.message || "An unknown error occurred while fetching analytics.");
@@ -44,15 +58,17 @@ export default function Analytics() {
     fetchData();
   }, []);
 
-  const recentEventsRows = recentEvents.map(event => [
+  const recentEventsRows = recentEvents.slice(0, 20).map(event => [
     new Date(event.ts).toLocaleString(),
-    event.concern,
-    event.plan,
+    event.concern || 'N/A',
+    event.plan || 'N/A',
     event.meta?.source || 'N/A'
   ]);
 
   const pageContent = loading ? (
-    <Spinner accessibilityLabel="Loading analytics" size="large" />
+    <div className={styles.spinnerContainer}>
+      <Spinner accessibilityLabel="Loading analytics" size="large" />
+    </div>
   ) : (
     <BlockStack gap="400">
       {error && <Banner tone="critical"><p>{error}</p></Banner>}
@@ -87,11 +103,15 @@ export default function Analytics() {
       <Card>
         <BlockStack gap="400">
           <Text as="h2" variant="headingMd">Recent Activity</Text>
-          <DataTable
-            columnContentTypes={['text', 'text', 'text', 'text']}
-            headings={['Timestamp', 'Concern', 'Plan', 'Source']}
-            rows={recentEventsRows}
-          />
+          {recentEventsRows.length > 0 ? (
+            <DataTable
+              columnContentTypes={['text', 'text', 'text', 'text']}
+              headings={['Timestamp', 'Concern', 'Plan', 'Source']}
+              rows={recentEventsRows}
+            />
+          ) : (
+            <Text as="p" tone="subdued">No recent activity found.</Text>
+          )}
         </BlockStack>
       </Card>
     </BlockStack>
