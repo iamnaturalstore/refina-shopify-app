@@ -14,18 +14,23 @@ Refina Theme App Embed (Launcher, production)
 {%- assign page_type = template.name | downcase -%}
 <div
   data-refina-launcher
-  data-embed-ver="{{ ver }}"
-  data-side="{{ block.settings.side | default: 'right' }}"
-  data-offset="{{ block.settings.offset | default: 24 }}"
-  data-brand-color="{{ block.settings.brand_color | default: '#d10000' }}"
-  data-show-mobile="{{ block.settings.show_mobile | default: true }}"
-  data-page-type="{{ page_type }}"
-  data-hide-on-product="{{ block.settings.hide_on_product | default: false }}"
-  data-hide-on-cart="{{ block.settings.hide_on_cart | default: false }}"
+  data-heading="{{ block.settings.heading }}"
+  data-subheading="{{ block.settings.subheading }}"
+  data-cta-text="{{ block.settings.cta_text }}"
+  data-primary-color="{{ block.settings.primary_color }}"
+  data-accent-color="{{ block.settings.accent_color }}"
+  data-border-radius="{{ block.settings.border_radius }}"
+  data-button-style="{{ block.settings.button_style }}"
+  data-grid-columns="{{ block.settings.grid_columns }}"
+  data-side="{{ block.settings.side }}"
+  data-offset="{{ block.settings.offset }}"
+  data-show-mobile="{{ block.settings.show_mobile }}"
+  data-hide-on-product="{{ block.settings.hide_on_product }}"
+  data-hide-on-cart="{{ block.settings.hide_on_cart }}"
+  data-open-on-load="{{ block.settings.open_on_load }}"
+  data-show-badges="{{ block.settings.show_badges }}"
+  data-show-prices="{{ block.settings.show_prices }}"
   data-shop="{{ shop.permanent_domain }}"
-  data-proxy-path="{{ block.settings.proxy_path | default: 'apps/refina' }}"
-  data-z-index="{{ block.settings.z_index | default: 2147483646 }}"
-  data-open-on-load="{{ block.settings.open_on_load | default: false }}"
 ></div>
 
 <script>
@@ -195,19 +200,38 @@ Refina Theme App Embed (Launcher, production)
   "name": "Refina Concierge Launcher",
   "target": "body",
   "settings": [
-    { "type": "text", "id": "asset_version", "label": "Asset version (cache buster)", "default": "v3" },
-    { "type": "select", "id": "side", "label": "Launcher side", "default": "right", "options": [
-      { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
+    { "type": "header", "content": "Content" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Find the perfect routine" },
+    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Tell us your concern and we’ll match expert picks." },
+    { "type": "text", "id": "cta_text", "label": "Launcher Button Text", "default": "Ask Refina" },
+
+    { "type": "header", "content": "Appearance" },
+    { "type": "color", "id": "primary_color", "label": "Primary Color (Buttons)", "default": "#111827" },
+    { "type": "color", "id": "accent_color", "label": "Accent Color (Highlights)", "default": "#10B981" },
+    { "type": "select", "id": "border_radius", "label": "Border Radius", "options": [
+        { "value": "sm", "label": "Small" },
+        { "value": "md", "label": "Medium" },
+        { "value": "lg", "label": "Large" },
+        { "value": "2xl", "label": "2XL" }
+    ], "default": "lg"},
+    { "type": "select", "id": "button_style", "label": "Button Style", "options": [
+        { "value": "solid", "label": "Solid" },
+        { "value": "outline", "label": "Outline" }
+    ], "default": "solid"},
+    { "type": "range", "id": "grid_columns", "label": "Product Grid Columns", "min": 2, "max": 4, "step": 1, "default": 3 },
+
+    { "type": "header", "content": "Behavior & Visibility" },
+    { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
+        { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
     ]},
-    { "type": "number", "id": "offset", "label": "Bottom offset (px)", "default": 24 },
-    { "type": "color", "id": "brand_color", "label": "Launcher brand color", "default": "#d10000" },
+    { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
     { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
     { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
     { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
-    { "type": "text", "id": "proxy_path", "label": "App Proxy subpath", "default": "apps/refina" },
-    { "type": "number", "id": "z_index", "label": "Z-index", "default": 2147483646 },
-    { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false }
-  ],
+    { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
+    { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
+    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true }
+],
   "enabled_on": { "templates": ["*"] }
 }
 {% endschema %}

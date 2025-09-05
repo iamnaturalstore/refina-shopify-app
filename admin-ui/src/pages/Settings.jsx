@@ -1,3 +1,4 @@
+//admin-ui/src/pages/Settings.jsx
 import * as React from "react";
 import {
   Card,
@@ -19,24 +20,10 @@ import { api } from "../api/client.js";
 // ---------- Defaults (edit as you like) ----------
 const DEFAULT_SETTINGS = {
   category: "Beauty",
-  aiTone: "professional", // professional | friendly | playful | scientific
-  theme: {
-    primaryColor: "#111827", // buttons / emphasis
-    accentColor: "#10B981",  // highlights / badges
-    borderRadius: "lg",      // sm | md | lg | 2xl
-    gridColumns: 3,          // 2 | 3 | 4
-    buttonStyle: "solid",    // solid | outline
-  },
-  ui: {
-    showBadges: true,
-    showPrices: true,
-    enableModal: true,
-  },
-  copy: {
-    heading: "Find the perfect routine",
-    subheading: "Tell Refina your concern and we’ll match expert picks.",
-    ctaText: "Ask Refina",
-  },
+  aiTone: "professional",
+  // New "Intelligence" settings
+  aiConstraints: "Prefer vegan products. Avoid products containing fragrance.",
+  productExclusions: "", // e.g. "tag:clearance, id:12345"
   updatedAt: null,
 };
 
@@ -196,60 +183,22 @@ export default function Settings() {
 
           <Card>
             <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">Frontend Theme</Text>
-              <InlineStack gap="300" wrap>
-                <Box minWidth="240px" width="100%">
-                  <Text as="span" variant="bodySm">Primary color</Text>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-                    <input type="color" value={settings.theme.primaryColor} onChange={(e) => set("theme.primaryColor", e.target.value)} style={{ width: 36, height: 36, border: "1px solid #E5E7EB", borderRadius: 6 }} />
-                    <TextField label="Hex" labelHidden value={settings.theme.primaryColor} onChange={(v) => set("theme.primaryColor", v)} autoComplete="off" />
-                  </div>
-                </Box>
-                <Box minWidth="240px" width="100%">
-                  <Text as="span" variant="bodySm">Accent color</Text>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
-                    <input type="color" value={settings.theme.accentColor} onChange={(e) => set("theme.accentColor", e.target.value)} style={{ width: 36, height: 36, border: "1px solid #E5E7EB", borderRadius: 6 }} />
-                    <TextField label="Hex" labelHidden value={settings.theme.accentColor} onChange={(v) => set("theme.accentColor", v)} autoComplete="off" />
-                  </div>
-                </Box>
-                <Box minWidth="240px" width="100%">
-                  <Select label="Border radius" options={[{ label: "Small", value: "sm" }, { label: "Medium", value: "md" }, { label: "Large", value: "lg" }, { label: "2XL", value: "2xl" }]} onChange={(v) => set("theme.borderRadius", v)} value={settings.theme.borderRadius} />
-                </Box>
-                <Box minWidth="240px" width="100%">
-                  <Select label="Grid columns" options={[{ label: "2", value: "2" }, { label: "3", value: "3" }, { label: "4", value: "4" }]} onChange={(v) => set("theme.gridColumns", Number(v))} value={String(settings.theme.gridColumns)} />
-                </Box>
-                <Box minWidth="240px" width="100%">
-                  <Select label="Button style" options={[{ label: "Solid", value: "solid" }, { label: "Outline", value: "outline" }]} onChange={(v) => set("theme.buttonStyle", v)} value={settings.theme.buttonStyle} />
-                </Box>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">UI Options</Text>
-              <InlineStack gap="400" wrap>
-                <Checkbox label="Show product badges" checked={!!settings.ui.showBadges} onChange={(v) => set("ui.showBadges", v)} />
-                <Checkbox label="Show prices" checked={!!settings.ui.showPrices} onChange={(v) => set("ui.showPrices", v)} />
-                <Checkbox label="Enable product modal" checked={!!settings.ui.enableModal} onChange={(v) => set("ui.enableModal", v)} />
-              </InlineStack>
-            </BlockStack>
-          </Card>
-
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h3" variant="headingSm">Copy</Text>
-              <InlineStack gap="300" wrap>
-                <Box minWidth="280px" width="100%">
-                  <TextField label="Heading" value={settings.copy.heading} onChange={(v) => set("copy.heading", v)} autoComplete="off" />
-                </Box>
-                <Box minWidth="280px" width="100%">
-                  <TextField label="Subheading" value={settings.copy.subheading} onChange={(v) => set("copy.subheading", v)} autoComplete="off" />
-                </Box>
-                <Box minWidth="280px" width="100%">
-                  <TextField label="CTA text" value={settings.copy.ctaText} onChange={(v) => set("copy.ctaText", v)} autoComplete="off" />
-                </Box>
-              </InlineStack>
+              <Text as="h3" variant="headingSm">AI Behavior</Text>
+              <TextField
+                label="AI Constraints"
+                value={settings.aiConstraints}
+                onChange={(v) => set("aiConstraints", v)}
+                multiline={4}
+                autoComplete="off"
+                helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
+              />
+              <TextField
+                label="Product Exclusions"
+                value={settings.productExclusions}
+                onChange={(v) => set("productExclusions", v)}
+                autoComplete="off"
+                helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
+              />
             </BlockStack>
           </Card>
 
@@ -271,4 +220,3 @@ export default function Settings() {
     </Box>
   );
 }
-
