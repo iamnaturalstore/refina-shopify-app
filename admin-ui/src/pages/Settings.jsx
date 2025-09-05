@@ -151,15 +151,10 @@ export default function Settings() {
   };
 
   if (loading) {
-    // Show a full-page spinner inside the Page component for a better loading experience
-    return (
-      <Page>
-        <div className={styles.spinnerContainer}>
-          <Spinner accessibilityLabel="Loading settings" size="large" />
-        </div>
-      </Page>
-    );
-  }
+      return (
+        <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading analytics...</Text></InlineStack></Box>
+      );
+    }
 
   return (
     <Page>
