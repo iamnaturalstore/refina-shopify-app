@@ -17,7 +17,6 @@ import {
   Spinner,
   PageActions,
 } from "@shopify/polaris";
-import { api } from "../api/client.js";
 import styles from "./Analytics.module.css"; // Add this line to reuse our theme
 import { api } from "../api/client.js";
 
@@ -160,10 +159,10 @@ export default function Settings() {
   <Page>
     <BlockStack gap="400">
       <Text as="h1" variant="headingLg" className={styles.pageTitle}>
-        Settings
-      </Text>
+      Settings
+     </Text>
       <Text as="p" tone="subdued">
-        Customize the AI's behavior and intelligence for your store.
+        Control the core intelligence and behavior of your AI concierge.
       </Text>
 
       {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
