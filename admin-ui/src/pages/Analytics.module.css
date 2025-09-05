@@ -1,25 +1,67 @@
 /* admin-ui/src/pages/Analytics.module.css */
 
+/* Define Brand Colors for this component */
+:root {
+  --refina-plum: #6B3FA0;
+  --refina-sage: #B6CBB7;
+  --refina-charcoal: #2E2E38;
+  --refina-card-bg: #ffffff;
+  --refina-page-bg: #f9fafb;
+}
+
 .pageTitle {
   font-family: 'Satoshi', sans-serif;
-  color: #6B3FA0; /* Refina Plum */
+  font-weight: 700;
+  color: var(--refina-plum);
+}
+
+.spinnerContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
 }
 
 .metricNumber {
   font-family: 'Satoshi', sans-serif;
-  font-size: 2.5rem;
+  font-size: 2.25rem;
   font-weight: 700;
   line-height: 1;
-  color: #2E2E38; /* Charcoal Ink */
+  color: var(--refina-charcoal);
 }
 
 .metricText {
   font-family: 'Satoshi', sans-serif;
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 500;
   line-height: 1.2;
-  color: #2E2E38; /* Charcoal Ink */
+  color: var(--refina-charcoal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-top: 0.5rem; /* Visual alignment */
+}
+
+/* Use :global to override the default Polaris styles 
+  ONLY on the elements rendered by this Analytics page.
+*/
+
+:global(.Polaris-Page) {
+  background-color: var(--refina-page-bg) !important;
+}
+
+:global(.Polaris-Page) .Polaris-Card {
+  background-color: var(--refina-card-bg);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.08);
+  border: none;
+}
+
+/* Style for the progress bars in the "Top Concerns" card */
+:global(.Polaris-ProgressBar__Bar) {
+    background-color: var(--refina-sage) !important;
+}
+
+:global(.Polaris-ProgressBar__Indicator) {
+    background-color: var(--refina-plum) !important;
 }
