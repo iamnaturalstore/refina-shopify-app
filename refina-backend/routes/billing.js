@@ -286,13 +286,18 @@ router.post("/subscribe", async (req, res) => {
     console.error("[Billing] Unknown error: No confirmationUrl returned.", { shop });
     return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
-    if (err?.status === 401) {
+    // ─── FIX START for 401 Unauthorized Error ──────────────────────────────
+    // The original `catch` block didn't properly detect the 401 error from
+    // the GraphQL client. This fix checks for the specific error structure
+    // (`err.response.code`) and triggers the re-authentication flow.
+    if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
         .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
       return res.send("reauthorize");
     }
+    // ─── FIX END ────────────────────────────────────────────────────────────
     console.error("POST /api/billing/subscribe unhandled error", { shop: req.query?.shop, error: err });
     return res.status(500).json({ error: "Subscribe failed" });
   }
@@ -350,7 +355,8 @@ router.post("/sync", async (req, res) => {
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    if (err?.status === 401) {
+    // Also apply the 401 fix to the sync route
+    if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
@@ -363,3 +369,4 @@ router.post("/sync", async (req, res) => {
 });
 
 export default router;
+
