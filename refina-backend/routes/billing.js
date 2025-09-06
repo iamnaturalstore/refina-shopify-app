@@ -152,6 +152,7 @@ router.post("/subscribe", async (req, res) => {
     let currentSubId = null;
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
+      if (s.status !== 'ACTIVE') continue; // Only consider active subscriptions
       if (n.includes("premium") || n.includes("pro+") || n.includes("pro plus")) {
         currentLevel = "premium";
         currentSubId = s?.id || currentSubId;
@@ -190,14 +191,12 @@ router.post("/subscribe", async (req, res) => {
     const amt = PLAN.amount;
     const cc = currencyCode.replace(/[^A-Z]/g, "");
     const createMutation = `
-      mutation AppSubscribe {
+      mutation AppSubscribe($name: String!, $returnUrl: URL!, $test: Boolean, $lineItems: [AppSubscriptionLineItemInput!]!) {
         appSubscriptionCreate(
-          name: "${PLAN.name}"
-          returnUrl: "${returnUrl}"
-          test: ${process.env.NODE_ENV !== "production"}
-          lineItems: [{
-            plan: { appRecurringPricingDetails: { price: { amount: "${amt}", currencyCode: ${cc} }, interval: EVERY_30_DAYS } }
-          }]
+          name: $name
+          returnUrl: $returnUrl
+          test: $test
+          lineItems: $lineItems
         ) {
           userErrors { field message }
           confirmationUrl
@@ -205,9 +204,18 @@ router.post("/subscribe", async (req, res) => {
         }
       }
     `;
+    const createVars = {
+      name: PLAN.name,
+      returnUrl: returnUrl,
+      test: process.env.NODE_ENV !== "production",
+      lineItems: [{
+        plan: { appRecurringPricingDetails: { price: { amount: amt, currencyCode: cc }, interval: 'EVERY_30_DAYS' } }
+      }]
+    };
+
 
     const tryCreate = async () => {
-      const resp = await client.request(createMutation);
+      const resp = await client.request(createMutation, { variables: createVars });
       const payload = resp?.data?.appSubscriptionCreate;
       const errors = payload?.userErrors || [];
       const confirmationUrl = payload?.confirmationUrl || null;
@@ -223,57 +231,59 @@ router.post("/subscribe", async (req, res) => {
     const msg = (errors || []).map(e => e?.message || "").join("; ");
     const looksLikeActiveBlock = /already.*active|existing.*active|active recurring/i.test(msg);
 
+    // ─── FIX START ────────────────────────────────────────────────────────
+    // The original code had a bug here where it tried to re-find the
+    // subscription ID to cancel using flawed logic.
+    // The FIX is to use the `currentSubId` we already found earlier.
     if (looksLikeActiveBlock) {
-      const currentQ2 = `
-        query AppInstall {
-          currentAppInstallation {
-            activeSubscriptions { id name status }
-          }
-        }
-      `;
-      const currentResp2 = await client.request(currentQ2);
-      const subs2 = currentResp2?.data?.currentAppInstallation?.activeSubscriptions || [];
-      const match = subs2.find(s => (String(s?.name || "").toLowerCase().includes("premium") && target === "premium")
-                                 || (String(s?.name || "").toLowerCase().includes("pro") && target === "pro"));
-      const currentSubId = match?.id || null;
-
       if (!currentSubId) {
-        return res.status(409).json({ error: "ALREADY_HAS_ACTIVE", message: "Existing active subscription" });
+        console.error("[Billing] Shopify reports an active sub, but we couldn't find its ID.", { shop });
+        return res.status(409).json({ error: "ALREADY_HAS_ACTIVE", message: "Existing active subscription could not be identified for cancellation." });
       }
+
+      console.log(`[Billing] Active subscription found (${currentSubId}). Attempting to cancel before creating new one.`);
 
       const cancelMutation = `
         mutation CancelSub($id: ID!) {
           appSubscriptionCancel(id: $id) {
             userErrors { field message }
-            appSubscription { id }
+            appSubscription { id status }
           }
         }
       `;
-      const cancelResp = await client.request(cancelMutation, { id: currentSubId });
+
+      // Pass variables correctly in the `variables` key
+      const cancelResp = await client.request(cancelMutation, { variables: { id: currentSubId } });
       const cancelErrors = cancelResp?.data?.appSubscriptionCancel?.userErrors || [];
 
       if (cancelErrors.length) {
+        console.error("[Billing] Failed to cancel existing subscription:", { shop, errors: cancelErrors });
         return res.status(409).json({
-          error: "ALREADY_HAS_ACTIVE",
+          error: "CANCEL_FAILED",
           message: cancelErrors.map(e => e?.message || "Cancel failed").join("; "),
         });
       }
 
+      console.log(`[Billing] Successfully cancelled. Retrying subscription creation for ${target}...`);
       const retry = await tryCreate();
       if (!retry.errors.length && retry.confirmationUrl) {
         return res.json({ confirmationUrl: retry.confirmationUrl });
       }
 
+      console.error("[Billing] Failed to create subscription AFTER successful cancel:", { shop, errors: retry.errors });
       return res.status(400).json({
         error: "CREATE_AFTER_CANCEL_FAILED",
         errors: retry.errors,
       });
     }
+    // ─── FIX END ──────────────────────────────────────────────────────────
 
     if (errors.length) {
+      console.error("[Billing] Subscription creation failed with errors:", { shop, errors });
       return res.status(400).json({ error: "Subscription creation failed", errors });
     }
 
+    console.error("[Billing] Unknown error: No confirmationUrl returned.", { shop });
     return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
     if (err?.status === 401) {
@@ -283,10 +293,11 @@ router.post("/subscribe", async (req, res) => {
         .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
       return res.send("reauthorize");
     }
-    console.error("POST /api/billing/subscribe error", err);
+    console.error("POST /api/billing/subscribe unhandled error", { shop: req.query?.shop, error: err });
     return res.status(500).json({ error: "Subscribe failed" });
   }
 });
+
 
 /**
  * POST /api/billing/sync
@@ -328,6 +339,7 @@ router.post("/sync", async (req, res) => {
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
       const st = s?.status || "UNKNOWN";
+      if (st !== 'ACTIVE') continue;
       if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
       if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
     }
