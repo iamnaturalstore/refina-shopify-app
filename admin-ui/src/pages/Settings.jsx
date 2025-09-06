@@ -6,241 +6,216 @@ import {
   Card,
   BlockStack,
   InlineStack,
-  Button,
   Text,
   TextField,
   Select,
   Checkbox,
-  Banner,
   Divider,
-  Box,
+  Banner,
   Spinner,
-  PageActions,
+  Button,
 } from "@shopify/polaris";
-import styles from "./Analytics.module.css";
-import { api } from "../api/client.js";
-
-
-// ---------- Defaults (edit as you like) ----------
-const DEFAULT_SETTINGS = {
-  category: "Beauty",
-  aiTone: "professional",
-  // New "Intelligence" settings
-  aiConstraints: "Prefer vegan products. Avoid products containing fragrance.",
-  productExclusions: "", // e.g. "tag:clearance, id:12345"
-  updatedAt: null,
-};
-
-// Normalize shallow + partials safely
-function mergeDefaults(current = {}) {
-  const out = structuredClone(DEFAULT_SETTINGS);
-  // Deeply merge properties from current into the default structure
-  const deepMerge = (target, source) => {
-    for (const key in source) {
-      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
-        if (!target[key]) Object.assign(target, { [key]: {} });
-        deepMerge(target[key], source[key]);
-      } else {
-        Object.assign(target, { [key]: source[key] });
-      }
-    }
-  };
-  deepMerge(out, current);
-  return out;
-}
-
-function normalizeLevel(v) {
-  const s = String(v || "").toLowerCase().trim();
-  if (/\bpremium\b/.test(s) || /\bpro\s*\+|\bpro\W*plus\b/.test(s)) return "premium";
-  if (/\bpro\b/.test(s)) return "pro";
-  return "free";
-}
-
-// Correctly use the new api client methods
-async function getSettings() {
-  try {
-    const { data: json } = await api.get("/api/admin/store-settings");
-    console.log("[Settings] Fetched data:", json);
-    return json || {}; // Return the full payload
-  } catch (e) {
-    throw new Error(e?.message || "Failed to load settings");
-  }
-}
-
-async function saveSettings(settingsToSave) {
-  try {
-    const { data: json } = await api.put("/api/admin/store-settings", {
-      settings: settingsToSave
-    });
-    return json;
-  } catch (e) {
-    throw new Error(e?.message || "Failed to save settings");
-  }
-}
+import { adminApi, getShop } from "../api/client.js";
 
 export default function Settings() {
+  const shop = getShop();
+
   const [loading, setLoading] = React.useState(true);
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState("");
-  const [ok, setOk] = React.useState("");
-  const [planBadge, setPlanBadge] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [savedAt, setSavedAt] = React.useState(null);
 
-  const [settings, setSettings] = React.useState(DEFAULT_SETTINGS);
-  const [initial, setInitial] = React.useState(DEFAULT_SETTINGS);
+  // form state
+  const [form, setForm] = React.useState({
+    category: "Beauty",
+    tone: "friendly",
+    showExplanations: true,
+    enableWidget: true,
+    themePreset: "Minimal",
+  });
+  const [baseline, setBaseline] = React.useState(form);
 
-  const dirty = JSON.stringify(settings) !== JSON.stringify(initial);
+  const dirty = React.useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(baseline),
+    [form, baseline]
+  );
 
   React.useEffect(() => {
+    let cancelled = false;
     (async () => {
-      setError("");
-      setOk("");
-      setLoading(true);
       try {
-        const rawPayload = await getSettings();
-        // The actual settings are nested inside the 'settings' key
-        const fetchedSettings = rawPayload.settings || {};
-        if (fetchedSettings?.plan?.level) {
-          setPlanBadge(normalizeLevel(fetchedSettings.plan.level));
-        }
-        const merged = mergeDefaults(fetchedSettings);
-        setSettings(merged);
-        setInitial(merged);
+        const res = await adminApi("/api/settings", { method: "GET" });
+        const data = (await res.json()) || {};
+        if (cancelled) return;
+        const next = {
+          category: data.category || "Beauty",
+          tone: data.tone || "friendly",
+          showExplanations: data.showExplanations ?? true,
+          enableWidget: data.enableWidget ?? true,
+          themePreset: data.themePreset || "Minimal",
+        };
+        setForm(next);
+        setBaseline(next);
       } catch (e) {
-        setError(e?.message || "Failed to load settings");
+        // keep sensible defaults; surface message inline
+        console.warn("Settings load failed", e);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  async function handleSave() {
-    setBusy(true);
-    setError("");
-    setOk("");
+  const update = (key) => (value) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+
+  const onSave = async () => {
+    setSaving(true);
     try {
-      const payload = { ...settings, updatedAt: new Date().toISOString() };
-      await saveSettings(payload);
-      setInitial(payload); // Set the new baseline for "dirty" checking
-      setSettings(payload); // Ensure UI reflects the exact saved state
-      setOk("Settings saved successfully.");
-      setTimeout(() => setOk(""), 3000); // Clear success message after 3s
+      await adminApi("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop, ...form }),
+      });
+      setBaseline(form);
+      setSavedAt(new Date());
     } catch (e) {
-      setError(e?.message || "Failed to save settings");
+      console.error("Settings save failed", e);
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
-  }
-
-  function handleResetDefaults() {
-    const next = mergeDefaults({});
-    setSettings(next);
-  }
-
-  const set = (path, value) => {
-    setSettings((prev) => {
-      const copy = structuredClone(prev);
-      const parts = path.split(".");
-      let obj = copy;
-      for (let i = 0; i < parts.length - 1; i++) {
-        obj = obj[parts[i]] = obj[parts[i]] || {};
-      }
-      obj[parts.at(-1)] = value;
-      return copy;
-    });
   };
 
-  if (loading) {
-    return (
-      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading settings...</Text></InlineStack></Box>
-    );
-  }
+  const onReset = () => setForm(baseline);
 
   return (
-    <Page fullWidth>
-      <BlockStack gap="400">
-        <Text as="h1" variant="headingLg" className={styles.pageTitle}>
-          Settings
-        </Text>
-        <Text as="p" tone="subdued">
-          Control the core intelligence and behavior of your AI concierge.
-        </Text>
-
-        {error && <Banner tone="critical" title="Error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
-        {ok && <Banner tone="success" title="Success" onDismiss={() => setOk("")}><p>{ok}</p></Banner>}
-
-        <Layout>
-          <Layout.Section>
+    <Page
+      title="Settings"
+      primaryAction={{
+        content: "Save changes",
+        onAction: onSave,
+        disabled: !dirty || saving,
+        loading: saving,
+      }}
+    >
+      <Layout>
+        <Layout.Section>
+          {loading ? (
             <Card>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingSm">General</Text>
-                <InlineStack gap="300" wrap>
-                  <Box minWidth="280px" width="100%">
-                    <TextField
-                      label="Store category"
-                      value={settings.category}
-                      onChange={(v) => set("category", v)}
-                      autoComplete="off"
-                      placeholder="e.g. Beauty, Fishing Gear"
-                    />
-                  </Box>
-                  <Box minWidth="280px" width="100%">
-                    <Select
-                      label="AI tone"
-                      options={[
-                        { label: "Professional", value: "professional" },
-                        { label: "Friendly", value: "friendly" },
-                        { label: "Playful", value: "playful" },
-                        { label: "Scientific", value: "scientific" },
-                      ]}
-                      onChange={(v) => set("aiTone", v)}
-                      value={settings.aiTone}
-                    />
-                  </Box>
+              <BlockStack gap="400" align="center" inlineAlign="center">
+                <InlineStack gap="200" align="center">
+                  <Spinner accessibilityLabel="Loading settings" size="small" />
+                  <Text as="span" variant="bodyMd">Loading settings…</Text>
                 </InlineStack>
               </BlockStack>
             </Card>
-          </Layout.Section>
+          ) : (
+            <>
+              {dirty && (
+                <Card>
+                  <Banner tone="warning" title="Unsaved changes">
+                    <p>Make sure to save your updates before leaving this page.</p>
+                  </Banner>
+                </Card>
+              )}
 
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingSm">AI Behavior</Text>
-                <TextField
-                  label="AI Constraints"
-                  value={settings.aiConstraints}
-                  onChange={(v) => set("aiConstraints", v)}
-                  multiline={4}
-                  autoComplete="off"
-                  helpText="Add store-wide rules for the AI to follow. For example: 'Only recommend products under $50'."
-                />
-                <TextField
-                  label="Product Exclusions"
-                  value={settings.productExclusions}
-                  onChange={(v) => set("productExclusions", v)}
-                  autoComplete="off"
-                  helpText="Enter product tags or IDs to exclude from all recommendations, separated by commas."
-                />
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
-      </BlockStack>
+              {savedAt && !dirty && (
+                <Card>
+                  <Banner tone="success" title="Settings saved">
+                    <p>Last saved {savedAt.toLocaleTimeString()}.</p>
+                  </Banner>
+                </Card>
+              )}
 
-      <PageActions
-        primaryAction={{
-          content: "Save changes",
-          loading: busy,
-          disabled: !dirty || busy,
-          onAction: handleSave,
-        }}
-        secondaryActions={[
-          {
-            content: "Reset to defaults",
-            disabled: busy || loading,
-            onAction: handleResetDefaults,
-          },
-        ]}
-      />
+              <Layout>
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="400">
+                      <Text as="h2" variant="headingMd">Store configuration</Text>
+                      <InlineStack gap="400" wrap={false} align="start">
+                        <div style={{flex: 1}}>
+                          <Select
+                            label="Store category"
+                            options={[
+                              { label: "Beauty", value: "Beauty" },
+                              { label: "Home & Living", value: "Home" },
+                              { label: "Outdoors", value: "Outdoors" },
+                              { label: "Wellness", value: "Wellness" },
+                              { label: "Other", value: "Other" },
+                            ]}
+                            value={form.category}
+                            onChange={update("category")}
+                          />
+                        </div>
+                        <div style={{flex: 1}}>
+                          <Select
+                            label="Tone"
+                            options={[
+                              { label: "Friendly", value: "friendly" },
+                              { label: "Expert", value: "expert" },
+                              { label: "Concise", value: "concise" },
+                              { label: "Playful", value: "playful" },
+                            ]}
+                            value={form.tone}
+                            onChange={update("tone")}
+                          />
+                        </div>
+                      </InlineStack>
+                    </BlockStack>
+                  </Card>
+                </Layout.Section>
+
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="400">
+                      <Text as="h2" variant="headingMd">Widget & AI</Text>
+                      <Checkbox
+                        label="Enable storefront widget"
+                        checked={form.enableWidget}
+                        onChange={(v) => update("enableWidget")(v)}
+                      />
+                      <Checkbox
+                        label="Show AI explanations (Premium)"
+                        checked={form.showExplanations}
+                        onChange={(v) => update("showExplanations")(v)}
+                      />
+                    </BlockStack>
+                  </Card>
+                </Layout.Section>
+
+                <Layout.Section>
+                  <Card>
+                    <BlockStack gap="400">
+                      <Text as="h2" variant="headingMd">Styling preset</Text>
+                      <Select
+                        label="Theme preset"
+                        options={[
+                          { label: "Minimal", value: "Minimal" },
+                          { label: "Modern", value: "Modern" },
+                          { label: "Boutique", value: "Boutique" },
+                          { label: "Editorial", value: "Editorial" },
+                          { label: "Bold", value: "Bold" },
+                        ]}
+                        value={form.themePreset}
+                        onChange={update("themePreset")}
+                      />
+                      <InlineStack gap="300">
+                        <Button onClick={onReset} disabled={!dirty || saving} variant="tertiary">
+                          Reset
+                        </Button>
+                        <Button onClick={onSave} disabled={!dirty || saving} loading={saving} variant="primary">
+                          Save changes
+                        </Button>
+                      </InlineStack>
+                    </BlockStack>
+                  </Card>
+                </Layout.Section>
+              </Layout>
+            </>
+          )}
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }
