@@ -6,6 +6,7 @@ import proxy from "http-proxy-middleware";           // CJS in ESM
 const { createProxyMiddleware } = proxy;
 
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
+import shopify from "./shopify.js"; // Added for authentication routes
 
 // ─────────────────────────────────────────────────────────────
 // Config (PROD ONLY)
@@ -106,6 +107,46 @@ async function getSettings(storeId) {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(cors());
+
+// ─── ADD THIS CODE BLOCK START ───────────────────────────────────────────
+// These are the standard Shopify authentication routes.
+// The /api/auth route is the entry point for authorization.
+app.get("/api/auth", async (req, res) => {
+  try {
+    await shopify.auth.begin({
+      shop: shopify.utils.sanitizeShop(req.query.shop, true),
+      callbackPath: "/api/auth/callback",
+      isOnline: false, // Use false for offline tokens, which are needed for billing
+      req,
+      res,
+    });
+  } catch (e) {
+    console.error("Failed to begin auth:", e);
+    res.status(500).send(e.message);
+  }
+});
+
+// The /api/auth/callback route is where Shopify redirects after the user approves.
+app.get("/api/auth/callback", async (req, res) => {
+  try {
+    const callback = await shopify.auth.callback({
+      req,
+      res,
+    });
+
+    // The callback object contains the session.
+    // Your app's session storage handler will save it automatically.
+
+    // Redirect to the app's root in the Shopify admin
+    res.redirect(`/?shop=${callback.session.shop}&host=${req.query.host}`);
+  } catch (e) {
+    console.error("Failed on auth callback:", e);
+    // You can add more robust error handling here if needed
+    res.status(500).send(e.message);
+  }
+});
+// ─── ADD THIS CODE BLOCK END ─────────────────────────────────────────────
+
 
 // ── PROD assets proxy (no wildcards, no dev) ─────────────────
 // /proxy/refina/<anything> → ASSETS_BASE_URL/<same>
@@ -292,3 +333,4 @@ app.listen(PORT, () => {
   console.log(`Refina BFF (ESM) running on :${PORT}`);
   console.log(`Concierge proxy: prod → ${ASSETS_BASE_URL}`);
 });
+
