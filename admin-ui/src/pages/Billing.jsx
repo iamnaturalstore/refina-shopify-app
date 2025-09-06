@@ -23,8 +23,8 @@ const PENDING_KEY = "refina:billing:pending";
 const PLAN_DETAILS = {
   pro: {
     label: "Pro",
-    priceMonthly: "$9/mo",
-    priceAnnualNote: "or $90/yr (~2 mo free)",
+    priceMonthly: "$19/mo",
+    priceAnnualNote: "or $190/yr (~2 mo free)",
     tooltip: "Pro — Core AI • 1k queries/mo • email support",
     features: [
       "Core AI recommendations",
@@ -34,8 +34,8 @@ const PLAN_DETAILS = {
   },
   premium: {
     label: "Premium",
-    priceMonthly: "$29/mo",
-    priceAnnualNote: "or $290/yr (~2 mo free)",
+    priceMonthly: "$49/mo",
+    priceAnnualNote: "or $490/yr (~2 mo free)",
     tooltip: "Premium — Advanced AI • styling & analytics • priority support",
     ribbon: "Best value",
     features: [

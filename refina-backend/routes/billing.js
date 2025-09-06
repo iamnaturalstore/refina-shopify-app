@@ -231,10 +231,6 @@ router.post("/subscribe", async (req, res) => {
     const msg = (errors || []).map(e => e?.message || "").join("; ");
     const looksLikeActiveBlock = /already.*active|existing.*active|active recurring/i.test(msg);
 
-    // ─── FIX START ────────────────────────────────────────────────────────
-    // The original code had a bug here where it tried to re-find the
-    // subscription ID to cancel using flawed logic.
-    // The FIX is to use the `currentSubId` we already found earlier.
     if (looksLikeActiveBlock) {
       if (!currentSubId) {
         console.error("[Billing] Shopify reports an active sub, but we couldn't find its ID.", { shop });
@@ -252,7 +248,6 @@ router.post("/subscribe", async (req, res) => {
         }
       `;
 
-      // Pass variables correctly in the `variables` key
       const cancelResp = await client.request(cancelMutation, { variables: { id: currentSubId } });
       const cancelErrors = cancelResp?.data?.appSubscriptionCancel?.userErrors || [];
 
@@ -276,7 +271,6 @@ router.post("/subscribe", async (req, res) => {
         errors: retry.errors,
       });
     }
-    // ─── FIX END ──────────────────────────────────────────────────────────
 
     if (errors.length) {
       console.error("[Billing] Subscription creation failed with errors:", { shop, errors });
@@ -286,13 +280,15 @@ router.post("/subscribe", async (req, res) => {
     console.error("[Billing] Unknown error: No confirmationUrl returned.", { shop });
     return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
-    // ─── FIX START for 401 Unauthorized Error ──────────────────────────────
-    // The original `catch` block didn't properly detect the 401 error from
-    // the GraphQL client. This fix checks for the specific error structure
-    // (`err.response.code`) and triggers the re-authentication flow.
+    // ─── FIX START for CORS + 401 Unauthorized Error ─────────────────────
+    // This fix ensures that even on a 401 error, we send the correct
+    // CORS headers, allowing the browser to read our special re-auth
+    // header and trigger the re-authentication flow.
     if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
+        .set("Access-Control-Allow-Origin", "*")
+        .set("Access-Control-Allow-Headers", "*")
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
         .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
       return res.send("reauthorize");
@@ -349,16 +345,17 @@ router.post("/sync", async (req, res) => {
       if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
     }
 
-    // Write only to full-domain doc
     const payload = { level, status, updatedAt: FieldValue.serverTimestamp() };
     await dbAdmin.collection("plans").doc(shop).set(payload, { merge: true });
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    // Also apply the 401 fix to the sync route
+    // Also apply the CORS fix to the sync route's error handler
     if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
+        .set("Access-Control-Allow-Origin", "*")
+        .set("Access-Control-Allow-Headers", "*")
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
         .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
       return res.send("reauthorize");
