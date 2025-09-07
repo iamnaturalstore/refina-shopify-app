@@ -93,17 +93,14 @@ export async function api(path, init = {}) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
-      // Build absolute URL for App Bridge remote redirect
-      const absTo = to.startsWith("http")
-        ? to
-        : new URL(to, window.location.origin).toString();
+      const absTo = to.startsWith("http") ? to : new URL(to, window.location.origin).toString();
       try {
-        getRedirect().dispatch(actions.Redirect.Action.REMOTE, { url: absTo });
+        // IMPORTANT: pass the URL as a string, not { url }
+        getRedirect().dispatch(actions.Redirect.Action.REMOTE, absTo);
       } catch {
         try { window.top.location.href = absTo; } catch { window.location.href = absTo; }
       }
-      // Halt the caller; navigation will take over
-      return new Promise(() => {});
+      return new Promise(() => {}); // navigation takes over
     }
   }
 
@@ -113,7 +110,6 @@ export async function api(path, init = {}) {
     const msg = (data && (data.error || data.message)) || (typeof data === "string" ? data : "") || "Request failed";
     throw new Error(msg);
   }
-  // Return a consistent object shape for easier use
   return { data, status: res.status, ok: res.ok };
 }
 
