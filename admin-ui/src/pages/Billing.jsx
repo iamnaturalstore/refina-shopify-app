@@ -1,3 +1,4 @@
+// admin-ui/src/pages/Billing.jsx
 import * as React from "react";
 import {
   Card,
@@ -97,6 +98,15 @@ export default function Billing() {
 
   React.useEffect(() => {
     loadPlan();
+      // If we just returned from the Shopify confirmation page
+      const u = new URL(window.location.href);
+      if (u.searchParams.get("billing") === "success") {
+      try { localStorage.removeItem(PENDING_KEY); } catch {}
+      showToast("Plan updated 🎉");
+      // Clean the URL so it doesn't retrigger
+      u.searchParams.delete("billing");
+      window.history.replaceState({}, "", u.toString());
+    }
     const onVis = () => { if (document.visibilityState === "visible") loadPlan(); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);

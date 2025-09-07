@@ -89,6 +89,61 @@ router.get("/plan", async (req, res) => {
 });
 
 /**
+ * GET /api/billing/activated
+ * After Shopify confirmation, read activeSubscriptions → write plans/{shop} → redirect to Admin UI.
+ */
+router.get("/activated", async (req, res) => {
+  try {
+    const { shop } = await resolveShopContext(req, res);
+
+    const offlineId = shopify.session.getOfflineId(shop);
+    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+    const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+    if (!offlineSession?.accessToken) {
+      return res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`)
+        .send("reauthorize");
+    }
+
+    const client = new shopify.api.clients.Graphql({ session: offlineSession });
+    const q = `
+      query AppInstall {
+        currentAppInstallation {
+          activeSubscriptions { id name status }
+        }
+      }
+    `;
+    const r = await client.request(q);
+    const subs = r?.data?.currentAppInstallation?.activeSubscriptions || [];
+
+    let level = "free";
+    let status = "NONE";
+    for (const s of subs) {
+      const n = String(s?.name || "").toLowerCase();
+      const st = s?.status || "UNKNOWN";
+      if (st !== "ACTIVE") continue;
+      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
+      if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
+    }
+
+    await dbAdmin.collection("plans").doc(shop).set(
+      { level, status, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+
+    const hostParam = String(req.query.host || "");
+    const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+    return res.redirect(303, redirect);
+  } catch (err) {
+    console.error("GET /api/billing/activated error", err);
+    const fallback = `/admin-ui/?billing=error`;
+    return res.redirect(303, fallback);
+  }
+});
+
+/**
  * POST /api/billing/subscribe
  * Body: { plan: "pro" | "premium" }  (also accepts legacy: "pro+", "pro plus", "pro_plus")
  * Response: { confirmationUrl }
@@ -131,7 +186,7 @@ router.post("/subscribe", async (req, res) => {
       return res.status(400).json({ error: "Invalid plan" });
     }
 
-    const client = new shopify.clients.Graphql({ session: offlineSession });
+    const client = new shopify.api.clients.Graphql({ session: offlineSession });
 
     // 1) Determine current active level + current sub id (if any)
     const currentQ = `
@@ -176,25 +231,38 @@ router.post("/subscribe", async (req, res) => {
     const shopResp = await client.request(shopQ);
     let currencyCode = (shopResp?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
 
-    // 3) Plan catalog
+    // 3) Plan catalog (align with UI: Pro $19, Premium $49)
     const PLAN = target === "premium"
-      ? { name: "Premium", amount: "29.00" }
-      : { name: "Pro",      amount: "9.00" };
+      ? { name: "Premium", amount: "49.00" }
+      : { name: "Pro",      amount: "19.00" };
 
-    // 4) Return URL
+    // 4) Return URL (activation handler updates Firestore, then redirects to Admin UI)
     const rawHost = process.env.HOST || absoluteAppUrl(req);
-    let host = String(rawHost).replace(/\/$/, "");
-    if (host.startsWith("http://")) host = host.replace(/^http:\/\//, "https://");
-    const returnUrl = `${host}/admin-ui/`;
+    let hostBase = String(rawHost).replace(/\/$/, "");
+    if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
+    const hostParam = String(req.query.host || "");
+    const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(hostParam)}`;
 
-    // 5) Create subscription
+    // 5) Create subscription with replacementBehavior:
+    //    - Upgrade: APPLY_IMMEDIATELY
+    //    - Downgrade: APPLY_ON_NEXT_BILLING_CYCLE
     const amt = PLAN.amount;
     const cc = currencyCode.replace(/[^A-Z]/g, "");
+    const isUpgrade = target === "premium";
+    const replacementBehavior = isUpgrade ? "APPLY_IMMEDIATELY" : "APPLY_ON_NEXT_BILLING_CYCLE";
+
     const createMutation = `
-      mutation AppSubscribe($name: String!, $returnUrl: URL!, $test: Boolean, $lineItems: [AppSubscriptionLineItemInput!]!) {
+      mutation AppSubscribe(
+        $name: String!
+        $returnUrl: URL!
+        $test: Boolean
+        $lineItems: [AppSubscriptionLineItemInput!]!
+        $replacementBehavior: AppSubscriptionReplacementBehavior
+      ) {
         appSubscriptionCreate(
           name: $name
           returnUrl: $returnUrl
+          replacementBehavior: $replacementBehavior
           test: $test
           lineItems: $lineItems
         ) {
@@ -206,13 +274,13 @@ router.post("/subscribe", async (req, res) => {
     `;
     const createVars = {
       name: PLAN.name,
-      returnUrl: returnUrl,
+      returnUrl,
       test: process.env.NODE_ENV !== "production",
       lineItems: [{
         plan: { appRecurringPricingDetails: { price: { amount: amt, currencyCode: cc }, interval: 'EVERY_30_DAYS' } }
-      }]
+      }],
+      replacementBehavior
     };
-
 
     const tryCreate = async () => {
       const resp = await client.request(createMutation, { variables: createVars });
@@ -227,7 +295,7 @@ router.post("/subscribe", async (req, res) => {
       return res.json({ confirmationUrl });
     }
 
-    // Handle "already-active" block
+    // Handle "already-active" block (fallback safety; usually unnecessary with replacementBehavior)
     const msg = (errors || []).map(e => e?.message || "").join("; ");
     const looksLikeActiveBlock = /already.*active|existing.*active|active recurring/i.test(msg);
 
@@ -320,7 +388,7 @@ router.post("/sync", async (req, res) => {
         .send("reauthorize");
     }
 
-    const client = new shopify.clients.Graphql({ session: offlineSession });
+    const client = new shopify.api.clients.Graphql({ session: offlineSession });
     const query = `
       query AppInstall {
         currentAppInstallation {
@@ -366,4 +434,3 @@ router.post("/sync", async (req, res) => {
 });
 
 export default router;
-
