@@ -43,7 +43,10 @@ router.get("/callback", async (req, res) => {
     const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
 
     // Send merchant to embedded Admin UI (or /embedded if you prefer)
-    return res.redirect(302, `/admin-ui/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`);
+    return res.redirect(
+      302,
+      `/embedded?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`
+    );
   } catch (err) {
     console.error("OAuth callback failed:", err);
     return res.status(401).send("OAuth failed");
