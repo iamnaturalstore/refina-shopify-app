@@ -115,7 +115,7 @@ router.get("/activated", async (req, res) => {
         }
       }
     `;
-    const r = await client.query({ data: q });
+    const r = await client.query({ data: { query: q } });
     const subs = r?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
@@ -397,7 +397,8 @@ router.post("/sync", async (req, res) => {
         }
       }
     `;
-    const result = await client.query({ data: query });
+    const result = await client.query({ data: { query } });
+    console.log("[billing] appSubscriptionCreate result", JSON.stringify(resp.body, null, 2));
     const subs = result?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
