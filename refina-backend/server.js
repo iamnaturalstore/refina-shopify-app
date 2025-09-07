@@ -1,44 +1,25 @@
-// refina-backend/server.js  (ESM, PROD-ONLY, Express v5-safe)
-import express from "express";
-import cors from "cors";
-import crypto from "crypto"; // (ok if unused)
-import proxy from "http-proxy-middleware";           // CJS in ESM
-const { createProxyMiddleware } = proxy;
+// refina-backend/server.js (ESM, PROD-ONLY, Express v5-safe)
 import { join } from "path";
 import { readFileSync } from "fs";
+import express from "express";
+import cors from "cors";
+import proxy from "http-proxy-middleware";
+const { createProxyMiddleware } = proxy;
 
-import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 import shopify from "./shopify.js";
-
-// --- Import your API route handlers ---
 import billingRoutes from "./routes/billing.js";
+import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
-
-// ─────────────────────────────────────────────────────────────
-// Config (PROD ONLY)
-// ─────────────────────────────────────────────────────────────
-const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
-const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
-const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.netlify.app").replace(/\/+$/, "");
+// --- Config ------------------------------------------------------------------
+const PORT = parseInt(process.env.PORT || "8081", 10);
 const UI_DIST_PATH = `${process.cwd()}/admin-ui-dist`;
+const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.netlify.app").replace(/\/+$/, "");
 
-// simple in-memory TTL cache
-const cache = new Map();
-const cacheGet = (k) => {
-  const v = cache.get(k);
-  if (!v) return null;
-  if (Date.now() > v.exp) { cache.delete(k); return null; }
-  return v.val;
-};
-const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.now() + ttl });
-
-// ─────────────────────────────────────────────────────────────
-// App
-// ─────────────────────────────────────────────────────────────
+// --- App Initialization ------------------------------------------------------
 const app = express();
 
-// Set up Shopify authentication and webhook handling BEFORE any other routes.
-// The auth routes are public and do not need session validation.
+// --- Shopify Auth & Webhook Routes (Public) --------------------------------
+// These routes must come BEFORE any session validation.
 app.get("/api/auth", async (req, res) => {
   try {
     await shopify.auth.begin({
@@ -49,7 +30,7 @@ app.get("/api/auth", async (req, res) => {
       res,
     });
   } catch (e) {
-    console.error("Failed to begin auth:", e);
+    console.error("Auth begin error:", e);
     res.status(500).send(e.message);
   }
 });
@@ -59,48 +40,48 @@ app.get("/api/auth/callback", async (req, res) => {
     const callback = await shopify.auth.callback({ req, res });
     res.redirect(`/?shop=${callback.session.shop}&host=${req.query.host}`);
   } catch (e) {
-    console.error("Failed on auth callback:", e);
+    console.error("Auth callback error:", e);
     res.status(500).send(e.message);
   }
 });
 
-// The webhook handler needs the raw body of the request to verify the signature.
-// It must be placed before any JSON parsing middleware.
 app.post("/api/webhooks", express.raw({ type: "application/json" }), async (req, res) => {
   try {
-    await shopify.webhooks.process({
-      req,
-      res,
-    });
-    console.log(`Webhook processed, returned status code 200`);
+    await shopify.webhooks.process({ req, res });
+    console.log("Webhook processed successfully.");
   } catch (e) {
     console.error(`Failed to process webhook: ${e.message}`);
-    if (!res.headersSent) {
-      res.status(500).send(e.message);
-    }
+    if (!res.headersSent) res.status(500).send(e.message);
   }
 });
 
-// Now, set up the security checkpoint. All routes BELOW this point will require a
-// valid Shopify session. This middleware handles the 401 Unauthorized errors
-// and triggers the re-authentication flow correctly.
+// --- Security Checkpoint -----------------------------------------------------
+// All API routes below this point require a valid Shopify session.
+// This middleware handles the 401 Unauthorized errors and triggers re-auth.
 app.use("/api/*", shopify.validateAuthenticatedSession());
 
-// Parse JSON for all protected API routes.
+// --- Protected API Routes ----------------------------------------------------
 app.use(express.json());
 app.use(cors());
 
-// Mount your protected API route handlers here.
 app.use("/api/billing", billingRoutes);
 
+// Example of another protected route
+app.get("/api/test", (req, res) => {
+  res.status(200).send("API test route is working.");
+});
 
-// This middleware serves your React app's compiled static assets.
-// It should come after all API routes.
+
+// --- Shopify App Frontend Serving --------------------------------------------
+// This serves your compiled React app.
 app.use(express.static(UI_DIST_PATH));
-
-// This middleware handles all other requests by serving the React app's index.html.
-// This is essential for client-side routing to work.
-app.use("/*", async (_req, res, _next) => {
+app.use("/*", async (req, res, next) => {
+  // Allow BFF routes to pass through
+  const bffRoutes = ["/launcher.js", "/v1/health", "/v1/concerns", "/v1/recommend", "/proxy/refina"];
+  if (bffRoutes.some(p => req.path.startsWith(p))) {
+    return next();
+  }
+  // Serve the React app for all other routes
   return res
     .status(200)
     .set("Content-Type", "text/html")
@@ -111,29 +92,23 @@ app.use("/*", async (_req, res, _next) => {
 // ─────────────────────────────────────────────────────────────
 // BFF Logic (for storefront widget) - This remains unchanged
 // ─────────────────────────────────────────────────────────────
-// Helpers
+const cache = new Map();
+const cacheGet = (k) => { const v = cache.get(k); if (!v || Date.now() > v.exp) { cache.delete(k); return null; } return v.val; };
+const cacheSet = (k, val, ttl = (24 * 60 * 60 * 1000)) => cache.set(k, { val, exp: Date.now() + ttl });
 function normalizeConcern(s) { return String(s || "").toLowerCase().normalize("NFKC").replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim(); }
 function stripHtml(s) { return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(); }
 function tokenize(s) { return String(s || "").toLowerCase().normalize("NFKC").replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean); }
 function rankProducts(products, concern) { const terms = tokenize(concern); const w = { title: 3.0, tags: 2.2, keywords: 2.0, description: 1.6, productType: 1.0 }; const scored = []; for (const p of products) { if (!p) continue; const titleText = p.title || p.name || ""; const desc = stripHtml(p.description || "").slice(0, 800); const hay = { title: tokenize(titleText), tags: (Array.isArray(p.tags) ? p.tags : []).flatMap(tokenize), keywords: (Array.isArray(p.keywords) ? p.keywords : []).flatMap(tokenize), description: tokenize(desc), productType: tokenize(p.productType || ""), }; let score = 0; for (const t of terms) { if (hay.title.includes(t)) score += w.title; if (hay.tags.includes(t)) score += w.tags; if (hay.keywords.includes(t)) score += w.keywords; if (hay.description.includes(t)) score += w.description; if (hay.productType.includes(t)) score += w.productType; } if (p.handle && (p.image || (Array.isArray(p.images) && p.images[0]?.src))) score += 0.3; if (score > 0) scored.push({ ...p, _score: score }); } scored.sort((a, b) => b._score - a._score || (a.title || a.name || "").localeCompare(b.title || b.name || "")); return scored; }
 function shapeCopy({ products, concern, tone, category }) { const first = products[0] || {}; const name = first.title || first.name || "this pick"; const middleWord = /beauty|skin|hair|cosmetic/i.test(category) ? "ingredients" : "features"; const why = /bestie/i.test(String(tone || "")) ? `I picked ${name} because it lines up beautifully with “${concern}”. It’s a solid, low-fuss match from this store.` : `Recommended: ${name}. It aligns strongly with “${concern}” based on the store’s catalogue signals.`; const rationale = `Relevance is based on product ${middleWord}, tags, and related keywords that map to “${concern}”.`; const extras = first.description ? `Tip: check the product page for usage guidance and added benefits noted in the description.` : `Tip: start low and adjust as needed; always follow usage directions on the product page.`; return { why, rationale, extras }; }
 async function getSettings(storeId) { const ref = db.doc(`storeSettings/${storeId}`); const snap = await ref.get(); if (!snap.exists) { const seed = { tone: (process.env.BFF_DEFAULT_TONE || "expert").toLowerCase(), category: process.env.BFF_DEFAULT_CATEGORY || "Generic", enabledPacks: (process.env.BFF_ENABLED_PACKS || "").split(",").map(s => s.trim()).filter(Boolean), domain: "", createdAt: nowTs(), settingsVersion: 1, }; await setDocSafe(ref, seed); return seed; } const data = snap.data() || {}; const s = String(data.tone || "").toLowerCase(); const tone = /bestie|friendly|warm|helpful/.test(s) ? "bestie" : /expert|pro|concise|direct/.test(s) ? "expert" : (process.env.BFF_DEFAULT_TONE || "expert"); return { tone, category: data.category || "Generic", domain: data.domain || "", enabledPacks: data.enabledPacks || [] }; }
-
-// PROD assets proxy
 const stripProxyPrefix = (path) => path.replace(/^\/proxy\/refina/, "");
-app.use("/proxy/refina", createProxyMiddleware({ target: ASSETS_BASE_URL, changeOrigin: true, ws: false, pathRewrite: stripProxyPrefix, logLevel: "warn", }));
-// Stable launcher
-app.get("/launcher.js", async (_req, res) => { try { const candidates = [ `${ASSETS_BASE_URL}/manifest.json`, `${ASSETS_BASE_URL}/assets/manifest.json`, ]; let manifest = null; for (const u of candidates) { const r = await fetch(u); if (r.ok) { manifest = await r.json(); break; } } let file = null, css = []; if (manifest) { const entries = Object.values(manifest).filter(e => e && e.isEntry && e.file); if (entries.length) { file = entries[0].file; css = entries[0].css || []; } } else { const r = await fetch(`${ASSETS_BASE_URL}/index.html`); if (r.ok) { const html = await r.text(); const m = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/i); if (m) file = m[1].replace(/^\//, ""); css = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/gi)] .map(x => x[1].replace(/^\//, "")); } } if (!file) { res.type("application/javascript").status(500).send(`console.error("Refina launcher: could not resolve prod entry from ${ASSETS_BASE_URL}");`); return; } const base = "/proxy/refina"; const entryUrl = `${base}/${file.replace(/^\/+/, "")}`; const cssUrls = css.map(href => `${base}/${href.replace(/^\/+/, "")}`); res.type("application/javascript").send(`(function(){ const css = ${JSON.stringify(cssUrls)}; for (const href of css) { var l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; document.head.appendChild(l); } var s = document.createElement("script"); s.type = "module"; s.src = ${JSON.stringify(entryUrl)}; document.head.appendChild(s); })();`); } catch (e) { res.type("application/javascript").status(500).send('console.error("Refina launcher error:", ' + JSON.stringify(String(e && e.message || e)) + ');'); } });
-// Health
-app.get("/v1/health", (_req, res) => { res.json({ ok: true, now: new Date().toISOString(), cacheSize: cache.size, version: "bff-esm-prod", proxy: `prod → ${ASSETS_BASE_URL}` }); });
-// Concerns
-app.get("/v1/concerns", async (req, res) => { try { const storeId = String(req.query.storeId || "").trim(); if (!storeId) return res.status(400).json({ error: "storeId required" }); const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`)); let chips = Array.isArray(docChips?.chips) ? docChips.chips : []; if (!chips.length) { const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get(); chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean); } res.json({ storeId, chips }); } catch (e) { console.error("GET /v1/concerns error", e); res.status(500).json({ error: "internal_error" }); } });
-// Recommend
-app.post("/v1/recommend", async (req, res) => { const t0 = Date.now(); try { const { storeId: rawStoreId, concern: rawConcern, plan: rawPlan } = req.body || {}; const storeId = String(rawStoreId || "").trim(); const concernInput = String(rawConcern || "").trim(); const plan = String(rawPlan || "free").toLowerCase(); if (!storeId || !concernInput) return res.status(400).json({ error: "storeId and concern required" }); const normalizedConcern = normalizeConcern(concernInput); const settings = await getSettings(storeId); const { category, tone, domain } = settings; const cacheKey = ["rec", storeId, normalizedConcern, plan, tone].join("|"); const cached = cacheGet(cacheKey); if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } }); const snaps = await db.collection("products").where("storeId", "==", storeId).limit(1500).get(); const allProducts = []; snaps.forEach(d => allProducts.push({ id: d.id, ...d.data() })); const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`); const mapping = await getDocSafe(mappingRef); let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : []; let source = "mapping"; if (!productIds.length) { const ranked = rankProducts(allProducts, normalizedConcern); productIds = ranked.slice(0, 8).map(p => p.id); source = "fallback"; } const used = productIds.slice(0, plan === "free" ? 3 : 8); const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, ""); const hydrate = used.map((id) => { const p = allProducts.find((x) => x.id === id) || {}; const handle = String(p.handle || "").replace(/^\/+|\/+$/g, ""); const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : ""); return { id: p.id, title: p.title || p.name || "", name: p.title || p.name || "", image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ""), description: p.description || "", productType: p.productType || "", tags: p.tags || [], url: productUrl, price: p.price ?? null, }; }); const copy = shapeCopy({ products: allProducts.filter(p => used.includes(p.id)), concern: normalizedConcern, tone, category, }); const payload = { productIds: used, products: hydrate, copy, meta: { source, cache: "miss", tone }, }; cacheSet(cacheKey, payload); res.json(payload); } catch (e) { console.error("POST /v1/recommend error", e); res.status(500).json({ error: "internal_error" }); } finally { const ms = Date.now() - t0; if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`); } });
+app.use("/proxy/refina", createProxyMiddleware({ target: ASSETS_BASE_URL, changeOrigin: true, ws: false, pathRewrite: stripProxyPrefix, logLevel: "warn" }));
+app.get("/launcher.js", async (_req, res) => { try { const r = await fetch(`${ASSETS_BASE_URL}/index.html`); if (!r.ok) throw new Error("Could not fetch index.html"); const html = await r.text(); const m = html.match(/<script[^>]+type="module"[^>]+src="([^"]+)"/i); if (!m) throw new Error("Could not find entry script in index.html"); const file = m[1].replace(/^\//, ""); const css = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/gi)].map(x => x[1].replace(/^\//, "")); const base = "/proxy/refina"; const entryUrl = `${base}/${file}`; const cssUrls = css.map(href => `${base}/${href}`); res.type("application/javascript").send(`(function(){ const css = ${JSON.stringify(cssUrls)}; for (const href of css) { const l=document.createElement("link"); l.rel="stylesheet"; l.href=href; document.head.appendChild(l); } const s=document.createElement("script"); s.type="module"; s.src=${JSON.stringify(entryUrl)}; document.head.appendChild(s); })();`); } catch (e) { res.type("application/javascript").status(500).send(`console.error("Refina launcher error:", ${JSON.stringify(e.message)});`); } });
+app.get("/v1/health", (_req, res) => res.json({ ok: true, now: new Date().toISOString(), cacheSize: cache.size, version: "bff-esm-prod", proxy: `prod → ${ASSETS_BASE_URL}` }));
+app.get("/v1/concerns", express.json(), async (req, res) => { try { const storeId = String(req.query.storeId || "").trim(); if (!storeId) return res.status(400).json({ error: "storeId required" }); const docChips = await getDocSafe(db.doc(`commonConcerns/${storeId}`)); let chips = Array.isArray(docChips?.chips) ? docChips.chips : []; if (!chips.length) { const colSnap = await db.collection(`commonConcerns/${storeId}/items`).get(); chips = colSnap.docs.map(d => d.data()?.text).filter(Boolean); } res.json({ storeId, chips }); } catch (e) { console.error("GET /v1/concerns error", e); res.status(500).json({ error: "internal_error" }); } });
+app.post("/v1/recommend", express.json(), async (req, res) => { const t0 = Date.now(); try { const { storeId, concern, plan } = req.body || {}; if (!storeId || !concern) return res.status(400).json({ error: "storeId and concern required" }); const normalizedConcern = normalizeConcern(concern); const settings = await getSettings(storeId); const { category, tone, domain } = settings; const cacheKey = ["rec", storeId, normalizedConcern, plan, tone].join("|"); const cached = cacheGet(cacheKey); if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: "hit" } }); const snaps = await db.collection("products").where("storeId", "==", storeId).limit(1500).get(); const allProducts = snaps.docs.map(d => ({ id: d.id, ...d.data() })); const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`); const mapping = await getDocSafe(mappingRef); let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : []; let source = productIds.length ? "mapping" : "fallback"; if (!productIds.length) { productIds = rankProducts(allProducts, normalizedConcern).slice(0, 8).map(p => p.id); } const used = productIds.slice(0, String(plan).toLowerCase() === "free" ? 3 : 8); const safeDomain = String(domain || "").replace(/^https?:\/\//, "").replace(/\/+$/, ""); const hydrate = used.map((id) => { const p = allProducts.find((x) => x.id === id) || {}; const handle = String(p.handle || "").replace(/^\/+|\/+$/g, ""); const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : ""); return { id, title: p.title || p.name || "", name: p.title || p.name || "", image: p.image || p.images?.[0]?.src || "", description: p.description || "", productType: p.productType || "", tags: p.tags || [], url: productUrl, price: p.price ?? null }; }); const copy = shapeCopy({ products: hydrate, concern: normalizedConcern, tone, category }); const payload = { productIds: used, products: hydrate, copy, meta: { source, cache: "miss", tone } }; cacheSet(cacheKey, payload); res.json(payload); } catch (e) { console.error("POST /v1/recommend error", e); res.status(500).json({ error: "internal_error" }); } finally { const ms = Date.now() - t0; if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`); } });
 
-// ─────────────────────────────────────────────────────────────
-// Listen
-// ─────────────────────────────────────────────────────────────
+// --- Server Listen -----------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`Refina Server running on :${PORT}`);
 });
