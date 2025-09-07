@@ -37,7 +37,7 @@ const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.n
 // ─────────────────────────────────────────────────────────────
 const app = express();
 
-// Standard Shopify Auth Routes
+// Standard Shopify Auth Routes (these are public)
 app.get("/api/auth", async (req, res) => {
   try {
     await shopify.auth.begin({
@@ -67,6 +67,7 @@ app.get("/api/auth/callback", async (req, res) => {
 // Shopify Webhook processor
 app.post("/api/webhooks", async (req, res) => {
   try {
+    // We use express.raw({type: 'application/json'}) to make sure we have the raw body for verification
     await shopify.webhooks.process({
       req,
       res,
@@ -81,14 +82,15 @@ app.post("/api/webhooks", async (req, res) => {
 });
 
 
-// All API routes must be registered before the frontend middleware.
-// Parse JSON bodies for all API routes
+// All API routes must be protected by the session validation middleware.
+// This middleware is what automatically handles 401s and triggers re-auth.
+app.use("/api/*", shopify.validateAuthenticatedSession());
+
+// Parse JSON bodies for all API routes AFTER validation
 app.use("/api/*", express.json());
+app.use("/api/*", cors()); // Apply CORS if needed, after validation
 
-// Add CORS headers to API routes
-app.use("/api/*", cors());
-
-// Mount your API route handlers
+// Mount your protected API route handlers
 app.use("/api/billing", billingRoutes);
 
 
