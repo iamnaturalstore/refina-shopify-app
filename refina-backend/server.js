@@ -37,7 +37,8 @@ const cacheSet = (k, val, ttl = CACHE_TTL_MS) => cache.set(k, { val, exp: Date.n
 // ─────────────────────────────────────────────────────────────
 const app = express();
 
-// Standard Shopify Auth Routes (these are public)
+// Set up Shopify authentication and webhook handling BEFORE any other routes.
+// The auth routes are public and do not need session validation.
 app.get("/api/auth", async (req, res) => {
   try {
     await shopify.auth.begin({
@@ -56,7 +57,6 @@ app.get("/api/auth", async (req, res) => {
 app.get("/api/auth/callback", async (req, res) => {
   try {
     const callback = await shopify.auth.callback({ req, res });
-    // Your app's session storage handler will save the session automatically.
     res.redirect(`/?shop=${callback.session.shop}&host=${req.query.host}`);
   } catch (e) {
     console.error("Failed on auth callback:", e);
@@ -64,10 +64,10 @@ app.get("/api/auth/callback", async (req, res) => {
   }
 });
 
-// Shopify Webhook processor
-app.post("/api/webhooks", async (req, res) => {
+// The webhook handler needs the raw body of the request to verify the signature.
+// It must be placed before any JSON parsing middleware.
+app.post("/api/webhooks", express.raw({ type: "application/json" }), async (req, res) => {
   try {
-    // We use express.raw({type: 'application/json'}) to make sure we have the raw body for verification
     await shopify.webhooks.process({
       req,
       res,
@@ -81,23 +81,25 @@ app.post("/api/webhooks", async (req, res) => {
   }
 });
 
-
-// All API routes must be protected by the session validation middleware.
-// This middleware is what automatically handles 401s and triggers re-auth.
+// Now, set up the security checkpoint. All routes BELOW this point will require a
+// valid Shopify session. This middleware handles the 401 Unauthorized errors
+// and triggers the re-authentication flow correctly.
 app.use("/api/*", shopify.validateAuthenticatedSession());
 
-// Parse JSON bodies for all API routes AFTER validation
-app.use("/api/*", express.json());
-app.use("/api/*", cors()); // Apply CORS if needed, after validation
+// Parse JSON for all protected API routes.
+app.use(express.json());
+app.use(cors());
 
-// Mount your protected API route handlers
+// Mount your protected API route handlers here.
 app.use("/api/billing", billingRoutes);
 
 
-// This middleware serves your React app's compiled static assets
+// This middleware serves your React app's compiled static assets.
+// It should come after all API routes.
 app.use(express.static(UI_DIST_PATH));
 
-// This middleware ensures that all other requests are handled by your React app
+// This middleware handles all other requests by serving the React app's index.html.
+// This is essential for client-side routing to work.
 app.use("/*", async (_req, res, _next) => {
   return res
     .status(200)
