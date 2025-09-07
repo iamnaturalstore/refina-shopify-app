@@ -73,6 +73,7 @@ app.use("/api/billing", billingRoutes);
 
 // --- Admin UI static + SPA mounts -------------------------------------------
 // Serve versioned assets (JS/CSS/maps) at /assets
+// 1) Serve hashed assets explicitly at /assets (JS/CSS/maps)
 app.use(
   "/assets",
   express.static(join(UI_DIST_PATH, "assets"), {
@@ -80,6 +81,17 @@ app.use(
     maxAge: "365d",
   })
 );
+app.use(
+  "/assets",
+  express.static(join(UI_DIST_PATH, "assets"), {
+    immutable: true,
+    maxAge: "365d",
+  })
+);
+// 2) Serve the Admin SPA at /admin (and nested)
+app.get(["/admin", "/admin/*"], (_req, res) => {
+  res.sendFile(join(UI_DIST_PATH, "index.html"));
+});
 
 // Minimal CSP to allow embedding in Shopify Admin, only for /admin pages
 app.use(["/admin", "/admin/*"], (_req, res, next) => {
