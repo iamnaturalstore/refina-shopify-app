@@ -1,5 +1,6 @@
 import createApp from "@shopify/app-bridge";
 import { authenticatedFetch } from "@shopify/app-bridge-utils";
+import * as actions from "@shopify/app-bridge/actions";
 
 // Persist host/shop once per load to survive navigation
 (function persistParams() {
@@ -62,7 +63,7 @@ function requireEnvKey() {
   return k;
 }
 
-let _app, _fetchFn;
+let _app, _fetchFn, _redirect;
 function getAppBridge() {
   if (_app) return _app;
   const host = getHost();
@@ -71,6 +72,11 @@ function getAppBridge() {
   _app = createApp({ apiKey, host, forceRedirect: true });
   _fetchFn = authenticatedFetch(_app);
   return _app;
+}
+function getRedirect() {
+  getAppBridge();
+  if (!_redirect) _redirect = actions.Redirect.create(_app);
+  return _redirect;
 }
 
 export async function api(path, init = {}) {
@@ -82,14 +88,25 @@ export async function api(path, init = {}) {
     : init;
   const fetchInit = { cache: "no-store", ...baseInit };
   const res = await _fetchFn(finalUrl, fetchInit);
+
   if (res.status === 401 || res.status === 403) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
-      window.top.location.href = to;
+      // Build absolute URL for App Bridge remote redirect
+      const absTo = to.startsWith("http")
+        ? to
+        : new URL(to, window.location.origin).toString();
+      try {
+        getRedirect().dispatch(actions.Redirect.Action.REMOTE, { url: absTo });
+      } catch {
+        try { window.top.location.href = absTo; } catch { window.location.href = absTo; }
+      }
+      // Halt the caller; navigation will take over
       return new Promise(() => {});
     }
   }
+
   const ct = res.headers.get("content-type") || "";
   const data = ct.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) {
