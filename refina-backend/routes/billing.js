@@ -22,14 +22,10 @@ function normalizePlan(data) {
   return { level, status };
 }
 
-/**
- * Resolve canonical shop from guard/query; no short IDs; throws 401 on failure.
- */
+/** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, _res) {
-  // 1) Use guard-resolved shop from server.js (preferred)
   let shop = (typeof req.shop === "string" && req.shop) ? req.shop.toLowerCase() : null;
 
-  // 2) Fallbacks: ?shop=<full>, or derive from ?host (base64)
   const q = req.query || {};
   if (!shop && typeof q.shop === "string" && q.shop.toLowerCase().endsWith(".myshopify.com")) {
     shop = q.shop.toLowerCase();
@@ -49,8 +45,36 @@ async function resolveShopContext(req, _res) {
     err.status = 401;
     throw err;
   }
-
   return { shop };
+}
+
+/* ---------- Shopify GraphQL compatibility (works across SDK shapes) ---------- */
+
+function getGraphqlClient(session) {
+  const Graphql =
+    shopify?.api?.clients?.Graphql || // newer shape
+    shopify?.clients?.Graphql;        // older shape
+  if (!Graphql) {
+    throw new Error("Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql).");
+  }
+  return new Graphql({ session });
+}
+
+/**
+ * gql(client, query, variables?) → data
+ * Normalizes .query({data:{...}}) vs .request(query,{variables}) across SDK versions.
+ */
+async function gql(client, query, variables) {
+  if (typeof client.query === "function") {
+    const resp = await client.query({ data: variables ? { query, variables } : { query } });
+    return resp?.body?.data;
+  }
+  if (typeof client.request === "function") {
+    // older clients
+    const resp = await client.request(query, variables ? { variables } : undefined);
+    return resp?.data ?? resp?.body?.data ?? resp;
+  }
+  throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
 /* ----------------------------- Routes ---------------------------- */
@@ -63,7 +87,6 @@ router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
 
-    // Single source of truth: plans/<shop>.myshopify.com
     const plans = dbAdmin.collection("plans");
     const longSnap = await plans.doc(shop).get();
     let raw = longSnap.exists ? longSnap.data() : null;
@@ -107,7 +130,7 @@ router.get("/activated", async (req, res) => {
         .send("reauthorize");
     }
 
-    const client = new shopify.api.clients.Graphql({ session: offlineSession });
+    const client = getGraphqlClient(offlineSession);
     const q = `
       query AppInstall {
         currentAppInstallation {
@@ -115,8 +138,8 @@ router.get("/activated", async (req, res) => {
         }
       }
     `;
-    const r = await client.query({ data: { query: q } });
-    const subs = r?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const data = await gql(client, q);
+    const subs = data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
     let status = "NONE";
@@ -186,7 +209,7 @@ router.post("/subscribe", async (req, res) => {
       return res.status(400).json({ error: "Invalid plan" });
     }
 
-    const client = new shopify.api.clients.Graphql({ session: offlineSession });
+    const client = getGraphqlClient(offlineSession);
 
     // 1) Determine current active level + current sub id (if any)
     const currentQ = `
@@ -200,14 +223,14 @@ router.post("/subscribe", async (req, res) => {
         }
       }
     `;
-    const currentResp = await client.query({ data: currentQ });
-    const subs = currentResp?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const currentData = await gql(client, currentQ);
+    const subs = currentData?.currentAppInstallation?.activeSubscriptions || [];
 
     let currentLevel = "free";
     let currentSubId = null;
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
-      if (s.status !== 'ACTIVE') continue; // Only consider active subscriptions
+      if (s.status !== "ACTIVE") continue; // Only consider active subscriptions
       if (n.includes("premium") || n.includes("pro+") || n.includes("pro plus")) {
         currentLevel = "premium";
         currentSubId = s?.id || currentSubId;
@@ -228,8 +251,8 @@ router.post("/subscribe", async (req, res) => {
 
     // 2) Get shop currency
     const shopQ = `query { shop { currencyCode } }`;
-    const shopResp = await client.query({ data: shopQ });
-    let currencyCode = (shopResp?.body?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
+    const shopData = await gql(client, shopQ);
+    let currencyCode = (shopData?.shop?.currencyCode || "USD").toString().toUpperCase();
 
     // 3) Plan catalog (align with UI: Pro $19, Premium $49)
     const PLAN = target === "premium"
@@ -277,20 +300,16 @@ router.post("/subscribe", async (req, res) => {
       returnUrl,
       test: process.env.NODE_ENV !== "production",
       lineItems: [{
-        plan: { appRecurringPricingDetails: { price: { amount: amt, currencyCode: cc }, interval: 'EVERY_30_DAYS' } }
+        plan: { appRecurringPricingDetails: { price: { amount: amt, currencyCode: cc }, interval: "EVERY_30_DAYS" } }
       }],
       replacementBehavior
     };
 
-    const tryCreate = async () => {
-      const resp = await client.query({ data: { query: createMutation, variables: createVars } });
-      const payload = resp?.body?.data?.appSubscriptionCreate;
-      const errors = payload?.userErrors || [];
-      const confirmationUrl = payload?.confirmationUrl || null;
-      return { errors, confirmationUrl };
-    };
+    const createData = await gql(client, createMutation, createVars);
+    const payload = createData?.appSubscriptionCreate;
+    const errors = payload?.userErrors || [];
+    const confirmationUrl = payload?.confirmationUrl || null;
 
-    let { errors, confirmationUrl } = await tryCreate();
     if (!errors.length && confirmationUrl) {
       return res.json({ confirmationUrl });
     }
@@ -315,9 +334,8 @@ router.post("/subscribe", async (req, res) => {
           }
         }
       `;
-
-      const cancelResp = await client.query({ data: { query: cancelMutation, variables: { id: currentSubId } } });
-      const cancelErrors = cancelResp?.body?.data?.appSubscriptionCancel?.userErrors || [];
+      const cancelData = await gql(client, cancelMutation, { id: currentSubId });
+      const cancelErrors = cancelData?.appSubscriptionCancel?.userErrors || [];
 
       if (cancelErrors.length) {
         console.error("[Billing] Failed to cancel existing subscription:", { shop, errors: cancelErrors });
@@ -328,15 +346,16 @@ router.post("/subscribe", async (req, res) => {
       }
 
       console.log(`[Billing] Successfully cancelled. Retrying subscription creation for ${target}...`);
-      const retry = await tryCreate();
-      if (!retry.errors.length && retry.confirmationUrl) {
-        return res.json({ confirmationUrl: retry.confirmationUrl });
+      const retryData = await gql(client, createMutation, createVars);
+      const retryPayload = retryData?.appSubscriptionCreate;
+      if (!retryPayload?.userErrors?.length && retryPayload?.confirmationUrl) {
+        return res.json({ confirmationUrl: retryPayload.confirmationUrl });
       }
 
-      console.error("[Billing] Failed to create subscription AFTER successful cancel:", { shop, errors: retry.errors });
+      console.error("[Billing] Failed to create subscription AFTER successful cancel:", { shop, errors: retryPayload?.userErrors });
       return res.status(400).json({
         error: "CREATE_AFTER_CANCEL_FAILED",
-        errors: retry.errors,
+        errors: retryPayload?.userErrors,
       });
     }
 
@@ -348,7 +367,6 @@ router.post("/subscribe", async (req, res) => {
     console.error("[Billing] Unknown error: No confirmationUrl returned.", { shop });
     return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
-    // ─── FIX START for CORS + 401 Unauthorized Error ─────────────────────
     if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
@@ -358,12 +376,10 @@ router.post("/subscribe", async (req, res) => {
         .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
       return res.send("reauthorize");
     }
-    // ─── FIX END ────────────────────────────────────────────────────────────
     console.error("POST /api/billing/subscribe unhandled error", { shop: req.query?.shop, error: err });
     return res.status(500).json({ error: "Subscribe failed" });
   }
 });
-
 
 /**
  * POST /api/billing/sync
@@ -385,7 +401,7 @@ router.post("/sync", async (req, res) => {
         .send("reauthorize");
     }
 
-    const client = new shopify.api.clients.Graphql({ session: offlineSession });
+    const client = getGraphqlClient(offlineSession);
     const query = `
       query AppInstall {
         currentAppInstallation {
@@ -397,16 +413,15 @@ router.post("/sync", async (req, res) => {
         }
       }
     `;
-    const result = await client.query({ data: { query } });
-    console.log("[billing] appSubscriptionCreate result", JSON.stringify(resp.body, null, 2));
-    const subs = result?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const data = await gql(client, query);
+    const subs = data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
     let status = "NONE";
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
       const st = s?.status || "UNKNOWN";
-      if (st !== 'ACTIVE') continue;
+      if (st !== "ACTIVE") continue;
       if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
       if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
     }
@@ -416,7 +431,6 @@ router.post("/sync", async (req, res) => {
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    // Also apply the CORS fix to the sync route's error handler
     if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
