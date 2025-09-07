@@ -115,8 +115,8 @@ router.get("/activated", async (req, res) => {
         }
       }
     `;
-    const r = await client.request(q);
-    const subs = r?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const r = await client.query({ data: q });
+    const subs = r?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
     let status = "NONE";
@@ -200,8 +200,8 @@ router.post("/subscribe", async (req, res) => {
         }
       }
     `;
-    const currentResp = await client.request(currentQ);
-    const subs = currentResp?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const currentResp = await client.query({ data: currentQ });
+    const subs = currentResp?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
 
     let currentLevel = "free";
     let currentSubId = null;
@@ -228,8 +228,8 @@ router.post("/subscribe", async (req, res) => {
 
     // 2) Get shop currency
     const shopQ = `query { shop { currencyCode } }`;
-    const shopResp = await client.request(shopQ);
-    let currencyCode = (shopResp?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
+    const shopResp = await client.query({ data: shopQ });
+    let currencyCode = (shopResp?.body?.data?.shop?.currencyCode || "USD").toString().toUpperCase();
 
     // 3) Plan catalog (align with UI: Pro $19, Premium $49)
     const PLAN = target === "premium"
@@ -283,8 +283,8 @@ router.post("/subscribe", async (req, res) => {
     };
 
     const tryCreate = async () => {
-      const resp = await client.request(createMutation, { variables: createVars });
-      const payload = resp?.data?.appSubscriptionCreate;
+      const resp = await client.query({ data: { query: createMutation, variables: createVars } });
+      const payload = resp?.body?.data?.appSubscriptionCreate;
       const errors = payload?.userErrors || [];
       const confirmationUrl = payload?.confirmationUrl || null;
       return { errors, confirmationUrl };
@@ -316,8 +316,8 @@ router.post("/subscribe", async (req, res) => {
         }
       `;
 
-      const cancelResp = await client.request(cancelMutation, { variables: { id: currentSubId } });
-      const cancelErrors = cancelResp?.data?.appSubscriptionCancel?.userErrors || [];
+      const cancelResp = await client.query({ data: { query: cancelMutation, variables: { id: currentSubId } } });
+      const cancelErrors = cancelResp?.body?.data?.appSubscriptionCancel?.userErrors || [];
 
       if (cancelErrors.length) {
         console.error("[Billing] Failed to cancel existing subscription:", { shop, errors: cancelErrors });
@@ -349,9 +349,6 @@ router.post("/subscribe", async (req, res) => {
     return res.status(500).json({ error: "No confirmationUrl returned" });
   } catch (err) {
     // ─── FIX START for CORS + 401 Unauthorized Error ─────────────────────
-    // This fix ensures that even on a 401 error, we send the correct
-    // CORS headers, allowing the browser to read our special re-auth
-    // header and trigger the re-authentication flow.
     if (err?.status === 401 || err.response?.code === 401) {
       res
         .status(401)
@@ -400,8 +397,8 @@ router.post("/sync", async (req, res) => {
         }
       }
     `;
-    const result = await client.request(query);
-    const subs = result?.data?.currentAppInstallation?.activeSubscriptions || [];
+    const result = await client.query({ data: query });
+    const subs = result?.body?.data?.currentAppInstallation?.activeSubscriptions || [];
 
     let level = "free";
     let status = "NONE";
