@@ -18,6 +18,7 @@ import analyticsIngestRouter from "../routes/analyticsIngest.js";
 import { callGemini } from "./ai/gemini.js";
 import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";
 import { expandConcernToIngredients, getIngredientFacts } from "./lib/knowledge.js";
+import authRouter from "../routes/auth.js";
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -1063,6 +1064,7 @@ app.post("/api/admin/store-settings", async (req, res) => {
 
 // Billing APIs used by Home + Billing page
 app.use("/api/billing", billingRouter); // /api/billing/plan, /subscribe, /sync
+app.use("/api/auth", authRouter);
 
 // Admin APIs used by Home/Settings/Analytics
 app.use("/api/admin", analyticsRouter); // /api/admin/analytics/* (overview, logs)
