@@ -1,6 +1,5 @@
 // refina-backend/server.js (ESM, PROD-ONLY, Express v5-safe)
 import { join } from "path";
-import { readFileSync } from "fs";
 import express from "express";
 import cors from "cors";
 import proxy from "http-proxy-middleware";
@@ -72,22 +71,26 @@ app.use("/api/billing", billingRoutes);
 // app.use("/api/settings", settingsRoutes);
 // app.use("/api/analytics", analyticsRoutes);
 
-// --- Shopify App Frontend Serving --------------------------------------------
-// This serves your compiled React app for the Shopify Admin.
-app.use(express.static(UI_DIST_PATH));
-app.use("/*", (req, res, next) => {
-  // Allow BFF routes to pass through to the next section.
-  const bffPaths = ["/launcher.js", "/v1/", "/proxy/"];
-  if (bffPaths.some(p => req.path.startsWith(p))) {
-    return next();
-  }
-  // For all other paths, serve the React app's index.html.
-  res
-    .status(200)
-    .set("Content-Type", "text/html")
-    .send(readFileSync(join(UI_DIST_PATH, "index.html")));
+// --- Admin UI static + SPA mounts -------------------------------------------
+// Serve versioned assets (JS/CSS/maps) at /assets
+app.use(
+  "/assets",
+  express.static(join(UI_DIST_PATH, "assets"), {
+    immutable: true,
+    maxAge: "365d",
+  })
+);
+
+// Minimal CSP to allow embedding in Shopify Admin, only for /admin pages
+app.use(["/admin", "/admin/*"], (_req, res, next) => {
+  res.setHeader("Content-Security-Policy", "frame-ancestors https://admin.shopify.com https://*.myshopify.com;");
+  next();
 });
 
+// Serve SPA index.html for /admin and any nested route
+app.get(["/admin", "/admin/*"], (_req, res) => {
+  res.sendFile(join(UI_DIST_PATH, "index.html"));
+});
 
 // ─────────────────────────────────────────────────────────────
 // BFF Logic (for public storefront widget) - This section is now separate.
@@ -112,4 +115,3 @@ app.post("/v1/recommend", express.json(), async (req, res) => { const t0 = Date.
 app.listen(PORT, () => {
   console.log(`Refina Server running on :${PORT}`);
 });
-
