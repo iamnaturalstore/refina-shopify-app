@@ -19,7 +19,7 @@ const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || "https://refina.ne
 const app = express();
 
 // --- Shopify Auth & Webhook Routes (Public) --------------------------------
-// These routes must come BEFORE any session validation.
+// These routes must come BEFORE any session validation or body parsing.
 app.get("/api/auth", async (req, res) => {
   try {
     await shopify.auth.begin({
@@ -45,6 +45,7 @@ app.get("/api/auth/callback", async (req, res) => {
   }
 });
 
+// The webhook handler needs the raw request body for signature validation.
 app.post("/api/webhooks", express.raw({ type: "application/json" }), async (req, res) => {
   try {
     await shopify.webhooks.process({ req, res });
@@ -55,34 +56,33 @@ app.post("/api/webhooks", express.raw({ type: "application/json" }), async (req,
   }
 });
 
-// --- Security Checkpoint -----------------------------------------------------
-// All API routes below this point require a valid Shopify session.
-// This middleware handles the 401 Unauthorized errors and triggers re-auth.
+// --- Security Checkpoint for Shopify Admin API -------------------------------
+// All API routes below this point are for the Shopify Admin UI and require a
+// valid session. This middleware handles the 401 Unauthorized errors and
+// triggers the re-authentication flow correctly.
 app.use("/api/*", shopify.validateAuthenticatedSession());
 
-// --- Protected API Routes ----------------------------------------------------
+// --- Protected Shopify Admin API Routes --------------------------------------
 app.use(express.json());
 app.use(cors());
 
 app.use("/api/billing", billingRoutes);
 
-// Example of another protected route
-app.get("/api/test", (req, res) => {
-  res.status(200).send("API test route is working.");
-});
-
+// You will add other admin API routes here, for example:
+// app.use("/api/settings", settingsRoutes);
+// app.use("/api/analytics", analyticsRoutes);
 
 // --- Shopify App Frontend Serving --------------------------------------------
-// This serves your compiled React app.
+// This serves your compiled React app for the Shopify Admin.
 app.use(express.static(UI_DIST_PATH));
-app.use("/*", async (req, res, next) => {
-  // Allow BFF routes to pass through
-  const bffRoutes = ["/launcher.js", "/v1/health", "/v1/concerns", "/v1/recommend", "/proxy/refina"];
-  if (bffRoutes.some(p => req.path.startsWith(p))) {
+app.use("/*", (req, res, next) => {
+  // Allow BFF routes to pass through to the next section.
+  const bffPaths = ["/launcher.js", "/v1/", "/proxy/"];
+  if (bffPaths.some(p => req.path.startsWith(p))) {
     return next();
   }
-  // Serve the React app for all other routes
-  return res
+  // For all other paths, serve the React app's index.html.
+  res
     .status(200)
     .set("Content-Type", "text/html")
     .send(readFileSync(join(UI_DIST_PATH, "index.html")));
@@ -90,7 +90,7 @@ app.use("/*", async (req, res, next) => {
 
 
 // ─────────────────────────────────────────────────────────────
-// BFF Logic (for storefront widget) - This remains unchanged
+// BFF Logic (for public storefront widget) - This section is now separate.
 // ─────────────────────────────────────────────────────────────
 const cache = new Map();
 const cacheGet = (k) => { const v = cache.get(k); if (!v || Date.now() > v.exp) { cache.delete(k); return null; } return v.val; };
