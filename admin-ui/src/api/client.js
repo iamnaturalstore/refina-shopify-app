@@ -1,7 +1,14 @@
 // admin-ui/src/api/client.js
 // Centralized API client for the Admin UI.
-// Works with App Bridge v4 by accepting an injected authenticated fetch
-// (from useAuthenticatedFetch) and falls back to window.fetch if not set.
+// Works with App Bridge by accepting an injected authenticated fetch
+// (via setAuthedFetch), and also falls back to App Bridge's authenticatedFetch
+// automatically if available.
+
+// ─────────────────────────────────────────────────────────────
+// App Bridge fallback (safe to import; uses host from URL)
+// ─────────────────────────────────────────────────────────────
+import { authenticatedFetch } from "@shopify/app-bridge-utils";
+import app from "../appBridge"; // must export a configured App Bridge instance
 
 // ─────────────────────────────────────────────────────────────
 // Persist host/shop once per load to survive navigation
@@ -68,12 +75,26 @@ export function withContext(path) {
 let _authedFetch = null;
 
 /**
- * Call this once in your app root:
- *   const f = useAuthenticatedFetch();
- *   useEffect(() => { setAuthedFetch(f); }, [f]);
+ * Call this once in your app root, if you like:
+ *   import { authenticatedFetch } from "@shopify/app-bridge-utils";
+ *   import app from "../appBridge";
+ *   setAuthedFetch(authenticatedFetch(app));
+ *
+ * If you forget, we'll fall back to authenticatedFetch(app) automatically.
  */
 export function setAuthedFetch(fn) {
   _authedFetch = typeof fn === "function" ? fn : null;
+}
+
+function getAuthedFetch() {
+  try {
+    if (_authedFetch) return _authedFetch;
+    if (app) {
+      // Lazily create an authenticated fetch from App Bridge
+      return authenticatedFetch(app);
+    }
+  } catch {}
+  return fetch; // ultimate fallback (will 401 on protected routes)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -96,7 +117,7 @@ export async function api(path, init = {}) {
     : init;
 
   const fetchInit = { cache: "no-store", ...baseInit };
-  const f = _authedFetch || fetch;
+  const f = getAuthedFetch();
   const res = await f(finalUrl, fetchInit);
 
   // Handle reauthorization headers from the backend
@@ -104,18 +125,15 @@ export async function api(path, init = {}) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
-      // Make absolute and preserve host/shop context if needed
       const abs = to.startsWith("http")
         ? to
         : new URL(to, window.location.origin).toString();
       try {
-        // In an embedded app, redirect the *top* window
-        window.top.location.href = abs;
+        window.top.location.href = abs; // embedded app: redirect top
       } catch {
         window.location.href = abs;
       }
-      // Give control to the navigation
-      return new Promise(() => {});
+      return new Promise(() => {}); // hand off to navigation
     }
   }
 
