@@ -886,8 +886,8 @@ app.use(
   "/assets",
   express.static(path.join(ADMIN_UI_DIR, "assets"), { immutable: true, maxAge: "1y" })
 );
-// Minimal CSP for embedded Shopify Admin pages
-app.use(["/admin", "/admin/*"], (_req, res, next) => {
+// Minimal CSP for embedded Shopify Admin pages (Express v5-safe RegExp)
+app.use(/^\/admin(?:\/.*)?$/, (_req, res, next) => {
   res.setHeader(
     "Content-Security-Policy",
     "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
@@ -895,8 +895,9 @@ app.use(["/admin", "/admin/*"], (_req, res, next) => {
   next();
 });
 
-// Serve the Admin SPA at /admin and nested routes
-app.get(["/admin", "/admin/*"], (_req, res) => {
+
+// Serve the Admin SPA at /admin and nested routes (Express v5-safe RegExp)
+app.get(/^\/admin(?:\/.*)?$/, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
 });
 
