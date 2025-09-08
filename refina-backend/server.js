@@ -6,6 +6,7 @@ import cors from "cors";
 
 import shopify from "./shopify.js";
 import billingRoutes from "./routes/billing.js";
+import settingsRoutes from "./routes/settings.js";
 
 // --- Config ------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || "8081", 10);
@@ -70,6 +71,7 @@ app.use(cors());
 
 // Mount your existing billing routes (unchanged)
 app.use("/api/billing", billingRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // (Add other Admin API routes here, e.g.)
 // app.use("/api/settings", settingsRoutes);
