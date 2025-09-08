@@ -1,8 +1,11 @@
-import createApp from "@shopify/app-bridge";
-import { authenticatedFetch } from "@shopify/app-bridge-utils";
-import * as actions from "@shopify/app-bridge/actions";
+// admin-ui/src/api/client.js
+// Centralized API client for the Admin UI.
+// Works with App Bridge v4 by accepting an injected authenticated fetch
+// (from useAuthenticatedFetch) and falls back to window.fetch if not set.
 
+// ─────────────────────────────────────────────────────────────
 // Persist host/shop once per load to survive navigation
+// ─────────────────────────────────────────────────────────────
 (function persistParams() {
   try {
     const q = new URLSearchParams(window.location.search || "");
@@ -20,6 +23,9 @@ import * as actions from "@shopify/app-bridge/actions";
   } catch {}
 })();
 
+// ─────────────────────────────────────────────────────────────
+// URL/context helpers
+// ─────────────────────────────────────────────────────────────
 function getPersisted(key, storeKey) {
   const q = new URLSearchParams(window.location.search || "");
   const hashQ = (window.location.hash || "").split("?")[1] || "";
@@ -29,7 +35,6 @@ function getPersisted(key, storeKey) {
 
 function toMyshopifyDomain(raw) {
   const s = String(raw || "").trim().toLowerCase();
-  if (!s) return "";
   return s.endsWith(".myshopify.com") ? s : "";
 }
 
@@ -57,71 +62,84 @@ export function withContext(path) {
   return url.toString();
 }
 
-function requireEnvKey() {
-  const k = import.meta.env.VITE_SHOPIFY_API_KEY;
-  if (!k) throw new Error("VITE_SHOPIFY_API_KEY missing in admin-ui build");
-  return k;
+// ─────────────────────────────────────────────────────────────
+// Authenticated fetch injection (from useAuthenticatedFetch)
+// ─────────────────────────────────────────────────────────────
+let _authedFetch = null;
+
+/**
+ * Call this once in your app root:
+ *   const f = useAuthenticatedFetch();
+ *   useEffect(() => { setAuthedFetch(f); }, [f]);
+ */
+export function setAuthedFetch(fn) {
+  _authedFetch = typeof fn === "function" ? fn : null;
 }
 
-let _app, _fetchFn, _redirect;
-function getAppBridge() {
-  if (_app) return _app;
-  const host = getHost();
-  const apiKey = requireEnvKey();
-  if (!host) throw new Error("Missing host param (and none persisted)");
-  _app = createApp({ apiKey, host, forceRedirect: true });
-  _fetchFn = authenticatedFetch(_app);
-  return _app;
-}
-function getRedirect() {
-  getAppBridge();
-  if (!_redirect) _redirect = actions.Redirect.create(_app);
-  return _redirect;
-}
-
+// ─────────────────────────────────────────────────────────────
+// Core API
+// ─────────────────────────────────────────────────────────────
 export async function api(path, init = {}) {
-  getAppBridge();
   const finalUrl = withContext(path);
-  const isJSON = init.body && typeof init.body === "object" && !(init.body instanceof FormData);
-  const baseInit = isJSON
-    ? { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) }, body: JSON.stringify(init.body) }
-    : init;
-  const fetchInit = { cache: "no-store", ...baseInit };
-  const res = await _fetchFn(finalUrl, fetchInit);
+  const isJSON =
+    init.body && typeof init.body === "object" && !(init.body instanceof FormData);
 
+  const baseInit = isJSON
+    ? {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init.headers || {}),
+        },
+        body: JSON.stringify(init.body),
+      }
+    : init;
+
+  const fetchInit = { cache: "no-store", ...baseInit };
+  const f = _authedFetch || fetch;
+  const res = await f(finalUrl, fetchInit);
+
+  // Handle reauthorization headers from the backend
   if (res.status === 401 || res.status === 403) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
-      const absTo = to.startsWith("http") ? to : new URL(to, window.location.origin).toString();
+      // Make absolute and preserve host/shop context if needed
+      const abs = to.startsWith("http")
+        ? to
+        : new URL(to, window.location.origin).toString();
       try {
-        // IMPORTANT: pass the URL as a string, not { url }
-        getRedirect().dispatch(actions.Redirect.Action.REMOTE, absTo);
+        // In an embedded app, redirect the *top* window
+        window.top.location.href = abs;
       } catch {
-        try { window.top.location.href = absTo; } catch { window.location.href = absTo; }
+        window.location.href = abs;
       }
-      return new Promise(() => {}); // navigation takes over
+      // Give control to the navigation
+      return new Promise(() => {});
     }
   }
 
   const ct = res.headers.get("content-type") || "";
   const data = ct.includes("application/json") ? await res.json() : await res.text();
   if (!res.ok) {
-    const msg = (data && (data.error || data.message)) || (typeof data === "string" ? data : "") || "Request failed";
+    const msg =
+      (data && (data.error || data.message)) ||
+      (typeof data === "string" ? data : "") ||
+      "Request failed";
     throw new Error(msg);
   }
   return { data, status: res.status, ok: res.ok };
 }
 
-// RESTORED: Add convenience wrappers to the main 'api' function object
+// Convenience verbs
 api.get = (path, init) => api(path, { ...init, method: "GET" });
 api.post = (path, body, init) => api(path, { ...init, method: "POST", body });
 api.put = (path, body, init) => api(path, { ...init, method: "PUT", body });
 api.delete = (path, init) => api(path, { ...init, method: "DELETE" });
 
-/* ─────────────────────────────
- * RESTORED: Convenience wrappers for pages
- * ───────────────────────────── */
+// ─────────────────────────────────────────────────────────────
+// Feature-specific wrappers
+// ─────────────────────────────────────────────────────────────
 export const adminApi = {
   async getAnalyticsSummary({ days = 30, from, to } = {}) {
     const qs = new URLSearchParams();
@@ -132,20 +150,21 @@ export const adminApi = {
       qs.set("days", String(days));
     }
     const url = `/api/admin/analytics/overview${qs.toString() ? `?${qs.toString()}` : ""}`;
-    return api(url);
+    return api.get(url);
   },
+
   async getAnalyticsEvents({ limit, cursor } = {}) {
     const qs = new URLSearchParams();
     if (limit) qs.set("limit", String(limit));
     if (cursor) qs.set("cursor", cursor);
     const url = `/api/admin/analytics/logs${qs.toString() ? `?${qs.toString()}` : ""}`;
-    return api(url);
+    return api.get(url);
   },
 };
 
 export const billingApi = {
   async getPlan() {
-    return api(`/api/billing/plan`);
+    return api.get(`/api/billing/plan`);
   },
   async subscribe({ plan }) {
     return api(`/api/billing/subscribe`, {

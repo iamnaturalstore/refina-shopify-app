@@ -12,12 +12,12 @@ import {
   Spinner,
   InlineStack,
 } from "@shopify/polaris";
-import { useAuthenticatedFetch } from "@shopify/app-bridge-react";
+import api from "../api/client";
 
 // A simple page header that doesn't conflict with legacy title bars.
 function PageHeader({ title, primaryAction }) {
   return (
-    <div style={{ marginBottom: '1.6rem' }}>
+    <div style={{ marginBottom: "1.6rem" }}>
       <InlineStack align="space-between" blockAlign="center">
         <Text variant="headingXl" as="h1">
           {title}
@@ -38,8 +38,6 @@ function PageHeader({ title, primaryAction }) {
 }
 
 export default function Settings() {
-  const authedFetch = useAuthenticatedFetch();
-
   // --- State Management ---
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -48,10 +46,10 @@ export default function Settings() {
 
   // --- Form Fields ---
   const [brandName, setBrandName] = React.useState("");
-  const [category, setCategory] = React.useState("");
+  const [category, setCategory] = React.useState("Generic");
   const [tone, setTone] = React.useState("expert");
 
-  // Track original values to enable/disable Save button
+  // Track initial snapshot to determine "dirty"
   const [initialState, setInitialState] = React.useState(null);
   const isDirty = React.useMemo(() => {
     if (!initialState) return false;
@@ -63,36 +61,44 @@ export default function Settings() {
   }, [initialState, brandName, category, tone]);
 
   // --- Data Fetching and Saving ---
+
+  const normalizeLoaded = (json) => {
+    // Support both {settings:{...}} and flat {...}
+    const s = json?.settings && typeof json.settings === "object" ? json.settings : json || {};
+    return {
+      brandName: s.brandName || "",
+      category: s.category || "Generic",
+      tone: s.tone || "expert",
+    };
+  };
+
   const loadSettings = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     setSuccessBanner(null);
     try {
-      // Use admin endpoints you already mount server-side
-      const response = await authedFetch("/api/admin/settings");
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
+      // Prefer canonical route; fall back if a different router is mounted
+      let json;
+      try {
+        const { data } = await api.get("/api/admin/store-settings");
+        json = data;
+      } catch (e) {
+        // Fallback to legacy if store-settings isn't mounted
+        const { data } = await api.get("/api/admin/settings");
+        json = data;
       }
-      const json = await response.json();
-      const s = json?.settings || {};
-
-      const loaded = {
-        brandName: s.brandName || "",
-        category: s.category || "Generic",
-        tone: s.tone || "expert",
-      };
-
+      const loaded = normalizeLoaded(json);
       setBrandName(loaded.brandName);
       setCategory(loaded.category);
       setTone(loaded.tone);
       setInitialState(loaded);
     } catch (e) {
       console.error("Settings load failed", e);
-      setError("Failed to load your settings. Please reload the page.");
+      setError("Failed to load your settings. Please try reloading the page.");
     } finally {
       setLoading(false);
     }
-  }, [authedFetch]);
+  }, []);
 
   React.useEffect(() => {
     loadSettings();
@@ -104,25 +110,10 @@ export default function Settings() {
     setError(null);
     setSuccessBanner(null);
     try {
-      // Use the admin settings save route (POST or PUT per your router)
-      const response = await authedFetch("/api/admin/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings: { brandName, category, tone } }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-      const json = await response.json();
-      const s = json?.settings || {};
-
-      const saved = {
-        brandName: s.brandName || "",
-        category: s.category || "Generic",
-        tone: s.tone || "expert",
-      };
-
+      const payload = { brandName, category, tone };
+      // Server alias accepts POST /api/admin/store-settings and merges fields
+      const { data } = await api.post("/api/admin/store-settings", payload);
+      const saved = normalizeLoaded(data);
       setInitialState(saved);
       setBrandName(saved.brandName);
       setCategory(saved.category);
@@ -134,13 +125,14 @@ export default function Settings() {
     } finally {
       setSaving(false);
     }
-  }, [authedFetch, isDirty, brandName, category, tone]);
+  }, [isDirty, brandName, category, tone]);
 
   // --- Render ---
+
   if (loading) {
     return (
       <Card>
-        <div style={{ padding: '10rem' }}>
+        <div style={{ padding: "10rem" }}>
           <BlockStack gap="400" inlineAlign="center" blockAlign="center">
             <Spinner />
             <Text as="p">Loading settings...</Text>
@@ -151,7 +143,7 @@ export default function Settings() {
   }
 
   return (
-    <div style={{ padding: '1rem 1.6rem' }}>
+    <div style={{ padding: "1rem 1.6rem" }}>
       <PageHeader
         title="Settings"
         primaryAction={{

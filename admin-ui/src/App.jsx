@@ -10,6 +10,8 @@ import Analytics from "./pages/Analytics.jsx";
 import Settings from "./pages/Settings.jsx";
 import Billing from "./pages/Billing.jsx";
 
+// (no app-bridge-react hooks here)
+
 // ---------- Safe shells (no *.Section)
 function PageShell({ title, children }) {
   return (
@@ -106,6 +108,8 @@ function TitleBarSync() {
 
 // ---------- App
 export default function App() {
+
+
   return (
     <P.Frame>
       <HashRouter>
