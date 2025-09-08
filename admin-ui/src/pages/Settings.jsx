@@ -1,3 +1,4 @@
+//admin-ui/src/pages/Settings.jsx
 import * as React from "react";
 import {
   Layout,
