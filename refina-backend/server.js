@@ -11,6 +11,14 @@ import billingRoutes from "./routes/billing.js";
 import settingsRoutes from "./routes/settings.js";
 import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
+// NEW: Admin/BFF routes that the Admin UI uses
+import analyticsRoutes from "./routes/analytics.js";
+import adminSettingsRoutes from "./routes/adminSettings.js";     // Home & Settings pages
+import analyticsIngestRoutes from "./routes/analyticsIngest.js"; // event logs intake (if used by Admin)
+import privacyWebhooksRoutes from "./routes/privacyWebhooks.js"; // if your Admin UI surfaces privacy tools
+import semanticRoutes from "./routes/semantic.js";               // if used (search/semantic endpoints)
+
+
 // --- Config ------------------------------------------------------------------
 const PORT = parseInt(process.env.PORT || "8081", 10);
 const UI_DIST_PATH = `${process.cwd()}/admin-ui-dist`;
@@ -57,6 +65,18 @@ app.post("/api/webhooks", express.raw({ type: "application/json" }), async (req,
   }
 });
 
+// Put this before you mount /api routes
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/")) return next();
+  const t0 = Date.now();
+  res.on("finish", () => {
+    const ms = Date.now() - t0;
+    console.log(`[API] ${req.method} ${req.path} -> ${res.statusCode} ${ms}ms`);
+  });
+  next();
+});
+
+
 // --- Security Checkpoint for Shopify Admin API -------------------------------
 // All API routes below this point are for the Shopify Admin UI and require a
 // valid session. This middleware handles the 401 Unauthorized errors and
@@ -69,6 +89,14 @@ app.use(cors());
 
 app.use("/api/billing", billingRoutes);
 app.use("/api/settings", settingsRoutes);
+
+// NEW: mount the Admin/BFF routes the UI expects
+app.use("/api/admin/analytics", analyticsRoutes);
+app.use("/api/admin/settings", adminSettingsRoutes);
+app.use("/api/analytics/ingest", analyticsIngestRoutes);
+app.use("/api/privacy", privacyWebhooksRoutes);
+app.use("/api/semantic", semanticRoutes);
+
 
 // --- Admin UI CSP (embed in Shopify Admin) -----------------------------------
 // Apply frame-ancestors CSP to Admin UI pages/assets, but NOT to App Proxy/BFF.
