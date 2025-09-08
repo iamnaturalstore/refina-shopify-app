@@ -1,16 +1,15 @@
 import * as React from "react";
 import {
-  Page,
   Layout,
   Card,
   BlockStack,
-  InlineStack,
   Text,
   TextField,
   Select,
   Button,
   Banner,
   Spinner,
+  InlineStack,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { getSessionToken } from "@shopify/app-bridge-utils";
@@ -26,6 +25,30 @@ async function authenticatedFetch(app, url, options = {}) {
   return fetch(url, { ...options, headers });
 }
 
+// A simple page header that doesn't conflict with legacy title bars.
+function PageHeader({ title, primaryAction }) {
+  return (
+    <div style={{ marginBottom: '1.6rem' }}>
+      <InlineStack align="space-between" blockAlign="center">
+        <Text variant="headingXl" as="h1">
+          {title}
+        </Text>
+        {primaryAction && (
+           <Button
+              variant="primary"
+              onClick={primaryAction.onAction}
+              disabled={primaryAction.disabled}
+              loading={primaryAction.loading}
+            >
+              {primaryAction.content}
+            </Button>
+        )}
+      </InlineStack>
+    </div>
+  );
+}
+
+
 export default function Settings() {
   const app = useAppBridge();
 
@@ -33,7 +56,6 @@ export default function Settings() {
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState(null);
-  // We now use a banner for success messages instead of a Toast to avoid conflicts.
   const [successBanner, setSuccessBanner] = React.useState(null);
 
   // --- Form Fields ---
@@ -130,31 +152,28 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <Page title="Settings">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="200" inlineAlign="center" blockAlign="center" style={{padding: '2rem'}}>
-                <Spinner />
-                <Text as="p">Loading settings...</Text>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
-      </Page>
+        <Card>
+          <div style={{padding: '10rem'}}>
+            <BlockStack gap="400" inlineAlign="center" blockAlign="center">
+              <Spinner />
+              <Text as="p">Loading settings...</Text>
+            </BlockStack>
+          </div>
+        </Card>
     );
   }
 
   return (
-    <Page
-      title="Settings"
-      primaryAction={{
-        content: "Save changes",
-        onAction: saveSettings,
-        disabled: !isDirty || saving,
-        loading: saving,
-      }}
-    >
+    <div style={{padding: '1rem 1.6rem'}}>
+      <PageHeader
+        title="Settings"
+        primaryAction={{
+          content: "Save changes",
+          onAction: saveSettings,
+          disabled: !isDirty || saving,
+          loading: saving,
+        }}
+      />
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
@@ -209,7 +228,7 @@ export default function Settings() {
           </BlockStack>
         </Layout.Section>
       </Layout>
-    </Page>
+    </div>
   );
 }
 
