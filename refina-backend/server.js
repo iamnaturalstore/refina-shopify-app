@@ -81,13 +81,6 @@ app.use(
     maxAge: "365d",
   })
 );
-app.use(
-  "/assets",
-  express.static(join(UI_DIST_PATH, "assets"), {
-    immutable: true,
-    maxAge: "365d",
-  })
-);
 // 2) Serve the Admin SPA at /admin (and nested)
 app.get(["/admin", "/admin/*"], (_req, res) => {
   res.sendFile(join(UI_DIST_PATH, "index.html"));
