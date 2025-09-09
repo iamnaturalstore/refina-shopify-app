@@ -1,3 +1,4 @@
 # Minimal config for a Theme App Extension
 name = "Refina Launcher"
+uid = "df1fadfc-0aa2-0102-5072-0443220855f2ad661ec6"
 type = "theme_app_extension"

@@ -2,14 +2,13 @@
 
 client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
-application_url = "https://refina-app.onrender.com/embedded"   # ← change this
+application_url = "https://refina-app.onrender.com/embedded"
 embedded = true
 handle = "refina"
 
 [build]
 automatically_update_urls_on_dev = false
 dev_store_url = "refina-demo.myshopify.com"
-include_config_on_deploy = true
 
 [webhooks]
 api_version = "2024-10"
