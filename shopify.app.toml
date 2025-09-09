@@ -1,8 +1,8 @@
-# shopify.app.toml
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
-application_url = "https://refina-app.onrender.com/embedded"
+application_url = "https://refina-app.onrender.com/"
 embedded = true
 handle = "refina"
 
@@ -26,6 +26,7 @@ api_version = "2024-10"
   compliance_topics = [ "shop/redact" ]
 
 [access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products"
 
 [auth]
