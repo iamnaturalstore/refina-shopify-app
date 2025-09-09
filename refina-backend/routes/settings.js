@@ -1,5 +1,5 @@
 import express from "express";
-import { db } from "../firebaseAdmin.js";
+import { db } from "../lib/firestore.js";
 import { getDocSafe, setDocSafe, nowTs } from "../lib/firestore.js";
 
 const router = express.Router();

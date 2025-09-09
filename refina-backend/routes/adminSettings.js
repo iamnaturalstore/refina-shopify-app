@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
+import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 /* ───────── Store resolution ───────── */
 

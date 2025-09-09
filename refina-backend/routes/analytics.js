@@ -4,7 +4,7 @@
 //   GET /api/admin/analytics/overview
 
 import { Router } from "express";
-import { db } from "../bff/lib/firestore.js";
+import { db } from "../lib/firestore.js";
 import { FieldPath } from "firebase-admin/firestore";
 
 console.log("[analytics] router loaded (registering /analytics/logs & /analytics/overview)");

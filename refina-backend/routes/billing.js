@@ -3,7 +3,7 @@
 
 import express from "express";
 import shopify from "../shopify.js";
-import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
+import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
 

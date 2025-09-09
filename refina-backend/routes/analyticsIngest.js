@@ -7,7 +7,7 @@
 // - Do NOT persist storeId or createdAt fields
 
 import { Router } from "express";
-import { db, nowTs } from "../bff/lib/firestore.js";
+import { db, nowTs } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 const router = Router({ caseSensitive: false });

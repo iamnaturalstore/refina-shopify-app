@@ -9,7 +9,7 @@ const { createProxyMiddleware } = proxy;
 import shopify from "./shopify.js";
 import billingRoutes from "./routes/billing.js";
 import settingsRoutes from "./routes/settings.js";
-import { db, getDocSafe, setDocSafe, nowTs } from "./bff/lib/firestore.js";
+import { db, getDocSafe, setDocSafe, nowTs } from "./lib/firestore.js";
 
 // NEW: Admin/BFF routes that the Admin UI uses
 import analyticsRoutes from "./routes/analytics.js";

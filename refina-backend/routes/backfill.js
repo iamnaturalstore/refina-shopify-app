@@ -1,7 +1,7 @@
 // refina-backend/routes/backfill.js
 import express from "express";
 import shopify from "../shopify.js";
-import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
+import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 function productShapeFromShopify(raw, shop) {
   const price = Number(raw?.variants?.[0]?.price ?? NaN);
