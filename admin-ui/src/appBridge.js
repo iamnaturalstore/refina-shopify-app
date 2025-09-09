@@ -1,4 +1,3 @@
-// admin-ui/src/appBridge.js — FINAL (full-domain IDs only, with initAppBridge alias)
 import createApp from "@shopify/app-bridge";
 import * as actions from "@shopify/app-bridge/actions";
 
@@ -15,15 +14,12 @@ function requireEnvKey() {
   return k;
 }
 
-/**
- * Initializes App Bridge and returns { app, actions, shop, host, storeId }.
- * Guarantees:
- * - shop   = "<shop>.myshopify.com"
- * - storeId = shop (full domain; never short)
- * - host is present (derived from shop if missing)
- * No dev fallbacks; no short-ID derivations.
- */
-export default function appBridge() {
+let _app = null;
+let _context = null;
+
+function ensureAppBridge() {
+  if (_app) return _app;
+
   const qs = new URLSearchParams(window.location.search || "");
 
   let shop = (qs.get("shop") || "").trim().toLowerCase();
@@ -55,13 +51,21 @@ export default function appBridge() {
   if (!host) throw new Error("Missing 'host' in query/context");
 
   const apiKey = requireEnvKey();
-  const app = createApp({ apiKey, host, forceRedirect: true });
+  _app = createApp({ apiKey, host, forceRedirect: true });
 
   // Always return full-domain storeId (same as shop)
-  return { app, actions, shop, host, storeId: shop };
+  _context = { app: _app, actions, shop, host, storeId: shop };
+  return _app;
 }
 
-// 🔧 Compatibility alias for older imports
+/** Default export: the singleton App Bridge instance */
+const app = ensureAppBridge();
+export default app;
+
+/** Compatibility accessor for pages that expect the full context shape */
 export function initAppBridge() {
-  return appBridge();
+  ensureAppBridge();
+  return _context;
 }
+
+export { actions };
