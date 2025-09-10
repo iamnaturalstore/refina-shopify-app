@@ -65,7 +65,6 @@ export default function Billing() {
   const pollRef = React.useRef(null);
   const timeoutRef = React.useRef(null);
 
-  const proMeta = PLAN_DETAILS.pro;
   const premiumMeta = PLAN_DETAILS.premium;
 
   const loadPlan = React.useCallback(async () => {
@@ -134,7 +133,7 @@ export default function Billing() {
     };
   }, []);
 
-  async function subscribe(which /* "pro" | "premium" */) {
+  async function subscribe(which /* "premium" */) {
     try {
       setBusy(true); setError("");
       // CORRECTED: The billingApi wrapper still works, but we need its 'data' property
@@ -216,7 +215,7 @@ export default function Billing() {
         <BlockStack gap="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Billing</Text>
-            <Tooltip content={currentLevel === "pro" ? proMeta.tooltip : currentLevel === "premium" ? premiumMeta.tooltip : ""}>
+            <Tooltip content={currentLevel === "premium" ? premiumMeta.tooltip : ""}>
               <Badge tone={isPro || isPremium ? "success" : "subdued"}>
                 {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
               </Badge>
@@ -240,9 +239,6 @@ export default function Billing() {
           {error && <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
 
           <InlineStack gap="400" wrap>
-            <Box minWidth="320px" maxWidth="520px" width="100%">
-              <PlanTile id="pro" meta={proMeta} current={currentLevel} onChoose={subscribe} />
-            </Box>
             <Box minWidth="320px" maxWidth="520px" width="100%">
               <PlanTile id="premium" meta={premiumMeta} current={currentLevel} onChoose={subscribe} />
             </Box>
