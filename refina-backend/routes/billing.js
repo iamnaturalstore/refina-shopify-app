@@ -17,8 +17,10 @@ function absoluteAppUrl(req) {
 
 function normalizePlan(data) {
   if (!data) return null;
-  const level = String(data.level || "").toLowerCase(); // "free" | "pro" | "premium" | (legacy) "pro+"
+  let level = String(data.level || "").toLowerCase(); // "free" | "premium" | (legacy) "pro", "pro+"
   const status = data.status || "NONE";
+  // Map any legacy "pro" or "pro+" to "premium"
+  if (level === "pro" || level === "pro+") level = "premium";
   return { level, status };
 }
 
@@ -91,11 +93,8 @@ router.get("/plan", async (req, res) => {
     const longSnap = await plans.doc(shop).get();
     let raw = longSnap.exists ? longSnap.data() : null;
 
-    // Legacy migration: if "pro+" -> "premium"
+    // Legacy migration: map "pro" / "pro+" → "premium"
     let plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
-    if (plan && typeof plan.level === "string" && plan.level.toLowerCase() === "pro+") {
-      plan = { ...plan, level: "premium" };
-    }
 
     return res.json({ plan });
   } catch (err) {
@@ -141,14 +140,14 @@ router.get("/activated", async (req, res) => {
     const data = await gql(client, q);
     const subs = data?.currentAppInstallation?.activeSubscriptions || [];
 
+    // Treat any "premium" or legacy "pro/pro+" active sub as PREMIUM
     let level = "free";
     let status = "NONE";
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
       const st = s?.status || "UNKNOWN";
       if (st !== "ACTIVE") continue;
-      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
-      if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
+      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b|\bpro\b/.test(n)) { level = "premium"; status = st; break; }
     }
 
     await dbAdmin.collection("plans").doc(shop).set(
@@ -168,7 +167,7 @@ router.get("/activated", async (req, res) => {
 
 /**
  * POST /api/billing/subscribe
- * Body: { plan: "pro" | "premium" }  (also accepts legacy: "pro+", "pro plus", "pro_plus")
+ * Body: { plan: "premium" }  (also accepts legacy: "pro+", "pro plus", "pro_plus" → mapped to "premium")
  * Response: { confirmationUrl }
  */
 router.post("/subscribe", async (req, res) => {
@@ -196,17 +195,14 @@ router.post("/subscribe", async (req, res) => {
       .replace(/\s+/g, " ")
       .trim();
 
+    // Only "premium" is available. Legacy "pro+" maps to "premium". Plain "pro" is not available.
     const target =
-      /\bpremium\b/.test(normalized)
+      /\bpremium\b/.test(normalized) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
         ? "premium"
-        : /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
-        ? "premium" // legacy names map to premium
-        : /^pro\b/.test(normalized)
-        ? "pro"
         : "";
 
-    if (!["pro", "premium"].includes(target)) {
-      return res.status(400).json({ error: "Invalid plan" });
+    if (target !== "premium") {
+      return res.status(410).json({ error: "This plan is no longer available." });
     }
 
     const client = getGraphqlClient(offlineSession);
@@ -231,16 +227,10 @@ router.post("/subscribe", async (req, res) => {
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
       if (s.status !== "ACTIVE") continue; // Only consider active subscriptions
-      if (n.includes("premium") || n.includes("pro+") || n.includes("pro plus")) {
+      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\s*plus\b|\bpro\b/.test(n)) {
         currentLevel = "premium";
         currentSubId = s?.id || currentSubId;
         break;
-      }
-      if (n.includes("pro")) {
-        if (currentLevel !== "premium") {
-          currentLevel = "pro";
-          currentSubId = s?.id || currentSubId;
-        }
       }
     }
 
@@ -254,10 +244,8 @@ router.post("/subscribe", async (req, res) => {
     const shopData = await gql(client, shopQ);
     let currencyCode = (shopData?.shop?.currencyCode || "USD").toString().toUpperCase();
 
-    // 3) Plan catalog (align with UI: Pro $19, Premium $49)
-    const PLAN = target === "premium"
-      ? { name: "Premium", amount: "49.00" }
-      : { name: "Pro",      amount: "19.00" };
+    // 3) Plan catalog (Premium only)
+    const PLAN = { name: "Premium", amount: "49.00" };
 
     // 4) Return URL (activation handler updates Firestore, then redirects to Admin UI)
     const rawHost = process.env.HOST || absoluteAppUrl(req);
@@ -267,12 +255,10 @@ router.post("/subscribe", async (req, res) => {
     const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(hostParam)}`;
 
     // 5) Create subscription with replacementBehavior:
-    //    - Upgrade: APPLY_IMMEDIATELY
-    //    - Downgrade: APPLY_ON_NEXT_BILLING_CYCLE
+    //    Upgrades apply immediately (only premium is available now).
     const amt = PLAN.amount;
     const cc = currencyCode.replace(/[^A-Z]/g, "");
-    const isUpgrade = target === "premium";
-    const replacementBehavior = isUpgrade ? "APPLY_IMMEDIATELY" : "APPLY_ON_NEXT_BILLING_CYCLE";
+    const replacementBehavior = "APPLY_IMMEDIATELY";
 
     const createMutation = `
       mutation AppSubscribe(
@@ -416,14 +402,14 @@ router.post("/sync", async (req, res) => {
     const data = await gql(client, query);
     const subs = data?.currentAppInstallation?.activeSubscriptions || [];
 
+    // Treat any "premium" or legacy "pro/pro+" active sub as PREMIUM
     let level = "free";
     let status = "NONE";
     for (const s of subs) {
       const n = String(s?.name || "").toLowerCase();
       const st = s?.status || "UNKNOWN";
       if (st !== "ACTIVE") continue;
-      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b/.test(n)) { level = "premium"; status = st; break; }
-      if (/\bpro\b/.test(n)) { if (level !== "premium") { level = "pro"; status = st; } }
+      if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b|\bpro\b/.test(n)) { level = "premium"; status = st; break; }
     }
 
     const payload = { level, status, updatedAt: FieldValue.serverTimestamp() };

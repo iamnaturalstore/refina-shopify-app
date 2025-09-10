@@ -22,17 +22,6 @@ const PENDING_KEY = "refina:billing:pending";
 
 // ── Plan meta (EDIT here to change prices/blurbs) ────────────────────────
 const PLAN_DETAILS = {
-  pro: {
-    label: "Pro",
-    priceMonthly: "$19/mo",
-    priceAnnualNote: "or $190/yr (~2 mo free)",
-    tooltip: "Pro — Core AI • 1k queries/mo • email support",
-    features: [
-      "Core AI recommendations",
-      "Up to 1k queries / month",
-      "Email support",
-    ],
-  },
   premium: {
     label: "Premium",
     priceMonthly: "$49/mo",
@@ -51,13 +40,13 @@ const PLAN_DETAILS = {
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
   if (/\bpremium\b/.test(v) || /\bpro\s*\+|\bpro\W*plus\b/.test(v)) return "premium";
-  if (/\bpro\b/.test(v)) return "pro";
+  if (/\bpro\b/.test(v)) return "premium";
   return "free";
 }
 function labelFromLevel(level) {
   const v = (level || "").toLowerCase();
   if (v === "premium" || v === "pro+") return "Premium";
-  if (v === "pro") return "Pro";
+  if (v === "pro") return "Premium";
   return "Free";
 }
 function parsePlanResponse(jsonResponse) {
@@ -164,7 +153,7 @@ export default function Billing() {
   const currentLevel = plan ? normalizeLevel(plan.level) : null;
   const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
   const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
-  const isPro = currentLevel === "pro";
+  const isPro = currentLevel === "premium";
   const isPremium = currentLevel === "premium";
 
   if (loading) {
