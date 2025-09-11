@@ -285,6 +285,7 @@ router.post("/subscribe", async (req, res) => {
       name: PLAN.name,
       returnUrl,
       test: process.env.NODE_ENV !== "production",
+      trialDays: 7,
       lineItems: [{
         plan: { appRecurringPricingDetails: { price: { amount: amt, currencyCode: cc }, interval: "EVERY_30_DAYS" } }
       }],
