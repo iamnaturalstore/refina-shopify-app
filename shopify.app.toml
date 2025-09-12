@@ -4,6 +4,9 @@ client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
 handle = "refina"
 
+application_url = "https://refina-app.onrender.com/embedded"
+embedded = true
+
 [build]
 automatically_update_urls_on_dev = false
 dev_store_url = "refina-demo.myshopify.com"
@@ -28,7 +31,8 @@ scopes = "read_products"
 
 [auth]
 redirect_urls = [
-  "https://refina-app.onrender.com/api/auth/callback"
+  "https://refina-app.onrender.com/api/auth/callback",
+  "https://refina-app.onrender.com/auth/callback"
 ]
 
 [app_proxy]
@@ -38,7 +42,3 @@ prefix = "apps"
 
 [pos]
 embedded = false
-
-[app]
-application_url = "https://refina-app.onrender.com/embedded"
-embedded = true
