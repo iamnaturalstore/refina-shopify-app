@@ -38,14 +38,14 @@ router.get("/callback", async (req, res) => {
       rawResponse: res,
     });
 
-    // Optional: you can inspect session.shop / accessToken here.
     const shop = session.shop;
     const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
 
-    // Send merchant to embedded Admin UI (or /embedded if you prefer)
+    // Land on the app handle (/apps/refina) and instruct Admin to load /admin-ui/ inside the app
+    const appLoadPath = encodeURIComponent("/admin-ui/");
     return res.redirect(
       302,
-      `/admin-ui/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`
+      `/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&appLoadPath=${appLoadPath}`
     );
   } catch (err) {
     console.error("OAuth callback failed:", err);
