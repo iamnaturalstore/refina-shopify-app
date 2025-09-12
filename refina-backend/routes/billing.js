@@ -271,13 +271,23 @@ router.get("/activated", async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
+    // Deep-link to your SPA route (/admin-ui/...) while landing on the app handle (/apps/refina)
     const hostParam = String(req.query.host || "");
-    const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+    const appLoadPath = encodeURIComponent("/admin-ui/?billing=success");
+    const redirect = `/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(
+      hostParam
+    )}&appLoadPath=${appLoadPath}`;
 
     return res.redirect(303, redirect);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
-    const fallback = `/admin-ui/?billing=error`;
+    // Fallback: still land on the app handle and deep-link to an error state inside your SPA
+    const shopParam = String(req.query?.shop || "");
+    const hostParam = String(req.query?.host || "");
+    const appLoadPath = encodeURIComponent("/admin-ui/?billing=error");
+    const fallback = `/?shop=${encodeURIComponent(shopParam)}&host=${encodeURIComponent(
+      hostParam
+    )}&appLoadPath=${appLoadPath}`;
     return res.redirect(303, fallback);
   }
 });
