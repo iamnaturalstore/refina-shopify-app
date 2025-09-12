@@ -121,26 +121,26 @@ export async function api(path, init = {}) {
   const res = await f(finalUrl, fetchInit);
 
   // Handle reauthorization headers from the backend
-  if (res.status === 401 || res.status === 403) {
-    const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
-    const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
-    if (need && to) {
-      // Append ?shop=... if the server didn't include it
-      let abs = to.startsWith("http")
-        ? to
-        : new URL(to, window.location.origin).toString();
-      const shop = getShop();
-      if (shop && !/[?&]shop=/.test(abs)) {
-        abs += (abs.includes("?") ? "&" : "?") + `shop=${encodeURIComponent(shop)}`;
-      }
-      try {
-        window.top.location.href = abs; // embedded app: redirect top
-      } catch {
-        window.location.href = abs;
-      }
-      return new Promise(() => {}); // hand off to navigation
-    }
+if (res.status === 401 || res.status === 403) {
+  const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
+  const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
+  if (need && to) {
+    // Build absolute URL
+    const base = window.location.origin;
+    const u = to.startsWith("http") ? new URL(to) : new URL(to, base);
+
+    // 🔑 Ensure we carry shop/host so /api/auth can start OAuth reliably
+    const shop = getShop();
+    const host = getPersisted("host", "shopify-host");
+    if (shop && !u.searchParams.get("shop")) u.searchParams.set("shop", shop);
+    if (host && !u.searchParams.get("host")) u.searchParams.set("host", host);
+
+    try { window.top.location.href = u.toString(); } catch { window.location.href = u.toString(); }
+    // Hand off to navigation so callers don't try to parse the 401
+    return new Promise(() => {});
   }
+}
+
 
   const ct = res.headers.get("content-type") || "";
   const data = ct.includes("application/json") ? await res.json() : await res.text();

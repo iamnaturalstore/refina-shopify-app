@@ -225,20 +225,32 @@ router.get("/plan", async (req, res) => {
     }
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
-    const raw = snap.exists ? snap.data() : null;
-    const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
-    return res.json({ plan });
-  } catch (err) {
-    if (err?.status === 401) {
-      res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
-    }
-    console.error("GET /api/billing/plan error", err);
-    return res.status(500).json({ error: "Plan lookup failed" });
+const raw = snap.exists ? snap.data() : null;
+const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
+return res.json({ plan });
+} catch (err) {
+  if (err?.status === 401 || err?.response?.code === 401) {
+    // Build a fully-qualified /api/auth URL and append shop/host
+    const shopParam = String(req.query?.shop || "").toLowerCase();
+    const hostParam = String(req.query?.host || "");
+
+    const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+    let base = String(rawBase).replace(/\/+$/, "");
+    if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+
+    const authUrl = new URL("/api/auth", base);
+    if (shopParam) authUrl.searchParams.set("shop", shopParam);
+    if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+    return res
+      .status(401)
+      .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+      .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+      .send("reauthorize");
   }
+  console.error("GET /api/billing/plan error", err);
+  return res.status(500).json({ error: "Plan lookup failed" });
+}
 });
 
 /** GET /api/billing/activated → reads activeSubscriptions, writes Firestore, redirects back to Admin UI */
