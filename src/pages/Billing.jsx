@@ -143,7 +143,7 @@ export default function Billing() {
                 onChange={() => setChosen("pro")}
               />
               <RadioButton
-                label="Pro+ • $39/mo"
+                label="Pro+ • $49/mo"
                 checked={chosen === "pro+"}
                 id="r-pro-plus"
                 name="plan"
