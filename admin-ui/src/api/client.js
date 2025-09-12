@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────
 import { authenticatedFetch } from "@shopify/app-bridge-utils";
 import app from "../appBridge"; // must export a configured App Bridge instance
+import { Redirect } from "@shopify/app-bridge/actions";
 
 // ─────────────────────────────────────────────────────────────
 // Persist host/shop once per load to survive navigation
@@ -126,24 +127,29 @@ if (res.status === 401 || res.status === 403) {
   let to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
 
   if (need && to) {
-    // Upgrade to absolute URL and always append shop/host
+    // Upgrade to absolute URL + always append shop/host
     const base = window.location.origin;
     const u = to.startsWith("http") ? new URL(to) : new URL(to, base);
 
-    // pull persisted params from our helper
-    const shop = getShop();                           // e.g. refina-demo.myshopify.com
-    const host = getPersisted("host", "shopify-host"); // base64 host from Shopify Admin
-
+    const shop = getShop(); // e.g. refina-demo.myshopify.com
+    const host = getPersisted("host", "shopify-host");
     if (shop && !u.searchParams.get("shop")) u.searchParams.set("shop", shop);
     if (host && !u.searchParams.get("host")) u.searchParams.set("host", host);
 
-    // 🔎 helpful console so you can see it fire once
-    // eslint-disable-next-line no-console
-    console.log("[api] Reauthorize →", u.toString());
+    // Try App Bridge REMOTE redirect first (most reliable in embedded apps)
+    try {
+      if (app) {
+        const redirect = Redirect.create(app);
+        redirect.dispatch(Redirect.Action.REMOTE, u.toString());
+      } else {
+        window.top.location.href = u.toString();
+      }
+    } catch {
+      // Hard fallback
+      try { window.top.location.href = u.toString(); } catch { window.location.href = u.toString(); }
+    }
 
-    try { window.top.location.href = u.toString(); } catch { window.location.href = u.toString(); }
-
-    // Hand off to navigation so callers won't continue on a 401
+    // Stop the caller from continuing on a 401
     return new Promise(() => {});
   }
 }
