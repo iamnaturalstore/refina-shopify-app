@@ -123,20 +123,27 @@ export async function api(path, init = {}) {
   // Handle reauthorization headers from the backend
 if (res.status === 401 || res.status === 403) {
   const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
-  const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
+  let to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
+
   if (need && to) {
-    // Build absolute URL
+    // Upgrade to absolute URL and always append shop/host
     const base = window.location.origin;
     const u = to.startsWith("http") ? new URL(to) : new URL(to, base);
 
-    // 🔑 Ensure we carry shop/host so /api/auth can start OAuth reliably
-    const shop = getShop();
-    const host = getPersisted("host", "shopify-host");
+    // pull persisted params from our helper
+    const shop = getShop();                           // e.g. refina-demo.myshopify.com
+    const host = getPersisted("host", "shopify-host"); // base64 host from Shopify Admin
+
     if (shop && !u.searchParams.get("shop")) u.searchParams.set("shop", shop);
     if (host && !u.searchParams.get("host")) u.searchParams.set("host", host);
 
+    // 🔎 helpful console so you can see it fire once
+    // eslint-disable-next-line no-console
+    console.log("[api] Reauthorize →", u.toString());
+
     try { window.top.location.href = u.toString(); } catch { window.location.href = u.toString(); }
-    // Hand off to navigation so callers don't try to parse the 401
+
+    // Hand off to navigation so callers won't continue on a 401
     return new Promise(() => {});
   }
 }
