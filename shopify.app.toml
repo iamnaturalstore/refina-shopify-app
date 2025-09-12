@@ -2,8 +2,6 @@
 
 client_id = "8b7905126e30769a20c27b4cdd775722"
 name = "refina"
-application_url = "https://refina-app.onrender.com/"
-embedded = true
 handle = "refina"
 
 [build]
@@ -15,23 +13,21 @@ api_version = "2024-10"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
-  compliance_topics = [ "customers/data_request" ]
+  compliance_topics = ["customers/data_request"]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/redact"
-  compliance_topics = [ "customers/redact" ]
+  compliance_topics = ["customers/redact"]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/shop/redact"
-  compliance_topics = [ "shop/redact" ]
+  compliance_topics = ["shop/redact"]
 
 [access_scopes]
-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products"
 
 [auth]
 redirect_urls = [
-  "https://refina-app.onrender.com/auth/callback",
   "https://refina-app.onrender.com/api/auth/callback"
 ]
 
@@ -42,3 +38,7 @@ prefix = "apps"
 
 [pos]
 embedded = false
+
+[app]
+application_url = "https://refina-app.onrender.com/embedded"
+embedded = true
