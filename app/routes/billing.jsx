@@ -51,7 +51,7 @@ export default function Billing() {
 
   const plans = [
     { key: "pro",     label: "Pro ($19/mo)" },
-    { key: "premium", label: "Premium ($39/mo)" },
+    { key: "premium", label: "Premium ($49/mo)" },
   ];
 
   return (
