@@ -57,8 +57,6 @@ export function withContext(path) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Authenticated fetch (App Bridge) + one-shot reauth guard
-// ─────────────────────────────────────────────────────────────
 let _authedFetch = null;
 let __reauthInFlight = false;
 
@@ -127,12 +125,10 @@ export async function api(path, init = {}) {
       if (shop && !u.searchParams.get("shop")) u.searchParams.set("shop", shop);
       if (host && !u.searchParams.get("host")) u.searchParams.set("host", host);
 
-      // Breadcrumb so you can confirm it fires exactly once
       // eslint-disable-next-line no-console
       console.log("[api] Reauthorize →", u.toString());
 
       forceTopFrameRedirect(u.toString());
-      // Hand off to navigation so callers don't continue on a 401
       return new Promise(() => {});
     }
   }
@@ -176,12 +172,25 @@ export const adminApi = {
 };
 
 export const billingApi = {
-  async getPlan() {
-    // Legacy helper (kept for callers that still import billingApi)
-    return api.get(`/api/billing/plan`);
+  async getPlan({ fresh } = {}) {
+    const url = fresh ? `/api/billing/plan?fresh=1` : `/api/billing/plan`;
+    return api.get(url);
   },
-  async subscribe({ plan }) {
-    return api(`/api/billing/subscribe`, { method: "POST", body: { plan } });
+  async upgrade({ returnUrl } = {}) {
+    return api(`/api/billing/upgrade`, { method: "POST", body: { returnUrl } });
+  },
+  async downgrade() {
+    return api(`/api/billing/downgrade`, { method: "POST", body: {} });
+  },
+  async status() {
+    return api.get(`/api/billing/status`);
+  },
+  async sync() {
+    return api(`/api/billing/sync`, { method: "POST", body: {} });
+  },
+  // Legacy (kept for backwards compat; not used by the new Billing page)
+  async subscribe({ plan, returnUrl } = {}) {
+    return api(`/api/billing/subscribe`, { method: "POST", body: { plan, returnUrl } });
   },
 };
 

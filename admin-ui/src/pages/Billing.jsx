@@ -16,6 +16,8 @@ import {
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
 import { api, billingApi } from "../api/client.js";
+import app from "../appBridge";
+import { Redirect } from "@shopify/app-bridge/actions";
 
 const PENDING_KEY = "refina:billing:pending";
 
@@ -99,6 +101,8 @@ export default function Billing() {
       showToast("Plan updated 🎉");
       u.searchParams.delete("billing");
       window.history.replaceState({}, "", u.toString());
+      // Ensure a fresh reflect immediately after return
+      loadPlan();
     }
     const onVis = () => { if (document.visibilityState === "visible") loadPlan(); };
     document.addEventListener("visibilitychange", onVis);
@@ -117,6 +121,8 @@ export default function Billing() {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       setSyncing(false);
       showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
+      // Final fresh read to capture any delayed Shopify proration updates
+      loadPlan();
       return;
     }
     if (!syncing) {
@@ -141,11 +147,18 @@ export default function Billing() {
       setBusy(true); setError("");
       const sep = window.location.href.includes("?") ? "&" : "?";
       const returnUrl = `${window.location.href}${sep}billing=success`;
-      const { data: json } = await billingApi.subscribe({ plan: which, returnUrl });
+      // Use the upgrade endpoint; backend reads returnUrl explicitly here
+      const { data: json } = await billingApi.upgrade({ returnUrl });
       const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
-      try { window.top.location.href = url; } catch { window.location.href = url; }
+      // App Bridge top-frame redirect (canonical for embedded apps)
+      try {
+        const redirect = Redirect.create(app);
+        redirect.dispatch(Redirect.Action.REMOTE, url);
+      } catch {
+        try { window.top.location.href = url; } catch { window.location.href = url; }
+      }
     } catch (e) {
       console.error("[Billing] Upgrade failed:", e);
       setError(e?.message || "Upgrade failed");
@@ -159,8 +172,10 @@ export default function Billing() {
       setBusy(true); setError("");
       const { data } = await api.post("/api/billing/downgrade", {});
       if (!data?.ok && !data?.canceled) throw new Error(data?.error || "Downgrade failed");
-      showToast("Downgrade complete. You are now on the Free plan.");
+      // Force a fresh reflect of current plan
+      try { await api.post("/api/billing/sync", {}); } catch {}
       await loadPlan();
+      showToast("Downgrade complete. You are now on the Free plan.");
     } catch (e) {
       console.error("[Billing] Downgrade failed:", e);
       setError(e?.message || "Downgrade failed");

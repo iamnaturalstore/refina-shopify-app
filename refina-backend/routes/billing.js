@@ -42,6 +42,13 @@ async function resolveShopContext(req, _res) {
       if (!shop && m2?.[1]) shop = `${m2[1].toLowerCase()}.myshopify.com`;
     } catch { /* no-op */ }
   }
+  // NEW: final fallback via header
+  if (!shop) {
+    const hdr = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "").toLowerCase().trim();
+    if (hdr.endsWith(".myshopify.com")) {
+      shop = hdr;
+    }
+  }
 
   if (!shop) {
     const err = new Error("Missing shop context");
@@ -225,32 +232,32 @@ router.get("/plan", async (req, res) => {
     }
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
-const raw = snap.exists ? snap.data() : null;
-const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
-return res.json({ plan });
-} catch (err) {
-  if (err?.status === 401 || err?.response?.code === 401) {
-    // Build a fully-qualified /api/auth URL and append shop/host
-    const shopParam = String(req.query?.shop || "").toLowerCase();
-    const hostParam = String(req.query?.host || "");
+    const raw = snap.exists ? snap.data() : null;
+    const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
+    return res.json({ plan });
+  } catch (err) {
+    if (err?.status === 401 || err?.response?.code === 401) {
+      // Build a fully-qualified /api/auth URL and append shop/host
+      const shopParam = String(req.query?.shop || "").toLowerCase();
+      const hostParam = String(req.query?.host || "");
 
-    const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-    let base = String(rawBase).replace(/\/+$/, "");
-    if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+      let base = String(rawBase).replace(/\/+$/, "");
+      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
 
-    const authUrl = new URL("/api/auth", base);
-    if (shopParam) authUrl.searchParams.set("shop", shopParam);
-    if (hostParam) authUrl.searchParams.set("host", hostParam);
+      const authUrl = new URL("/api/auth", base);
+      if (shopParam) authUrl.searchParams.set("shop", shopParam);
+      if (hostParam) authUrl.searchParams.set("host", hostParam);
 
-    return res
-      .status(401)
-      .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-      .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-      .send("reauthorize");
+      return res
+        .status(401)
+        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+        .send("reauthorize");
+    }
+    console.error("GET /api/billing/plan error", err);
+    return res.status(500).json({ error: "Plan lookup failed" });
   }
-  console.error("GET /api/billing/plan error", err);
-  return res.status(500).json({ error: "Plan lookup failed" });
-}
 });
 
 /** GET /api/billing/activated → reads activeSubscriptions, writes Firestore, redirects back to Admin UI */
@@ -347,6 +354,7 @@ router.post("/subscribe", async (req, res) => {
     return res.status(400).json({ error: "Subscription creation failed", userErrors });
   } catch (err) {
     if (err?.status === 401) {
+      // Preserve legacy behavior here (unchanged)
       res
         .status(401)
         .set("Access-Control-Allow-Origin", "*")
@@ -377,13 +385,21 @@ router.post("/sync", async (req, res) => {
     return res.json({ ok: true, level, status });
   } catch (err) {
     if (err?.status === 401) {
-      res
+      // NEW: absolute, parameterized reauth hint
+      const shopParam = String(req.query?.shop || "").toLowerCase();
+      const hostParam = String(req.query?.host || "");
+      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+      let base = String(rawBase).replace(/\/+$/, "");
+      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+      const authUrl = new URL("/api/auth", base);
+      if (shopParam) authUrl.searchParams.set("shop", shopParam);
+      if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+      return res
         .status(401)
-        .set("Access-Control-Allow-Origin", "*")
-        .set("Access-Control-Allow-Headers", "*")
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+        .send("reauthorize");
     }
     console.error("POST /api/billing/sync error", err);
     return res.status(500).json({ error: "Sync failed" });
@@ -402,11 +418,21 @@ router.get("/status", async (req, res) => {
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
     if (err?.status === 401) {
-      res
+      // NEW: absolute, parameterized reauth hint
+      const shopParam = String(req.query?.shop || "").toLowerCase();
+      const hostParam = String(req.query?.host || "");
+      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+      let base = String(rawBase).replace(/\/+$/, "");
+      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+      const authUrl = new URL("/api/auth", base);
+      if (shopParam) authUrl.searchParams.set("shop", shopParam);
+      if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+      return res
         .status(401)
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+        .send("reauthorize");
     }
     console.error("GET /api/billing/status error", err);
     return res.status(500).json({ error: "Status failed" });
@@ -476,11 +502,21 @@ router.post("/upgrade", async (req, res) => {
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
     if (err?.status === 401) {
-      res
+      // NEW: absolute, parameterized reauth hint
+      const shopParam = String(req.query?.shop || "").toLowerCase();
+      const hostParam = String(req.query?.host || "");
+      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+      let base = String(rawBase).replace(/\/+$/, "");
+      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+      const authUrl = new URL("/api/auth", base);
+      if (shopParam) authUrl.searchParams.set("shop", shopParam);
+      if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+      return res
         .status(401)
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+        .send("reauthorize");
     }
     console.error("POST /api/billing/upgrade error", err);
     return res.status(500).json({ error: "Upgrade failed" });
@@ -515,11 +551,21 @@ router.post("/downgrade", async (req, res) => {
     return res.json({ ok: true, canceled });
   } catch (err) {
     if (err?.status === 401) {
-      res
+      // NEW: absolute, parameterized reauth hint
+      const shopParam = String(req.query?.shop || "").toLowerCase();
+      const hostParam = String(req.query?.host || "");
+      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+      let base = String(rawBase).replace(/\/+$/, "");
+      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+      const authUrl = new URL("/api/auth", base);
+      if (shopParam) authUrl.searchParams.set("shop", shopParam);
+      if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+      return res
         .status(401)
         .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
+        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+        .send("reauthorize");
     }
     console.error("POST /api/billing/downgrade error", err);
     return res.status(500).json({ error: "Downgrade failed" });
