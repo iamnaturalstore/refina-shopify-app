@@ -15,7 +15,7 @@ import {
   Spinner,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { api } from "../api/client.js"; // <- keep api wrapper; remove billingApi import
+import { api, billingApi } from "../api/client.js";
 
 const PENDING_KEY = "refina:billing:pending";
 
@@ -49,12 +49,8 @@ function labelFromLevel(level) {
   return "Free";
 }
 function parsePlanResponse(jsonResponse) {
-  // Fallback helper if you ever want to read your legacy /api/billing/plan shape.
   const p = jsonResponse?.plan || jsonResponse || {};
-  return {
-    level: normalizeLevel(p.level),
-    status: (p.status || p.state || "unknown").toString(),
-  };
+  return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
 }
 
 export default function Billing() {
@@ -64,42 +60,28 @@ export default function Billing() {
   const [error, setError] = React.useState("");
   const [toast, setToast] = React.useState("");
   const [syncing, setSyncing] = React.useState(false);
-  const [subId, setSubId] = React.useState(null);
   const pollRef = React.useRef(null);
   const timeoutRef = React.useRef(null);
 
   const premiumMeta = PLAN_DETAILS.premium;
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3000);
-  };
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
   const loadPlan = React.useCallback(async () => {
     setError("");
     setLoading(true);
     try {
-      // Canonical status: GraphQL currentAppInstallation.activeSubscriptions via backend
-      const { data } = await api.get("/api/billing/status");
-      const subs = Array.isArray(data?.activeSubscriptions)
-        ? data.activeSubscriptions
-        : [];
-      const active = subs.find(
-        (s) => String(s.status || "").toUpperCase() === "ACTIVE"
-      );
-      setSubId(active?.id || null);
-      setPlan({
-        level: active ? "premium" : "free",
-        status: active ? "ACTIVE" : "NONE",
-      });
+      // Canonical: read Firestore-backed plan, forcing a fresh sync with Shopify
+      const { data } = await billingApi.getPlan({ fresh: true });
+      setPlan(parsePlanResponse(data));
     } catch (e) {
-      console.error("[Billing] /status failed, falling back:", e);
-      // Optional: if you want a soft fallback to your legacy /api/billing/plan:
+      console.error("[Billing] /api/billing/plan?fresh=1 failed:", e);
+      // Soft fallback (non-fresh)
       try {
-        const { data: json } = await api.get("/api/billing/plan");
+        const { data: json } = await billingApi.getPlan({ fresh: false });
         setPlan(parsePlanResponse(json));
       } catch (e2) {
-        console.error("[Billing] /plan fallback failed:", e2);
+        console.error("[Billing] /api/billing/plan fallback failed:", e2);
         setError("Failed to load current plan.");
         setPlan(null);
       }
@@ -110,37 +92,27 @@ export default function Billing() {
 
   React.useEffect(() => {
     loadPlan();
-
     // If we just returned from the Shopify confirmation page
     const u = new URL(window.location.href);
     if (u.searchParams.get("billing") === "success") {
-      try {
-        localStorage.removeItem(PENDING_KEY);
-      } catch {}
+      try { localStorage.removeItem(PENDING_KEY); } catch {}
       showToast("Plan updated 🎉");
-      // Clean URL
       u.searchParams.delete("billing");
       window.history.replaceState({}, "", u.toString());
     }
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") loadPlan();
-    };
+    const onVis = () => { if (document.visibilityState === "visible") loadPlan(); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
 
   React.useEffect(() => {
-    // Polling loop while awaiting webhook/Shopify propagation
     const wantRaw = localStorage.getItem(PENDING_KEY);
     if (!wantRaw) return;
     const want = normalizeLevel(wantRaw);
     const have = plan ? normalizeLevel(plan.level) : null;
 
     if (have && have === want) {
-      try {
-        localStorage.removeItem(PENDING_KEY);
-      } catch {}
+      try { localStorage.removeItem(PENDING_KEY); } catch {}
       if (pollRef.current) clearInterval(pollRef.current);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       setSyncing(false);
@@ -165,31 +137,15 @@ export default function Billing() {
   }, []);
 
   async function subscribe(which /* "premium" */) {
-    // Creates sub and redirects to Shopify confirmation page (top frame)
     try {
-      setBusy(true);
-      setError("");
-      // Add a success flag to help toast after return
+      setBusy(true); setError("");
       const sep = window.location.href.includes("?") ? "&" : "?";
       const returnUrl = `${window.location.href}${sep}billing=success`;
-      const { data: json } = await api.post("/api/billing/upgrade", {
-        plan: which,
-        returnUrl,
-      });
-      const url =
-        json?.confirmationUrl ||
-        json?.url ||
-        json?.confirmation_url ||
-        json?.redirectUrl;
+      const { data: json } = await billingApi.subscribe({ plan: which, returnUrl });
+      const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
-      try {
-        localStorage.setItem(PENDING_KEY, which);
-      } catch {}
-      try {
-        window.top.location.href = url;
-      } catch {
-        window.location.href = url;
-      }
+      try { localStorage.setItem(PENDING_KEY, which); } catch {}
+      try { window.top.location.href = url; } catch { window.location.href = url; }
     } catch (e) {
       console.error("[Billing] Upgrade failed:", e);
       setError(e?.message || "Upgrade failed");
@@ -199,17 +155,10 @@ export default function Billing() {
   }
 
   async function downgrade() {
-    // Cancels active sub (prorate) and flips plan to Free on our side
     try {
-      setBusy(true);
-      setError("");
-      const { data } = await api.post("/api/billing/downgrade", {
-        subscriptionId: subId || null,
-        prorate: true,
-      });
-      if (!data?.ok && !data?.canceled) {
-        throw new Error(data?.error || "Downgrade failed");
-      }
+      setBusy(true); setError("");
+      const { data } = await api.post("/api/billing/downgrade", {});
+      if (!data?.ok && !data?.canceled) throw new Error(data?.error || "Downgrade failed");
       showToast("Downgrade complete. You are now on the Free plan.");
       await loadPlan();
     } catch (e) {
@@ -227,12 +176,7 @@ export default function Billing() {
 
   if (loading) {
     return (
-      <Box padding="400">
-        <InlineStack gap="200" blockAlign="center">
-          <Spinner size="small" />
-          <Text as="p">Loading billing details...</Text>
-        </InlineStack>
-      </Box>
+      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading billing details...</Text></InlineStack></Box>
     );
   }
 
@@ -243,17 +187,13 @@ export default function Billing() {
         <BlockStack gap="300">
           <InlineStack align="space-between" blockAlign="center">
             <InlineStack gap="200" blockAlign="center">
-              <Text as="h3" variant="headingLg">
-                {meta.label}
-              </Text>
+              <Text as="h3" variant="headingLg">{meta.label}</Text>
               {isCurrent && <Badge tone="success">Current</Badge>}
               {!isCurrent && meta.ribbon && <Badge tone="attention">{meta.ribbon}</Badge>}
             </InlineStack>
             <BlockStack gap="050" align="end">
               <Tooltip content={meta.tooltip}>
-                <Text as="span" variant="headingLg">
-                  {meta.priceMonthly}
-                </Text>
+                <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
               </Tooltip>
               {meta.priceAnnualNote && (
                 <Text as="span" tone="subdued" variant="bodySm">
@@ -267,9 +207,7 @@ export default function Billing() {
             {meta.features.map((f, i) => (
               <InlineStack key={i} gap="150" blockAlign="center">
                 <Icon source={CheckIcon} tone="success" />
-                <Text as="span" tone="subdued">
-                  {f}
-                </Text>
+                <Text as="span" tone="subdued">{f}</Text>
               </InlineStack>
             ))}
           </BlockStack>
@@ -295,9 +233,7 @@ export default function Billing() {
       <Card>
         <BlockStack gap="400">
           <InlineStack align="space-between" blockAlign="center">
-            <Text as="h2" variant="headingMd">
-              Billing
-            </Text>
+            <Text as="h2" variant="headingMd">Billing</Text>
             <Tooltip content={isPremium ? premiumMeta.tooltip : ""}>
               <Badge tone={isPremium ? "success" : "subdued"}>
                 {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
@@ -311,8 +247,7 @@ export default function Billing() {
                 {`You’re on the ${currentLabel || "Free"} plan`}
               </Text>
               <Text as="p" tone="subdued">
-                After approving a charge, click “Refresh” or wait a moment for
-                Shopify to confirm the change.
+                After approving a charge, click “Refresh” or wait a moment for Shopify to confirm the change.
               </Text>
             </BlockStack>
             <Button onClick={loadPlan} loading={loading || busy}>
@@ -320,11 +255,7 @@ export default function Billing() {
             </Button>
           </InlineStack>
 
-          {error && (
-            <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}>
-              <p>{error}</p>
-            </Banner>
-          )}
+          {error && <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
 
           <InlineStack gap="400" wrap>
             <Box minWidth="320px" maxWidth="520px" width="100%">
@@ -337,13 +268,8 @@ export default function Billing() {
               <Divider />
               <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
-                  <Text as="p" variant="bodyMd" fontWeight="semibold">
-                    Manage your subscription
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    You can downgrade to Free at any time. We’ll cancel the
-                    current subscription with proration.
-                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">Manage your subscription</Text>
+                  <Text as="p" tone="subdued">You can downgrade to Free at any time. We’ll cancel the current subscription with proration.</Text>
                 </BlockStack>
                 <Button tone="critical" onClick={downgrade} disabled={busy}>
                   Downgrade to Free
@@ -372,9 +298,7 @@ export default function Billing() {
           background="bg-inverse"
           style={{ color: "#fff", zIndex: 9999, boxShadow: "0 8px 24px rgba(0,0,0,.2)" }}
         >
-          <Text as="span" tone="inverse">
-            {toast}
-          </Text>
+          <Text as="span" tone="inverse">{toast}</Text>
         </Box>
       )}
     </Box>

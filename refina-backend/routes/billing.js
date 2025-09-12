@@ -1,5 +1,5 @@
 // refina-backend/routes/billing.js — GOLDEN PATH++ (legacy + new endpoints)
-// Full-domain shop keys only; preserves Firestore plan docs; adds /status|/upgrade|/downgrade
+// Full-domain shop keys only; preserves Firestore plan docs; adds fresh-sync plan and upgrade/downgrade
 "use strict";
 
 import express from "express";
@@ -83,7 +83,7 @@ async function gql(client, query, variables) {
   throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
-/* ------------------------ Shared helpers (new) ------------------------ */
+/* ------------------------ Shared helpers ------------------------ */
 
 async function ensureOfflineSession(shop) {
   const offlineId = shopify.session.getOfflineId(shop);
@@ -144,7 +144,6 @@ async function fetchShopCurrency(client) {
 }
 
 async function createSubscription(client, { name, amount, currency, returnUrl, test = false }) {
-  // Include trialDays directly inside appRecurringPricingDetails (Shopify supports this)
   const mutation = `
     mutation AppSubscribe(
       $name: String!,
@@ -207,12 +206,24 @@ async function cancelSubscription(client, id, prorate = true) {
   return { canceled: payload?.appSubscription || null, userErrors: errs };
 }
 
-/* ----------------------------- Legacy routes (kept) ---------------------------- */
+/* ----------------------------- Routes ---------------------------- */
 
-/** GET /api/billing/plan → { plan: {level, status} } */
+/** GET /api/billing/plan → { plan: {level, status} }
+ *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
+ */
 router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
+    const fresh = String(req.query.fresh || "0") === "1";
+
+    if (fresh) {
+      const offlineSession = await ensureOfflineSession(shop);
+      const client = getGraphqlClient(offlineSession);
+      const subs = await readActiveSubscriptions(client);
+      const { level, status } = inferPlanFromSubs(subs);
+      await writePlan(shop, level, status);
+    }
+
     const snap = await dbAdmin.collection("plans").doc(shop).get();
     const raw = snap.exists ? snap.data() : null;
     const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
@@ -480,11 +491,7 @@ router.post("/downgrade", async (req, res) => {
       return res.json({ ok: true, message: "No active subscription" });
     }
 
-    const { canceled, userErrors } = await cancelSubscription(
-      client,
-      activeId,
-      true // prorate
-    );
+    const { canceled, userErrors } = await cancelSubscription(client, activeId, true);
     if (userErrors?.length) {
       return res.status(400).json({
         error: "CANCEL_FAILED",

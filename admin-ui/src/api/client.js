@@ -125,9 +125,14 @@ export async function api(path, init = {}) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
     const to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
     if (need && to) {
-      const abs = to.startsWith("http")
+      // Append ?shop=... if the server didn't include it
+      let abs = to.startsWith("http")
         ? to
         : new URL(to, window.location.origin).toString();
+      const shop = getShop();
+      if (shop && !/[?&]shop=/.test(abs)) {
+        abs += (abs.includes("?") ? "&" : "?") + `shop=${encodeURIComponent(shop)}`;
+      }
       try {
         window.top.location.href = abs; // embedded app: redirect top
       } catch {
@@ -181,14 +186,19 @@ export const adminApi = {
 };
 
 export const billingApi = {
-  async getPlan() {
-    return api.get(`/api/billing/plan`);
+  async getPlan({ fresh = false } = {}) {
+    const url = fresh ? `/api/billing/plan?fresh=1` : `/api/billing/plan`;
+    return api.get(url);
   },
-  async subscribe({ plan }) {
-    return api(`/api/billing/subscribe`, {
+  async subscribe({ plan, returnUrl } = {}) {
+    // use the new upgrade endpoint
+    return api(`/api/billing/upgrade`, {
       method: "POST",
-      body: { plan },
+      body: { plan, returnUrl },
     });
+  },
+  async downgrade() {
+    return api(`/api/billing/downgrade`, { method: "POST", body: {} });
   },
 };
 
