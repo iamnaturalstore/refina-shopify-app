@@ -33,6 +33,8 @@ import {
 
 // Utilities
 import { toMyshopifyDomain } from './utils/resolveStore.js';
+import shopify from './shopify.js';
+import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -729,6 +731,48 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
       meta: { ...meta, tone, plan, rankMode, routineMode, totalMs: Date.now() - t0 },
     };
 
+    // --- Fallback: if no products yet, serve a few via Admin API ---
+if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+  try {
+    const shop = String(storeId || '').toLowerCase(); // <- use your storeId
+    let accessToken = req.accessToken;
+
+    // Load offline session token if middleware didn't attach one
+    if (!accessToken && shop) {
+      const offlineId = shopify.session.getOfflineId(shop);
+      const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+      const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+      accessToken = offlineSession?.accessToken || null;
+    }
+
+    if (shop && accessToken) {
+      // Use the user’s concern text as the search hint
+      const q = concernInput || '';
+      const fb = await fetchFallbackProducts(shop, accessToken, { limit: 10, query: q });
+
+      if (Array.isArray(fb) && fb.length) {
+        const fallbackPayload = {
+          productIds: fb.map(p => p.id),
+          products: fb.map(p => ({
+            id: p.id, title: p.title, handle: p.handle, image: p.image, url: p.url
+          })),
+          copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
+          disclaimer,
+          ...(enriched ? { enriched } : {}), // keep existing if any
+          meta: { ...meta, tone, plan, rankMode, routineMode, source: 'fallback', totalMs: Date.now() - t0 },
+        };
+        if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
+        return res.json(fallbackPayload);
+      }
+    }
+  } catch (err) {
+    console.error('[recommend] fallback error', err);
+    // fall through to normal payload
+  }
+}
+// --- end fallback ---
+
+
     cacheSet(cacheKey, payload);
     res.json(payload);
   } catch (e) {
@@ -822,31 +866,95 @@ app.post('/v1/recommend', async (req, res) => {
       source = 'fallback';
     }
 
-    const used = productIds.slice(0, plan === 'free' ? 3 : 8);
+    // pick the top N upfront
+const used = productIds.slice(0, plan === 'free' ? 3 : 8);
 
-    const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    const hydrate = used.map((id) => {
-      const p = allProducts.find((x) => x.id === id) || {};
-      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-      return {
-        id: p.id,
-        title: p.title || p.name || '',
-        name: p.title || p.name || '',
-        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-        description: p.description || '',
-        productType: p.productType || '',
-        tags: p.tags || [],
-        url: productUrl,
-        price: p.price ?? null,
-      };
-    });
+// route-local meta + helpers this handler expects later
+let meta = { source: 'mapping', cache: 'miss' };
+let enriched = null; // keep defined even if unused in this v1 handler
+const disclaimer = /beauty|skin|hair|cosmetic/i.test(String(category || ''))
+  ? 'Skincare guidance only — not medical advice.'
+  : '';
 
-    const copy = shapeCopy({ products: allProducts.filter((p) => used.includes(p.id)), concern: normalizedConcern, tone, category });
+// hydrate product objects for the UI
+const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const hydrate = used.map((id) => {
+  const p = allProducts.find((x) => x.id === id) || {};
+  const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+  const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+  return {
+    id: p.id,
+    title: p.title || p.name || '',
+    name: p.title || p.name || '',
+    image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+    description: p.description || '',
+    productType: p.productType || '',
+    tags: p.tags || [],
+    url: productUrl,
+    price: p.price ?? null,
+  };
+});
 
-    const payload = { productIds: used, products: hydrate, copy, meta: { source, cache: 'miss', tone, plan } };
-    cacheSet(cacheKey, payload);
-    res.json(payload);
+// friendly copy from what we actually send back
+const copy = shapeCopy({
+  products: hydrate, // <- use hydrated list
+  concern: normalizedConcern,
+  tone,
+  category,
+});
+
+// --- Fallback: if no products, serve a few via Admin API so reviewers see results ---
+if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+  try {
+    const offlineId = shopify.session.getOfflineId(shop);
+    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+    const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+    const accessToken = offlineSession?.accessToken || null;
+
+    if (accessToken) {
+      const fb = await fetchFallbackProducts(shop, accessToken, {
+        limit: 10,
+        query: concernInput || '',
+      });
+
+      if (Array.isArray(fb) && fb.length) {
+        const fallbackPayload = {
+          productIds: fb.map((p) => p.id),
+          products: fb.map((p) => ({
+            id: p.id,
+            title: p.title,
+            name: p.title,
+            handle: p.handle,
+            image: p.image,
+            url: p.url,
+          })),
+          copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
+          disclaimer,
+          ...(enriched ? { enriched } : {}),
+          meta: { ...meta, tone, plan, source: 'fallback', totalMs: Date.now() - t0 },
+        };
+        if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
+        return res.json(fallbackPayload);
+      }
+    }
+  } catch (err) {
+    console.error('[v1/recommend] fallback error', err);
+    // fall through to normal payload
+  }
+}
+// --- end fallback ---
+
+// normal response path
+const payload = {
+  productIds: used,
+  products: hydrate,
+  copy,
+  disclaimer,
+  ...(enriched ? { enriched } : {}),
+  meta: { ...meta, tone, plan, totalMs: Date.now() - t0 },
+};
+if (typeof cacheSet === 'function') cacheSet(cacheKey, payload);
+return res.json(payload);
   } catch (e) {
     console.error('POST /v1/recommend error', e);
     res.status(500).json({ error: 'internal_error' });
