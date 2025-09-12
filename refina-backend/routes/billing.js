@@ -272,7 +272,8 @@ router.get("/activated", async (req, res) => {
     await writePlan(shop, level, status);
 
     const hostParam = String(req.query.host || "");
-    const redirect = `/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+    const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+
     return res.redirect(303, redirect);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
