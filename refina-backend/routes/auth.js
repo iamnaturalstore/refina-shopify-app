@@ -6,9 +6,24 @@ import shopify from "../shopify.js";
 
 const router = express.Router();
 
+/** Guard against open redirects; only allow deep links under /admin-ui */
+function sanitizeReturnTo(p) {
+  if (!p || typeof p !== "string") return "";
+  try {
+    // Disallow full URLs
+    if (/^https?:\/\//i.test(p)) return "";
+    // Ensure it starts with /admin-ui
+    if (!p.startsWith("/admin-ui")) return "";
+    // Normalize to avoid "//"
+    return p.replace(/\/{2,}/g, "/");
+  } catch {
+    return "";
+  }
+}
+
 /**
  * Kick off OAuth for a shop.
- * Example: GET /api/auth?shop=refina-demo.myshopify.com
+ * Example: GET /api/auth?shop=refina-demo.myshopify.com[&return_to=/admin-ui/billing]
  */
 router.get("/", async (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
@@ -16,14 +31,18 @@ router.get("/", async (req, res) => {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
 
-  // Keep host param for deep-link friendliness during redirects
+  // Keep host + optional deep-link path for redirects
   const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
+  const returnToRaw = String(req.query.return_to || "");
+  const returnTo = sanitizeReturnTo(returnToRaw);
 
   try {
-    // Start OAuth (offline session)
+    // Start OAuth (offline session); thread return_to through the callback
     await shopify.auth.begin({
       shop,
-      callbackPath: "/api/auth/callback",
+      callbackPath: returnTo
+        ? `/api/auth/callback?return_to=${encodeURIComponent(returnTo)}`
+        : "/api/auth/callback",
       isOnline: false,
       rawRequest: req,
       rawResponse: res,
@@ -34,9 +53,10 @@ router.get("/", async (req, res) => {
     const needsTop =
       err?.status === 410 || /top.?level|cookie/i.test(String(err?.message || ""));
     if (needsTop) {
-      const to = `\ /api/auth/toplevel?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(
-        host
-      )}`.replace(" ", "");
+      const to =
+        `/api/auth/toplevel?shop=${encodeURIComponent(shop)}` +
+        `&host=${encodeURIComponent(host)}` +
+        (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
       return res.redirect(302, to);
     }
 
@@ -61,6 +81,8 @@ router.get("/toplevel", (req, res) => {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
   const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
+  const returnToRaw = String(req.query.return_to || "");
+  const returnTo = sanitizeReturnTo(returnToRaw);
 
   // Cookie name/value expected by the Shopify SDK for top-level initiation
   res.cookie("shopifyTopLevelOAuth", "1", {
@@ -69,9 +91,10 @@ router.get("/toplevel", (req, res) => {
     sameSite: "strict",
   });
 
-  const backToAuth = `/api/auth?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(
-    host
-  )}`;
+  const backToAuth =
+    `/api/auth?shop=${encodeURIComponent(shop)}` +
+    `&host=${encodeURIComponent(host)}` +
+    (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
 
   // Escape the iframe and continue OAuth at top-window
   const html = `<!DOCTYPE html>
@@ -85,7 +108,7 @@ router.get("/toplevel", (req, res) => {
 
 /**
  * OAuth callback target configured in the Partner app.
- * Finishes OAuth then redirects to your embedded Admin UI.
+ * Finishes OAuth then redirects to your embedded Admin UI (deep-link aware).
  */
 router.get("/callback", async (req, res) => {
   try {
@@ -97,12 +120,16 @@ router.get("/callback", async (req, res) => {
     const shop = session.shop;
     const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
 
-    // Land on the app handle (/apps/refina) and instruct Admin to load /admin-ui/ inside the app
-    const appLoadPath = encodeURIComponent("/admin-ui");
-    return res.redirect(
-      302,
-      `/admin-ui/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`
-    );
+    // Honor optional deep-link from the original /api/auth
+    const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
+    const targetPath = returnTo || "/admin-ui/";
+
+    // Append shop + host to the SPA route
+    const sep = targetPath.includes("?") ? "&" : "?";
+    const redirectUrl =
+      `${targetPath}${sep}shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`;
+
+    return res.redirect(302, redirectUrl);
   } catch (err) {
     console.error("OAuth callback failed:", err);
     return res.status(401).send("OAuth failed");

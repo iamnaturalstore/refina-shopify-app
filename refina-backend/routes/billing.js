@@ -341,43 +341,54 @@ router.post("/subscribe", async (req, res) => {
     if (confirmationUrl) return res.json({ confirmationUrl });
 
     // If Shopify complains about an existing active sub without id, try to cancel and retry
-    const looksLikeActiveBlock = (userErrors || [])
-      .map((e) => e?.message || "")
-      .join("; ")
-      .match(/already.*active|existing.*active|active recurring/i);
+const looksLikeActiveBlock = (userErrors || [])
+  .map((e) => e?.message || "")
+  .join("; ")
+  .match(/already.*active|existing.*active|active recurring/i);
 
-    if (looksLikeActiveBlock && currentSubId) {
-      const cancelled = await cancelSubscription(client, currentSubId, true);
-      if (!cancelled.userErrors?.length) {
-        const retry = await createSubscription(client, {
-          name: PLAN.name,
-          amount: PLAN.amount,
-          currency,
-          returnUrl,
-          test: process.env.NODE_ENV !== "production",
-        });
-        if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
-      }
-    }
-
-    return res.status(400).json({ error: "Subscription creation failed", userErrors });
-  } catch (err) {
-    if (err?.status === 401) {
-      // Preserve legacy behavior here (unchanged)
-      res
-        .status(401)
-        .set("Access-Control-Allow-Origin", "*")
-        .set("Access-Control-Allow-Headers", "*")
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", `/api/auth`);
-      return res.send("reauthorize");
-    }
-    console.error("POST /api/billing/subscribe unhandled error", {
-      shop: req.query?.shop,
-      error: err,
+if (looksLikeActiveBlock && currentSubId) {
+  const cancelled = await cancelSubscription(client, currentSubId, true);
+  if (!cancelled.userErrors?.length) {
+    const retry = await createSubscription(client, {
+      name: PLAN.name,
+      amount: PLAN.amount,
+      currency,
+      returnUrl,
+      test: process.env.NODE_ENV !== "production",
     });
-    return res.status(500).json({ error: "Subscribe failed" });
+    if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
   }
+}
+
+return res.status(400).json({ error: "Subscription creation failed", userErrors });
+} catch (err) {
+  if (err?.status === 401) {
+    // 401 → instruct App Bridge to reauth, and return user to Billing after OAuth
+    const hostParam = String(req.query.host || "");
+    const shopParam = String(req.query.shop || "");
+    const returnTo  = encodeURIComponent("/admin-ui/billing");
+
+    res
+      .status(401)
+      .set("Access-Control-Allow-Origin", "*")
+      .set("Access-Control-Allow-Headers", "*")
+      .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+      .set(
+        "X-Shopify-API-Request-Failure-Reauthorize-Url",
+        `/api/auth?shop=${encodeURIComponent(shopParam)}&host=${encodeURIComponent(
+          hostParam
+        )}&return_to=${returnTo}`
+      );
+
+    return res.send("reauthorize");
+  }
+  console.error("POST /api/billing/subscribe unhandled error", {
+    shop: req.query?.shop,
+    error: err,
+  });
+  return res.status(500).json({ error: "Subscribe failed" });
+}
+
 });
 
 /** POST /api/billing/sync → upserts plans/{shop} from activeSubscriptions */
