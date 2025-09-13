@@ -101,7 +101,7 @@ router.get("/callback", async (req, res) => {
     const appLoadPath = encodeURIComponent("/admin-ui");
     return res.redirect(
       302,
-      `/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&appLoadPath=${appLoadPath}`
+      `/admin-ui/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`
     );
   } catch (err) {
     console.error("OAuth callback failed:", err);
