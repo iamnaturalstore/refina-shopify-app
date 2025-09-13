@@ -98,7 +98,7 @@ router.get("/callback", async (req, res) => {
     const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
 
     // Land on the app handle (/apps/refina) and instruct Admin to load /admin-ui/ inside the app
-    const appLoadPath = encodeURIComponent("/admin-ui/");
+    const appLoadPath = encodeURIComponent("/admin-ui");
     return res.redirect(
       302,
       `/?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&appLoadPath=${appLoadPath}`
