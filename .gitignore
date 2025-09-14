@@ -89,3 +89,6 @@ refina-migrate/
 # Keep built Admin UI in repo for Render
 !refina-backend/admin-ui-dist/
 !refina-backend/admin-ui-dist/**
+
+# Build artifacts
+refina-backend/admin-ui-dist/
