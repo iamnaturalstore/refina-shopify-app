@@ -7,6 +7,13 @@ import shopify from "../shopify.js";
 import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
+// Verify App Bridge session tokens (JWT) on Admin UI calls
+const validate = shopify.validateAuthenticatedSession();
+// Protect Admin-UI endpoints; leave /activated open (Shopify redirects here without JWT)
+router.use(
+  ["/plan", "/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
+  validate
+);
 
 /* --------------------------- Utilities --------------------------- */
 
@@ -25,9 +32,14 @@ function normalizePlan(data) {
 }
 
 /** Resolve canonical shop from guard/query; throws 401 on failure. */
-async function resolveShopContext(req, _res) {
+async function resolveShopContext(req, res) {
+// ✅ First prefer verified shop from JWT-validated Admin session
+  const sessShop = res?.locals?.shopify?.session?.shop;
   let shop =
-    typeof req.shop === "string" && req.shop ? req.shop.toLowerCase() : null;
+    (typeof sessShop === "string" && sessShop
+      ? sessShop.toLowerCase()
+      : null) ||
+    (typeof req.shop === "string" && req.shop ? req.shop.toLowerCase() : null);
 
   const q = req.query || {};
   if (!shop && typeof q.shop === "string" && q.shop.toLowerCase().endsWith(".myshopify.com")) {
