@@ -1,29 +1,39 @@
-// admin-ui/vite.config.js — Option A (build into refina-backend/admin-ui-dist)
+// admin-ui/vite.config.js — production-ready env injection + fail-fast
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+// Pull from OS env provided by CI (Render). Prefer VITE_ key; fall back to SHOPIFY_API_KEY.
+const API_KEY = process.env.VITE_SHOPIFY_API_KEY || process.env.SHOPIFY_API_KEY;
+
+// Fail the build clearly if missing (prevents silent "undefined" in the browser)
+if (!API_KEY) {
+  throw new Error(
+    '[admin-ui build] Missing VITE_SHOPIFY_API_KEY (or SHOPIFY_API_KEY). ' +
+    'Set it in the environment so App Bridge can initialize.'
+  );
+}
+
 export default defineConfig({
   plugins: [react()],
-  // Ensure all asset URLs in index.html point to /admin-ui/*
   base: '/admin-ui/',
   build: {
-    // Build straight into the backend so server.js can serve it from ADMIN_UI_DIR
     outDir: resolve(__dirname, '../refina-backend/admin-ui-dist'),
     emptyOutDir: true,
-    sourcemap: true,              // helpful for prod debugging
-    assetsDir: 'assets',          // keep hashed assets under /assets
+    sourcemap: true,
+    assetsDir: 'assets',
     rollupOptions: {
       output: {
-        // Fingerprinted filenames under /admin-ui/assets/* to match server static path
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },
     },
   },
-  resolve: {
-    // Prevent duplicate React in monorepo/dev
-    dedupe: ['react', 'react-dom'],
+  resolve: { dedupe: ['react', 'react-dom'] },
+
+  // ✅ Inline the API key into the browser bundle at build time
+  define: {
+    'import.meta.env.VITE_SHOPIFY_API_KEY': JSON.stringify(API_KEY),
   },
 });
