@@ -1,5 +1,4 @@
-// refina-backend/routes/billing.js — GOLDEN PATH++ (legacy + new endpoints)
-// Full-domain shop keys only; preserves Firestore plan docs; adds fresh-sync plan and upgrade/downgrade
+// refina-backend/routes/billing.js
 "use strict";
 
 import express from "express";
@@ -8,14 +7,82 @@ import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
 
-/* --------------------------- Helpers: reauth --------------------------- */
+/**
+ * Version-compatible validator for Admin UI requests via App Bridge.
+ * PREFERS Bearer (App Bridge session token) → authenticate.admin → manual decode,
+ * and only falls back to validateAuthenticatedSession() if NO Bearer is present.
+ */
+async function validateAdminSessionCompat(req, res, next) {
+  try {
+    const authz = req.headers.authorization || "";
+    const bearerMatch = authz.match(/^Bearer\s+(.+)$/i);
 
-function computeHostFromShop(shop) {
-  const s = String(shop || "").trim().toLowerCase();
-  return s && s.endsWith(".myshopify.com")
-    ? Buffer.from(`${s}/admin`).toString("base64")
-    : "";
+    if (bearerMatch) {
+      // ── Primary path for embedded Admin: Bearer session token ─────────────
+      const token = bearerMatch[1];
+
+      // Newer API (v11+): authenticate.admin validates the Bearer for us
+      if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
+        const auth = await shopify.authenticate.admin(req, res);
+        if (auth?.session?.shop) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = auth.session;
+          return next();
+        }
+        // If it didn’t throw but also didn’t give a session, hard-fail to reauth
+        throw new Error("no_admin_session");
+      }
+
+      // Fallback: manual JWT decode using API secret
+      const payload = await shopify.api.session.decodeSessionToken(token);
+      const hostLike =
+        String(payload.dest || payload.iss || "")
+          .replace(/^https?:\/\//, "")
+          .replace(/\/.*$/, "")
+          .toLowerCase();
+      if (!hostLike.endsWith(".myshopify.com")) throw new Error("bad_dest");
+
+      res.locals.shopify = res.locals.shopify || {};
+      res.locals.shopify.session = { shop: hostLike };
+      return next();
+    }
+
+    // ── No Bearer present: allow cookie-based session validator as a fallback ──
+    if (typeof shopify.validateAuthenticatedSession === "function") {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
+
+    // Nothing to validate, require reauth
+    throw new Error("no_auth");
+  } catch (err) {
+    // Signal App Bridge to reauthorize at /api/auth with shop/host preserved
+    const shopParam = String(req.query?.shop || "").toLowerCase();
+    const hostParam = String(req.query?.host || "");
+    const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+    let base = String(rawBase).replace(/\/+$/, "");
+    if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+    const authUrl = new URL("/api/auth", base);
+    if (shopParam) authUrl.searchParams.set("shop", shopParam);
+    if (hostParam) authUrl.searchParams.set("host", hostParam);
+
+    return res
+      .status(401)
+      .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+      .set(
+        "X-Shopify-API-Request-Failure-Reauthorize-Url",
+        authUrl.toString()
+      )
+      .send("reauthorize");
+  }
 }
+
+// Protect Admin-UI endpoints; leave /activated open (Shopify redirects here without JWT)
+router.use(
+  ["/plan", "/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
+  validateAdminSessionCompat
+);
+
+/* --------------------------- Utilities --------------------------- */
 
 function absoluteAppUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
@@ -31,88 +98,16 @@ function normalizePlan(data) {
   return { level, status };
 }
 
-function sendReauth(res, req, opts = {}) {
-  const shopParam = (opts.shop || String(req.query?.shop || "")).toLowerCase();
-  let hostParam = String(opts.host || req.query?.host || "");
-  if (!hostParam && shopParam) hostParam = computeHostFromShop(shopParam);
-
-  const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-  let base = String(rawBase).replace(/\/+$/, "");
-  if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-
-  const authUrl = new URL("/api/auth", base);
-  if (shopParam) authUrl.searchParams.set("shop", shopParam);
-  if (hostParam) authUrl.searchParams.set("host", hostParam);
-  if (opts.return_to) authUrl.searchParams.set("return_to", opts.return_to);
-
-  return res
-    .status(401)
-    // CORS + header exposure so the client can read reauth headers
-    .set("Access-Control-Allow-Origin", "*")
-    .set("Access-Control-Allow-Headers", "*")
-    .set(
-      "Access-Control-Expose-Headers",
-      "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url"
-    )
-    // Shopify App Bridge reauth handshake
-    .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-    .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-    .send("reauthorize");
-}
-
-/* --------------------- Version-compatible Admin JWT -------------------- */
-
-async function validateAdminSessionCompat(req, res, next) {
-  try {
-    // Case 1: classic middleware available
-    if (typeof shopify.validateAuthenticatedSession === "function") {
-      return shopify.validateAuthenticatedSession()(req, res, next);
-    }
-    // Case 2: newer API (authenticate.admin)
-    if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
-      const auth = await shopify.authenticate.admin(req, res);
-      if (auth?.session?.shop) {
-        res.locals.shopify = res.locals.shopify || {};
-        res.locals.shopify.session = auth.session;
-      }
-      return next();
-    }
-    // Case 3: manual JWT (from App Bridge authenticatedFetch)
-    const authz = req.headers.authorization || "";
-    const m = authz.match(/^Bearer\s+(.+)$/i);
-    if (!m) throw new Error("no_bearer");
-
-    const token = m[1];
-    const payload = await shopify.api.session.decodeSessionToken(token);
-    const shopFromDest = String(payload.dest || payload.iss || "")
-      .replace(/^https?:\/\//, "")
-      .replace(/\/.*$/, "");
-    if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
-
-    res.locals.shopify = res.locals.shopify || {};
-    res.locals.shopify.session = { shop: shopFromDest };
-    return next();
-  } catch (_err) {
-    return sendReauth(res, req);
-  }
-}
-
-// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
-router.use(
-  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
-  validateAdminSessionCompat
-);
-
-/* --------------------------- Shop resolution --------------------------- */
-
 /** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, res) {
+  // Prefer verified shop from JWT-validated Admin session (set by our middleware)
   const sessShop = res?.locals?.shopify?.session?.shop;
   const q = req.query || {};
   const hdrShop = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "")
     .toLowerCase()
     .trim();
 
+  // Normalize into "<subdomain>.myshopify.com" or return ""
   const toMyshop = (raw) => {
     const s = String(raw || "").toLowerCase().trim();
     if (!s) return "";
@@ -122,11 +117,12 @@ async function resolveShopContext(req, res) {
   };
 
   let shop =
-    toMyshop(sessShop) ||
-    toMyshop(req.shop) ||
-    toMyshop(q.shop) ||
-    toMyshop(q.storeId);
+    toMyshop(sessShop) || // from verified session
+    toMyshop(req.shop) || // if upstream middleware set req.shop
+    toMyshop(q.shop) || // explicit ?shop=
+    toMyshop(q.storeId); // legacy alias
 
+  // Decode ?host= (base64 admin URL)
   if (!shop && typeof q.host === "string") {
     try {
       const decoded = Buffer.from(q.host, "base64").toString("utf8");
@@ -134,16 +130,23 @@ async function resolveShopContext(req, res) {
       const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
       if (m1?.[1]) shop = toMyshop(m1[1]);
       if (!shop && m2?.[1]) shop = toMyshop(m2[1]);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
-  if (!shop && hdrShop) shop = toMyshop(hdrShop);
+  // Header fallback (Shopify sometimes forwards this)
+  if (!shop && hdrShop) {
+    shop = toMyshop(hdrShop);
+  }
 
+  // Final hard validation
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop || "")) {
     const err = new Error("Missing shop context");
     err.status = 401;
     throw err;
   }
+
   return { shop };
 }
 
@@ -151,8 +154,8 @@ async function resolveShopContext(req, res) {
 
 function getGraphqlClient(session) {
   const Graphql =
-    shopify?.api?.clients?.Graphql ||
-    shopify?.clients?.Graphql;
+    shopify?.api?.clients?.Graphql || // newer shape
+    shopify?.clients?.Graphql; // older shape
   if (!Graphql) {
     throw new Error(
       "Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql)."
@@ -200,7 +203,8 @@ async function readActiveSubscriptions(client) {
     }
   `;
   const data = await gql(client, q);
-  return data?.currentAppInstallation?.activeSubscriptions || [];
+  const subs = data?.currentAppInstallation?.activeSubscriptions || [];
+  return subs;
 }
 
 function inferPlanFromSubs(subs) {
@@ -225,7 +229,10 @@ async function writePlan(shop, level, status) {
   await dbAdmin
     .collection("plans")
     .doc(shop)
-    .set({ level, status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    .set(
+      { level, status, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true }
+    );
 }
 
 async function fetchShopCurrency(client) {
@@ -234,7 +241,10 @@ async function fetchShopCurrency(client) {
   return (data?.shop?.currencyCode || "USD").toString().toUpperCase();
 }
 
-async function createSubscription(client, { name, amount, currency, returnUrl, test = false }) {
+async function createSubscription(
+  client,
+  { name, amount, currency, returnUrl, test = false }
+) {
   const mutation = `
     mutation AppSubscribe(
       $name: String!,
@@ -277,10 +287,9 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
   };
   const data = await gql(client, mutation, variables);
   const payload = data?.appSubscriptionCreate || {};
-  return {
-    confirmationUrl: payload?.confirmationUrl || null,
-    userErrors: payload?.userErrors || [],
-  };
+  const errs = payload?.userErrors || [];
+  const confirmationUrl = payload?.confirmationUrl || null;
+  return { confirmationUrl, userErrors: errs };
 }
 
 async function cancelSubscription(client, id, prorate = true) {
@@ -294,7 +303,8 @@ async function cancelSubscription(client, id, prorate = true) {
   `;
   const data = await gql(client, mutation, { id, prorate });
   const payload = data?.appSubscriptionCancel || {};
-  return { canceled: payload?.appSubscription || null, userErrors: payload?.userErrors || [] };
+  const errs = payload?.userErrors || [];
+  return { canceled: payload?.appSubscription || null, userErrors: errs };
 }
 
 /* ----------------------------- Routes ---------------------------- */
