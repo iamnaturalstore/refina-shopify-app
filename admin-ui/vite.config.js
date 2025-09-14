@@ -3,10 +3,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
-// Pull from OS env provided by CI (Render). Prefer VITE_ key; fall back to SHOPIFY_API_KEY.
+// Prefer VITE_SHOPIFY_API_KEY; fall back to SHOPIFY_API_KEY (Render env)
 const API_KEY = process.env.VITE_SHOPIFY_API_KEY || process.env.SHOPIFY_API_KEY;
-
-// Fail the build clearly if missing (prevents silent "undefined" in the browser)
 if (!API_KEY) {
   throw new Error(
     '[admin-ui build] Missing VITE_SHOPIFY_API_KEY (or SHOPIFY_API_KEY). ' +
@@ -32,8 +30,8 @@ export default defineConfig({
   },
   resolve: { dedupe: ['react', 'react-dom'] },
 
-  // ✅ Inline the API key into the browser bundle at build time
+  // ✅ Inline API key as a compile-time global (browser-safe)
   define: {
-    'import.meta.env.VITE_SHOPIFY_API_KEY': JSON.stringify(API_KEY),
+    __APP_BRIDGE_API_KEY__: JSON.stringify(API_KEY),
   },
 });

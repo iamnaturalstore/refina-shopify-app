@@ -5,18 +5,19 @@ import { AppProvider } from "@shopify/polaris";
 import en from "@shopify/polaris/locales/en.json";
 import App from "./App.jsx";
 
-// One-time authenticated fetch wiring (prevents fallback/race conditions)
-import { authenticatedFetch } from "@shopify/app-bridge-utils";
 import app from "./appBridge";
+import { authenticatedFetch } from "@shopify/app-bridge/utilities";
 import { setAuthedFetch } from "./api/client";
 
-try {
-  setAuthedFetch(authenticatedFetch(app));
-} catch {
-  // noop: fallback path in client will still work if this fails
+// Fail-fast: if authenticatedFetch cannot be initialized, throw
+const authed = authenticatedFetch(app);
+if (typeof authed !== "function") {
+  throw new Error("[AdminUI] authenticatedFetch initialization failed.");
 }
+setAuthedFetch(authed);
 
-console.log("ADMIN-UI BUILD", import.meta.env.VITE_BUILD_ID);
+// Minimal, safe info message (no secrets)
+console.info("[AdminUI] App Bridge ready; authenticated fetch wired.");
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <AppProvider i18n={en}>
