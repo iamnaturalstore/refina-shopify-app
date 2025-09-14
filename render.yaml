@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: refina-app
+    env: node
+    plan: starter
+    buildCommand: |
+      yarn install
+      yarn --cwd admin-ui install
+      yarn --cwd admin-ui build --outDir dist
+      yarn --cwd refina-backend install
+    startCommand: node refina-backend/server.js
+    envVars:
+      - key: VITE_SHOPIFY_API_KEY
+        value: 8b7905126e30769a20c27b4cdd775722
+      - key: SHOPIFY_API_KEY
+        value: 8b7905126e30769a20c27b4cdd775722
+      - key: SHOPIFY_API_SECRET
+        sync: false # Keep your secret in the dashboard, not in the file
+      # Add any other required SHOPIFY_* variables here if needed
