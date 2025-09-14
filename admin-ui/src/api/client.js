@@ -1,36 +1,40 @@
 // admin-ui/src/api/client.js
 // Centralized API client for the Admin UI.
 // • Uses App Bridge authenticatedFetch
-// • Appends shop/host to every request
-// • On 401 + reauth headers: forces a single top-frame redirect to /api/auth?shop&host
+// • Appends shop/host to every request (computes host if missing)
+// • On 401 + reauth headers: performs a single top-frame redirect to /api/auth?shop&host
 
 import { authenticatedFetch } from "@shopify/app-bridge-utils";
 import { Redirect } from "@shopify/app-bridge/actions";
-import app from "../appBridge"; // must export a configured App Bridge instance
+import app from "../appBridge"; // configured App Bridge instance
 
-// ─────────────────────────────────────────────────────────────
-// Persist host/shop once per load to survive navigation
-// ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
+   Persist host/shop once per load to survive SPA navigation
+   ───────────────────────────────────────────────────────────── */
 (function persistParams() {
   try {
     const q = new URLSearchParams(window.location.search || "");
     const hashQ = (window.location.hash || "").split("?")[1] || "";
     const h = new URLSearchParams(hashQ);
     const pick = (k) => q.get(k) || h.get(k) || null;
-    const pairs = [
-      ["host", "shopify-host"],
-      ["shop", "shopify-shop"],
-    ];
-    for (const [key, storeKey] of pairs) {
-      const v = pick(key);
-      if (v) sessionStorage.setItem(storeKey, v);
+
+    const shopRaw = (pick("shop") || "").trim().toLowerCase();
+    const shop = shopRaw && shopRaw.endsWith(".myshopify.com") ? shopRaw : "";
+
+    let host = (pick("host") || "").trim();
+    // If host missing but shop present, compute it (base64 "<shop>.myshopify.com/admin")
+    if (!host && shop) {
+      try { host = btoa(`${shop}/admin`); } catch { /* ignore */ }
     }
+
+    if (host) sessionStorage.setItem("shopify-host", host);
+    if (shop) sessionStorage.setItem("shopify-shop", shop);
   } catch {}
 })();
 
-// ─────────────────────────────────────────────────────────────
-// URL/context helpers
-// ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
+   URL/context helpers
+   ───────────────────────────────────────────────────────────── */
 function getPersisted(key, storeKey) {
   const q = new URLSearchParams(window.location.search || "");
   const hashQ = (window.location.hash || "").split("?")[1] || "";
@@ -43,7 +47,15 @@ export function getShop() {
   return s.endsWith(".myshopify.com") ? s : "";
 }
 function getHost() {
-  return getPersisted("host", "shopify-host");
+  let host = getPersisted("host", "shopify-host");
+  if (!host) {
+    const shop = getShop();
+    if (shop) {
+      try { host = btoa(`${shop}/admin`); } catch { /* ignore */ }
+      if (host) sessionStorage.setItem("shopify-host", host);
+    }
+  }
+  return host || "";
 }
 export function withContext(path) {
   const url = new URL(path, window.location.origin);
@@ -56,7 +68,9 @@ export function withContext(path) {
   return url.toString();
 }
 
-// ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
+   Authenticated fetch wiring
+   ───────────────────────────────────────────────────────────── */
 let _authedFetch = null;
 let __reauthInFlight = false;
 
@@ -68,11 +82,10 @@ function getAuthedFetch() {
     if (_authedFetch) return _authedFetch;
     if (app) return authenticatedFetch(app);
   } catch {}
-  return fetch; // ultimate fallback (likely to 401)
+  return fetch; // ultimate fallback (will likely 401, handled below)
 }
 
 function forceTopFrameRedirect(url) {
-  // Try App Bridge remote redirect first (best for embedded apps)
   try {
     if (app) {
       const redirect = Redirect.create(app);
@@ -80,13 +93,12 @@ function forceTopFrameRedirect(url) {
       return;
     }
   } catch {}
-  // Hard fallback
   try { window.top.location.href = url; } catch { window.location.href = url; }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Core API
-// ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
+   Core API
+   ───────────────────────────────────────────────────────────── */
 export async function api(path, init = {}) {
   const finalUrl = withContext(path);
 
@@ -96,21 +108,24 @@ export async function api(path, init = {}) {
   const baseInit = isJSON
     ? {
         ...init,
-        headers: { "Content-Type": "application/json", ...(init.headers || {}) },
+        headers: { Accept: "application/json", "Content-Type": "application/json", ...(init.headers || {}) },
         body: JSON.stringify(init.body),
       }
-    : init;
+    : { ...init, headers: { Accept: "application/json", ...(init.headers || {}) } };
 
   const fetchInit = { cache: "no-store", ...baseInit };
   const f = getAuthedFetch();
   const res = await f(finalUrl, fetchInit);
 
-  // Handle reauthorization headers from the backend
+  // Handle Shopify reauthorization handshake
   if (res.status === 401 || res.status === 403) {
     const need = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize") === "1";
-    let to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url");
-
-    if (need && to) {
+    let to = res.headers.get("X-Shopify-API-Request-Failure-Reauthorize-Url") || "";
+    if (need) {
+      if (!to) {
+        // Construct a local /api/auth as a safety net
+        to = "/api/auth";
+      }
       if (__reauthInFlight) {
         // Park concurrent callers while the first one navigates
         return new Promise(() => {});
@@ -127,19 +142,23 @@ export async function api(path, init = {}) {
 
       // eslint-disable-next-line no-console
       console.log("[api] Reauthorize →", u.toString());
-
       forceTopFrameRedirect(u.toString());
       return new Promise(() => {});
     }
   }
 
   const ct = res.headers.get("content-type") || "";
-  const data = ct.includes("application/json") ? await res.json() : await res.text();
+  let data;
+  try {
+    data = ct.includes("application/json") ? await res.json() : await res.text();
+  } catch {
+    data = null;
+  }
   if (!res.ok) {
     const msg =
       (data && (data.error || data.message)) ||
       (typeof data === "string" ? data : "") ||
-      "Request failed";
+      `Request failed (${res.status})`;
     throw new Error(msg);
   }
   return { data, status: res.status, ok: res.ok };
@@ -151,9 +170,9 @@ api.post = (path, body, init) => api(path, { ...init, method: "POST", body });
 api.put = (path, body, init) => api(path, { ...init, method: "PUT", body });
 api.delete = (path, init) => api(path, { ...init, method: "DELETE" });
 
-// ─────────────────────────────────────────────────────────────
-// Feature-specific wrappers
-// ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
+   Feature-specific wrappers
+   ───────────────────────────────────────────────────────────── */
 export const adminApi = {
   async getAnalyticsSummary({ days = 30, from, to } = {}) {
     const qs = new URLSearchParams();
@@ -173,6 +192,7 @@ export const adminApi = {
 
 export const billingApi = {
   async getPlan({ fresh } = {}) {
+    // Do NOT force fresh=1 by default. Let callers decide.
     const url = fresh ? `/api/billing/plan?fresh=1` : `/api/billing/plan`;
     return api.get(url);
   },

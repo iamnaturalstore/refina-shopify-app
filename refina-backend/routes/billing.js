@@ -8,69 +8,14 @@ import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
 
-/**
- * Version-compatible validator for Admin UI requests via App Bridge.
- * Uses validateAuthenticatedSession → authenticate.admin → manual JWT decode.
- */
-async function validateAdminSessionCompat(req, res, next) {
-  try {
-    // Case 1: classic middleware available
-    if (typeof shopify.validateAuthenticatedSession === 'function') {
-      return shopify.validateAuthenticatedSession()(req, res, next);
-    }
+/* --------------------------- Helpers: reauth --------------------------- */
 
-    // Case 2: newer API (authenticate.admin)
-    if (shopify.authenticate && typeof shopify.authenticate.admin === 'function') {
-      const auth = await shopify.authenticate.admin(req, res);
-      if (auth?.session?.shop) {
-        res.locals.shopify = res.locals.shopify || {};
-        res.locals.shopify.session = auth.session;
-      }
-      return next();
-    }
-
-    // Case 3: manual JWT check (from App Bridge authenticatedFetch)
-    const authz = req.headers.authorization || '';
-    const m = authz.match(/^Bearer\s+(.+)$/i);
-    if (!m) throw new Error('no_bearer');
-
-    const token = m[1];
-    const payload = await shopify.api.session.decodeSessionToken(token);
-    const shopFromDest = String(payload.dest || payload.iss || '')
-      .replace(/^https?:\/\//, '')
-      .replace(/\/.*$/, '');
-
-    if (!shopFromDest.endsWith('.myshopify.com')) throw new Error('bad_dest');
-
-    res.locals.shopify = res.locals.shopify || {};
-    res.locals.shopify.session = { shop: shopFromDest };
-    return next();
-  } catch (err) {
-    // Tell App Bridge to reauthorize
-    const shopParam = String(req.query?.shop || '').toLowerCase();
-    const hostParam = String(req.query?.host || '');
-    const rawBase = process.env.HOST || `${req.protocol}://${req.get('host')}`;
-    let base = String(rawBase).replace(/\/+$/, '');
-    if (base.startsWith('http://')) base = base.replace(/^http:\/\//, 'https://');
-    const authUrl = new URL('/api/auth', base);
-    if (shopParam) authUrl.searchParams.set('shop', shopParam);
-    if (hostParam) authUrl.searchParams.set('host', hostParam);
-
-    return res
-      .status(401)
-      .set('X-Shopify-API-Request-Failure-Reauthorize', '1')
-      .set('X-Shopify-API-Request-Failure-Reauthorize-Url', authUrl.toString())
-      .send('reauthorize');
-  }
+function computeHostFromShop(shop) {
+  const s = String(shop || "").trim().toLowerCase();
+  return s && s.endsWith(".myshopify.com")
+    ? Buffer.from(`${s}/admin`).toString("base64")
+    : "";
 }
-
-// Protect Admin-UI endpoints; leave /activated open (Shopify redirects here without JWT)
-router.use(
-  ['/plan', '/status', '/subscribe', '/upgrade', '/downgrade', '/sync'],
-  validateAdminSessionCompat
-);
-
-/* --------------------------- Utilities --------------------------- */
 
 function absoluteAppUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
@@ -86,66 +31,128 @@ function normalizePlan(data) {
   return { level, status };
 }
 
+function sendReauth(res, req, opts = {}) {
+  const shopParam = (opts.shop || String(req.query?.shop || "")).toLowerCase();
+  let hostParam = String(opts.host || req.query?.host || "");
+  if (!hostParam && shopParam) hostParam = computeHostFromShop(shopParam);
+
+  const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
+  let base = String(rawBase).replace(/\/+$/, "");
+  if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
+
+  const authUrl = new URL("/api/auth", base);
+  if (shopParam) authUrl.searchParams.set("shop", shopParam);
+  if (hostParam) authUrl.searchParams.set("host", hostParam);
+  if (opts.return_to) authUrl.searchParams.set("return_to", opts.return_to);
+
+  return res
+    .status(401)
+    // CORS + header exposure so the client can read reauth headers
+    .set("Access-Control-Allow-Origin", "*")
+    .set("Access-Control-Allow-Headers", "*")
+    .set(
+      "Access-Control-Expose-Headers",
+      "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url"
+    )
+    // Shopify App Bridge reauth handshake
+    .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
+    .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
+    .send("reauthorize");
+}
+
+/* --------------------- Version-compatible Admin JWT -------------------- */
+
+async function validateAdminSessionCompat(req, res, next) {
+  try {
+    // Case 1: classic middleware available
+    if (typeof shopify.validateAuthenticatedSession === "function") {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
+    // Case 2: newer API (authenticate.admin)
+    if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
+      const auth = await shopify.authenticate.admin(req, res);
+      if (auth?.session?.shop) {
+        res.locals.shopify = res.locals.shopify || {};
+        res.locals.shopify.session = auth.session;
+      }
+      return next();
+    }
+    // Case 3: manual JWT (from App Bridge authenticatedFetch)
+    const authz = req.headers.authorization || "";
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (!m) throw new Error("no_bearer");
+
+    const token = m[1];
+    const payload = await shopify.api.session.decodeSessionToken(token);
+    const shopFromDest = String(payload.dest || payload.iss || "")
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
+    if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
+
+    res.locals.shopify = res.locals.shopify || {};
+    res.locals.shopify.session = { shop: shopFromDest };
+    return next();
+  } catch (_err) {
+    return sendReauth(res, req);
+  }
+}
+
+// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
+router.use(
+  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
+  validateAdminSessionCompat
+);
+
+/* --------------------------- Shop resolution --------------------------- */
+
 /** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, res) {
-  // Prefer verified shop from JWT-validated Admin session (set by our middleware)
   const sessShop = res?.locals?.shopify?.session?.shop;
   const q = req.query || {};
-  const hdrShop = (req.get('X-Shopify-Shop-Domain') || req.get('x-shopify-shop-domain') || '')
+  const hdrShop = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "")
     .toLowerCase()
     .trim();
 
-  // Normalize into "<subdomain>.myshopify.com" or return ""
   const toMyshop = (raw) => {
-    const s = String(raw || '').toLowerCase().trim();
-    if (!s) return '';
-    if (s.endsWith('.myshopify.com')) return s;
+    const s = String(raw || "").toLowerCase().trim();
+    if (!s) return "";
+    if (s.endsWith(".myshopify.com")) return s;
     if (/^[a-z0-9][a-z0-9-]*$/.test(s)) return `${s}.myshopify.com`;
-    return '';
+    return "";
   };
 
   let shop =
-    toMyshop(sessShop) ||          // from verified session
-    toMyshop(req.shop) ||          // if upstream middleware set req.shop
-    toMyshop(q.shop) ||            // explicit ?shop=
-    toMyshop(q.storeId);           // legacy alias
+    toMyshop(sessShop) ||
+    toMyshop(req.shop) ||
+    toMyshop(q.shop) ||
+    toMyshop(q.storeId);
 
-  // Decode ?host= (base64 admin URL)
-  if (!shop && typeof q.host === 'string') {
+  if (!shop && typeof q.host === "string") {
     try {
-      const decoded = Buffer.from(q.host, 'base64').toString('utf8');
+      const decoded = Buffer.from(q.host, "base64").toString("utf8");
       const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
       const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
       if (m1?.[1]) shop = toMyshop(m1[1]);
       if (!shop && m2?.[1]) shop = toMyshop(m2[1]);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }
 
-  // Header fallback (Shopify sometimes forwards this)
-  if (!shop && hdrShop) {
-    shop = toMyshop(hdrShop);
-  }
+  if (!shop && hdrShop) shop = toMyshop(hdrShop);
 
-  // Final hard validation
-  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop || '')) {
-    const err = new Error('Missing shop context');
+  if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop || "")) {
+    const err = new Error("Missing shop context");
     err.status = 401;
     throw err;
   }
-
   return { shop };
 }
-
-
 
 /* ---------- Shopify GraphQL compatibility (works across SDK shapes) ---------- */
 
 function getGraphqlClient(session) {
   const Graphql =
-    shopify?.api?.clients?.Graphql || // newer shape
-    shopify?.clients?.Graphql;        // older shape
+    shopify?.api?.clients?.Graphql ||
+    shopify?.clients?.Graphql;
   if (!Graphql) {
     throw new Error(
       "Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql)."
@@ -154,10 +161,6 @@ function getGraphqlClient(session) {
   return new Graphql({ session });
 }
 
-/**
- * gql(client, query, variables?) → data
- * Normalizes .query({data:{...}}) vs .request(query,{variables}) across SDK versions.
- */
 async function gql(client, query, variables) {
   if (typeof client.query === "function") {
     const resp = await client.query({
@@ -197,8 +200,7 @@ async function readActiveSubscriptions(client) {
     }
   `;
   const data = await gql(client, q);
-  const subs = data?.currentAppInstallation?.activeSubscriptions || [];
-  return subs;
+  return data?.currentAppInstallation?.activeSubscriptions || [];
 }
 
 function inferPlanFromSubs(subs) {
@@ -275,9 +277,10 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
   };
   const data = await gql(client, mutation, variables);
   const payload = data?.appSubscriptionCreate || {};
-  const errs = payload?.userErrors || [];
-  const confirmationUrl = payload?.confirmationUrl || null;
-  return { confirmationUrl, userErrors: errs };
+  return {
+    confirmationUrl: payload?.confirmationUrl || null,
+    userErrors: payload?.userErrors || [],
+  };
 }
 
 async function cancelSubscription(client, id, prorate = true) {
@@ -291,26 +294,33 @@ async function cancelSubscription(client, id, prorate = true) {
   `;
   const data = await gql(client, mutation, { id, prorate });
   const payload = data?.appSubscriptionCancel || {};
-  const errs = payload?.userErrors || [];
-  return { canceled: payload?.appSubscription || null, userErrors: errs };
+  return { canceled: payload?.appSubscription || null, userErrors: payload?.userErrors || [] };
 }
 
 /* ----------------------------- Routes ---------------------------- */
 
 /** GET /api/billing/plan → { plan: {level, status} }
  *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
+ *  NOTE: This route is NOT behind the global JWT guard; we only require auth when fresh=1.
  */
 router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const fresh = String(req.query.fresh || "0") === "1";
+    const wantsFresh = String(req.query.fresh || "0") === "1";
 
-    if (fresh) {
-      const offlineSession = await ensureOfflineSession(shop);
-      const client = getGraphqlClient(offlineSession);
-      const subs = await readActiveSubscriptions(client);
-      const { level, status } = inferPlanFromSubs(subs);
-      await writePlan(shop, level, status);
+    if (wantsFresh) {
+      try {
+        const offlineSession = await ensureOfflineSession(shop);
+        const client = getGraphqlClient(offlineSession);
+        const subs = await readActiveSubscriptions(client);
+        const { level, status } = inferPlanFromSubs(subs);
+        await writePlan(shop, level, status);
+      } catch (err) {
+        if (err?.status === 401) {
+          return sendReauth(res, req, { shop });
+        }
+        throw err;
+      }
     }
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
@@ -319,23 +329,7 @@ router.get("/plan", async (req, res) => {
     return res.json({ plan });
   } catch (err) {
     if (err?.status === 401 || err?.response?.code === 401) {
-      // Build a fully-qualified /api/auth URL and append shop/host
-      const shopParam = String(req.query?.shop || "").toLowerCase();
-      const hostParam = String(req.query?.host || "");
-
-      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-      let base = String(rawBase).replace(/\/+$/, "");
-      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-
-      const authUrl = new URL("/api/auth", base);
-      if (shopParam) authUrl.searchParams.set("shop", shopParam);
-      if (hostParam) authUrl.searchParams.set("host", hostParam);
-
-      return res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-        .send("reauthorize");
+      return sendReauth(res, req);
     }
     console.error("GET /api/billing/plan error", err);
     return res.status(500).json({ error: "Plan lookup failed" });
@@ -343,7 +337,7 @@ router.get("/plan", async (req, res) => {
 });
 
 /** GET /api/billing/activated → reads activeSubscriptions, writes Firestore, redirects back to Admin UI */
-router.get('/activated', async (req, res) => {
+router.get("/activated", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
     const offlineSession = await ensureOfflineSession(shop);
@@ -353,24 +347,22 @@ router.get('/activated', async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
-    // Deep-link back into your Admin UI (embedded)
-    const hostParam = String(req.query.host || '');
+    const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
     const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shop
     )}&billing=success`;
 
     return res.redirect(303, redirect);
   } catch (err) {
-    console.error('GET /api/billing/activated error', err);
-    const shopParam = String(req.query?.shop || '');
-    const hostParam = String(req.query?.host || '');
+    console.error("GET /api/billing/activated error", err);
+    const shopParam = String(req.query?.shop || "");
+    const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
     const fallback = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shopParam
     )}&billing=error`;
     return res.redirect(303, fallback);
   }
 });
-
 
 /** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
 router.post("/subscribe", async (req, res) => {
@@ -379,13 +371,8 @@ router.post("/subscribe", async (req, res) => {
     const offlineSession = await ensureOfflineSession(shop);
     const client = getGraphqlClient(offlineSession);
 
-    // Normalize requested plan, map legacy pro/pro+ → premium
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
-    const normalized = raw
-      .replace(/%2b/gi, "+")
-      .replace(/[_-]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
     const target =
       /\bpremium\b/.test(normalized) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
         ? "premium"
@@ -395,22 +382,20 @@ router.post("/subscribe", async (req, res) => {
       return res.status(410).json({ error: "This plan is no longer available." });
     }
 
-    // Short-circuit if already active
     const existing = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
     if (currentLevel === "premium") {
       return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
     }
 
-    // Currency + returnUrl
     const currency = await fetchShopCurrency(client);
-    const rawHost = process.env.HOST || absoluteAppUrl(req);
-    let hostBase = String(rawHost).replace(/\/$/, "");
+    let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
     if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
-    const hostParam = String(req.query.host || "");
-    const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(hostParam)}`;
+    const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
+    const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(
+      shop
+    )}&host=${encodeURIComponent(hostParam)}`;
 
-    // Create sub (trialDays + test flag)
     const PLAN = { name: "Premium", amount: "49.00" };
     const { confirmationUrl, userErrors } = await createSubscription(client, {
       name: PLAN.name,
@@ -422,55 +407,38 @@ router.post("/subscribe", async (req, res) => {
 
     if (confirmationUrl) return res.json({ confirmationUrl });
 
-    // If Shopify complains about an existing active sub without id, try to cancel and retry
-const looksLikeActiveBlock = (userErrors || [])
-  .map((e) => e?.message || "")
-  .join("; ")
-  .match(/already.*active|existing.*active|active recurring/i);
+    const looksLikeActiveBlock = (userErrors || [])
+      .map((e) => e?.message || "")
+      .join("; ")
+      .match(/already.*active|existing.*active|active recurring/i);
 
-if (looksLikeActiveBlock && currentSubId) {
-  const cancelled = await cancelSubscription(client, currentSubId, true);
-  if (!cancelled.userErrors?.length) {
-    const retry = await createSubscription(client, {
-      name: PLAN.name,
-      amount: PLAN.amount,
-      currency,
-      returnUrl,
-      test: process.env.NODE_ENV !== "production",
+    if (looksLikeActiveBlock && currentSubId) {
+      const cancelled = await cancelSubscription(client, currentSubId, true);
+      if (!cancelled.userErrors?.length) {
+        const retry = await createSubscription(client, {
+          name: PLAN.name,
+          amount: PLAN.amount,
+          currency,
+          returnUrl,
+          test: process.env.NODE_ENV !== "production",
+        });
+        if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+      }
+    }
+
+    return res.status(400).json({ error: "Subscription creation failed", userErrors });
+  } catch (err) {
+    if (err?.status === 401) {
+      return sendReauth(res, req, {
+        return_to: encodeURIComponent("/admin-ui/billing"),
+      });
+    }
+    console.error("POST /api/billing/subscribe unhandled error", {
+      shop: req.query?.shop,
+      error: err,
     });
-    if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+    return res.status(500).json({ error: "Subscribe failed" });
   }
-}
-
-return res.status(400).json({ error: "Subscription creation failed", userErrors });
-} catch (err) {
-  if (err?.status === 401) {
-    // 401 → instruct App Bridge to reauth, and return user to Billing after OAuth
-    const hostParam = String(req.query.host || "");
-    const shopParam = String(req.query.shop || "");
-    const returnTo  = encodeURIComponent("/admin-ui/billing");
-
-    res
-      .status(401)
-      .set("Access-Control-Allow-Origin", "*")
-      .set("Access-Control-Allow-Headers", "*")
-      .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-      .set(
-        "X-Shopify-API-Request-Failure-Reauthorize-Url",
-        `/api/auth?shop=${encodeURIComponent(shopParam)}&host=${encodeURIComponent(
-          hostParam
-        )}&return_to=${returnTo}`
-      );
-
-    return res.send("reauthorize");
-  }
-  console.error("POST /api/billing/subscribe unhandled error", {
-    shop: req.query?.shop,
-    error: err,
-  });
-  return res.status(500).json({ error: "Subscribe failed" });
-}
-
 });
 
 /** POST /api/billing/sync → upserts plans/{shop} from activeSubscriptions */
@@ -486,29 +454,11 @@ router.post("/sync", async (req, res) => {
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    if (err?.status === 401) {
-      // NEW: absolute, parameterized reauth hint
-      const shopParam = String(req.query?.shop || "").toLowerCase();
-      const hostParam = String(req.query?.host || "");
-      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-      let base = String(rawBase).replace(/\/+$/, "");
-      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-      const authUrl = new URL("/api/auth", base);
-      if (shopParam) authUrl.searchParams.set("shop", shopParam);
-      if (hostParam) authUrl.searchParams.set("host", hostParam);
-
-      return res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-        .send("reauthorize");
-    }
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
     return res.status(500).json({ error: "Sync failed" });
   }
 });
-
-/* ----------------------------- New endpoints (reviewer-friendly) ---------------------------- */
 
 /** GET /api/billing/status → { activeSubscriptions: [...] } */
 router.get("/status", async (req, res) => {
@@ -519,23 +469,7 @@ router.get("/status", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
-    if (err?.status === 401) {
-      // NEW: absolute, parameterized reauth hint
-      const shopParam = String(req.query?.shop || "").toLowerCase();
-      const hostParam = String(req.query?.host || "");
-      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-      let base = String(rawBase).replace(/\/+$/, "");
-      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-      const authUrl = new URL("/api/auth", base);
-      if (shopParam) authUrl.searchParams.set("shop", shopParam);
-      if (hostParam) authUrl.searchParams.set("host", hostParam);
-
-      return res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-        .send("reauthorize");
-    }
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("GET /api/billing/status error", err);
     return res.status(500).json({ error: "Status failed" });
   }
@@ -548,7 +482,6 @@ router.post("/upgrade", async (req, res) => {
     const offlineSession = await ensureOfflineSession(shop);
     const client = getGraphqlClient(offlineSession);
 
-    // If already premium, short-circuit
     const subs = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(subs);
     if (currentLevel === "premium") {
@@ -557,15 +490,15 @@ router.post("/upgrade", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-    // Prefer explicit returnUrl from client (used by your Admin UI to add ?billing=success)
     const explicitReturn = String(req.body?.returnUrl || "");
     let returnUrl = explicitReturn;
     if (!returnUrl) {
-      const rawHost = process.env.HOST || absoluteAppUrl(req);
-      let hostBase = String(rawHost).replace(/\/$/, "");
+      let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
       if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
-      const hostParam = String(req.query.host || "");
-      returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(hostParam)}`;
+      const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
+      returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(
+        shop
+      )}&host=${encodeURIComponent(hostParam)}`;
     }
 
     const PLAN = { name: "Premium", amount: "49.00" };
@@ -581,7 +514,6 @@ router.post("/upgrade", async (req, res) => {
 
     if (confirmationUrl) return res.json({ confirmationUrl });
 
-    // Attempt cancel & retry if Shopify blocks due to existing active sub
     const looksLikeActiveBlock = (userErrors || [])
       .map((e) => e?.message || "")
       .join("; ")
@@ -603,23 +535,7 @@ router.post("/upgrade", async (req, res) => {
 
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    if (err?.status === 401) {
-      // NEW: absolute, parameterized reauth hint
-      const shopParam = String(req.query?.shop || "").toLowerCase();
-      const hostParam = String(req.query?.host || "");
-      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-      let base = String(rawBase).replace(/\/+$/, "");
-      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-      const authUrl = new URL("/api/auth", base);
-      if (shopParam) authUrl.searchParams.set("shop", shopParam);
-      if (hostParam) authUrl.searchParams.set("host", hostParam);
-
-      return res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-        .send("reauthorize");
-    }
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
     return res.status(500).json({ error: "Upgrade failed" });
   }
@@ -632,11 +548,9 @@ router.post("/downgrade", async (req, res) => {
     const offlineSession = await ensureOfflineSession(shop);
     const client = getGraphqlClient(offlineSession);
 
-    // Find active sub
     const subs = await readActiveSubscriptions(client);
     const { activeId } = inferPlanFromSubs(subs);
     if (!activeId) {
-      // Already free
       await writePlan(shop, "free", "NONE");
       return res.json({ ok: true, message: "No active subscription" });
     }
@@ -652,23 +566,7 @@ router.post("/downgrade", async (req, res) => {
     await writePlan(shop, "free", "NONE");
     return res.json({ ok: true, canceled });
   } catch (err) {
-    if (err?.status === 401) {
-      // NEW: absolute, parameterized reauth hint
-      const shopParam = String(req.query?.shop || "").toLowerCase();
-      const hostParam = String(req.query?.host || "");
-      const rawBase = process.env.HOST || `${req.protocol}://${req.get("host")}`;
-      let base = String(rawBase).replace(/\/+$/, "");
-      if (base.startsWith("http://")) base = base.replace(/^http:\/\//, "https://");
-      const authUrl = new URL("/api/auth", base);
-      if (shopParam) authUrl.searchParams.set("shop", shopParam);
-      if (hostParam) authUrl.searchParams.set("host", hostParam);
-
-      return res
-        .status(401)
-        .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
-        .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
-        .send("reauthorize");
-    }
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/downgrade error", err);
     return res.status(500).json({ error: "Downgrade failed" });
   }
