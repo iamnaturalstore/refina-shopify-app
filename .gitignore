@@ -36,6 +36,10 @@ out/
 refina-backend/admin-ui-dist/
 
 # --- Env files (keep examples)
+# ADD THIS LINE: Create an exception for the admin UI's production env file
+!admin-ui/.env.production
+
+# These original lines are still correct
 .env
 .env.*
 !.env.example
