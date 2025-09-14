@@ -334,7 +334,7 @@ app.use(cors());
 
 // ───────────────────────── Admin UI (embedded) ─────────────────────────
 // Long-cache static assets
-app.use('/admin-ui/assets', express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' }));
+app.use('/admin-ui/assets', express.static(path.join(__dirname, '../dist/assets'), { immutable: true, maxAge: '1y' }));
 app.use('/assets', express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' }));
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
