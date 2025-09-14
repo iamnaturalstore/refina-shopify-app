@@ -3,8 +3,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import proxy from 'http-proxy-middleware'; // CJS interop in ESM
-const { createProxyMiddleware } = proxy;
+import { createProxyMiddleware } from 'http-proxy-middleware'; // ESM-friendly import
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -42,7 +41,7 @@ import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001);
 const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
 
-// Where your built Admin UI lives (vite build → ../admin-ui-dist)
+// Where your built Admin UI lives (vite build → ../refina-backend/admin-ui-dist)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ADMIN_UI_DIR = path.join(__dirname, 'admin-ui-dist');
@@ -333,9 +332,19 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
 // ───────────────────────── Admin UI (embedded) ─────────────────────────
-// Long-cache static assets
-app.use('/admin-ui/assets', express.static(path.join(__dirname, '../dist/assets'), { immutable: true, maxAge: '1y' }));
-app.use('/assets', express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' }));
+// ✅ Option A: serve built Admin UI from ADMIN_UI_DIR consistently
+
+// 1) Long-cache fingerprinted assets
+app.use(
+  '/admin-ui/assets',
+  express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' })
+);
+
+// 2) Root-level static (favicon, manifest, robots, etc.) — no index
+app.use(
+  '/admin-ui',
+  express.static(ADMIN_UI_DIR, { index: false, maxAge: '1h' })
+);
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
@@ -732,46 +741,45 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     };
 
     // --- Fallback: if no products yet, serve a few via Admin API ---
-if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
-  try {
-    const shop = String(storeId || '').toLowerCase(); // <- use your storeId
-    let accessToken = req.accessToken;
+    if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+      try {
+        const shop = String(storeId || '').toLowerCase(); // <- use your storeId
+        let accessToken = req.accessToken;
 
-    // Load offline session token if middleware didn't attach one
-    if (!accessToken && shop) {
-      const offlineId = shopify.session.getOfflineId(shop);
-      const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
-      const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
-      accessToken = offlineSession?.accessToken || null;
-    }
+        // Load offline session token if middleware didn't attach one
+        if (!accessToken && shop) {
+          const offlineId = shopify.session.getOfflineId(shop);
+          const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+          const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+          accessToken = offlineSession?.accessToken || null;
+        }
 
-    if (shop && accessToken) {
-      // Use the user’s concern text as the search hint
-      const q = concernInput || '';
-      const fb = await fetchFallbackProducts(shop, accessToken, { limit: 10, query: q });
+        if (shop && accessToken) {
+          // Use the user’s concern text as the search hint
+          const q = concernInput || '';
+          const fb = await fetchFallbackProducts(shop, accessToken, { limit: 10, query: q });
 
-      if (Array.isArray(fb) && fb.length) {
-        const fallbackPayload = {
-          productIds: fb.map(p => p.id),
-          products: fb.map(p => ({
-            id: p.id, title: p.title, handle: p.handle, image: p.image, url: p.url
-          })),
-          copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
-          disclaimer,
-          ...(enriched ? { enriched } : {}), // keep existing if any
-          meta: { ...meta, tone, plan, rankMode, routineMode, source: 'fallback', totalMs: Date.now() - t0 },
-        };
-        if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
-        return res.json(fallbackPayload);
+          if (Array.isArray(fb) && fb.length) {
+            const fallbackPayload = {
+              productIds: fb.map(p => p.id),
+              products: fb.map(p => ({
+                id: p.id, title: p.title, handle: p.handle, image: p.image, url: p.url
+              })),
+              copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
+              disclaimer,
+              ...(enriched ? { enriched } : {}), // keep existing if any
+              meta: { ...meta, tone, plan, rankMode, routineMode, source: 'fallback', totalMs: Date.now() - t0 },
+            };
+            if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
+            return res.json(fallbackPayload);
+          }
+        }
+      } catch (err) {
+        console.error('[recommend] fallback error', err);
+        // fall through to normal payload
       }
     }
-  } catch (err) {
-    console.error('[recommend] fallback error', err);
-    // fall through to normal payload
-  }
-}
-// --- end fallback ---
-
+    // --- end fallback ---
 
     cacheSet(cacheKey, payload);
     res.json(payload);
@@ -867,94 +875,94 @@ app.post('/v1/recommend', async (req, res) => {
     }
 
     // pick the top N upfront
-const used = productIds.slice(0, plan === 'free' ? 3 : 8);
+    const used = productIds.slice(0, plan === 'free' ? 3 : 8);
 
-// route-local meta + helpers this handler expects later
-let meta = { source: 'mapping', cache: 'miss' };
-let enriched = null; // keep defined even if unused in this v1 handler
-const disclaimer = /beauty|skin|hair|cosmetic/i.test(String(category || ''))
-  ? 'Skincare guidance only — not medical advice.'
-  : '';
+    // route-local meta + helpers this handler expects later
+    let meta = { source: 'mapping', cache: 'miss' };
+    let enriched = null; // keep defined even if unused in this v1 handler
+    const disclaimer = /beauty|skin|hair|cosmetic/i.test(String(category || ''))
+      ? 'Skincare guidance only — not medical advice.'
+      : '';
 
-// hydrate product objects for the UI
-const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-const hydrate = used.map((id) => {
-  const p = allProducts.find((x) => x.id === id) || {};
-  const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-  const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-  return {
-    id: p.id,
-    title: p.title || p.name || '',
-    name: p.title || p.name || '',
-    image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-    description: p.description || '',
-    productType: p.productType || '',
-    tags: p.tags || [],
-    url: productUrl,
-    price: p.price ?? null,
-  };
-});
+    // hydrate product objects for the UI
+    const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const hydrate = used.map((id) => {
+      const p = allProducts.find((x) => x.id === id) || {};
+      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+      return {
+        id: p.id,
+        title: p.title || p.name || '',
+        name: p.title || p.name || '',
+        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+        description: p.description || '',
+        productType: p.productType || '',
+        tags: p.tags || [],
+        url: productUrl,
+        price: p.price ?? null,
+      };
+    });
 
-// friendly copy from what we actually send back
-const copy = shapeCopy({
-  products: hydrate, // <- use hydrated list
-  concern: normalizedConcern,
-  tone,
-  category,
-});
+    // friendly copy from what we actually send back
+    const copy = shapeCopy({
+      products: hydrate, // <- use hydrated list
+      concern: normalizedConcern,
+      tone,
+      category,
+    });
 
-// --- Fallback: if no products, serve a few via Admin API so reviewers see results ---
-if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
-  try {
-    const offlineId = shopify.session.getOfflineId(shop);
-    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
-    const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
-    const accessToken = offlineSession?.accessToken || null;
+    // --- Fallback: if no products, serve a few via Admin API so reviewers see results ---
+    if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+      try {
+        const offlineId = shopify.session.getOfflineId(shop);
+        const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+        const offlineSession = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+        const accessToken = offlineSession?.accessToken || null;
 
-    if (accessToken) {
-      const fb = await fetchFallbackProducts(shop, accessToken, {
-        limit: 10,
-        query: concernInput || '',
-      });
+        if (accessToken) {
+          const fb = await fetchFallbackProducts(shop, accessToken, {
+            limit: 10,
+            query: concernInput || '',
+          });
 
-      if (Array.isArray(fb) && fb.length) {
-        const fallbackPayload = {
-          productIds: fb.map((p) => p.id),
-          products: fb.map((p) => ({
-            id: p.id,
-            title: p.title,
-            name: p.title,
-            handle: p.handle,
-            image: p.image,
-            url: p.url,
-          })),
-          copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
-          disclaimer,
-          ...(enriched ? { enriched } : {}),
-          meta: { ...meta, tone, plan, source: 'fallback', totalMs: Date.now() - t0 },
-        };
-        if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
-        return res.json(fallbackPayload);
+          if (Array.isArray(fb) && fb.length) {
+            const fallbackPayload = {
+              productIds: fb.map((p) => p.id),
+              products: fb.map((p) => ({
+                id: p.id,
+                title: p.title,
+                name: p.title,
+                handle: p.handle,
+                image: p.image,
+                url: p.url,
+              })),
+              copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
+              disclaimer,
+              ...(enriched ? { enriched } : {}),
+              meta: { ...meta, tone, plan, source: 'fallback', totalMs: Date.now() - t0 },
+            };
+            if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
+            return res.json(fallbackPayload);
+          }
+        }
+      } catch (err) {
+        console.error('[v1/recommend] fallback error', err);
+        // fall through to normal payload
       }
     }
-  } catch (err) {
-    console.error('[v1/recommend] fallback error', err);
-    // fall through to normal payload
-  }
-}
-// --- end fallback ---
+    // --- end fallback ---
 
-// normal response path
-const payload = {
-  productIds: used,
-  products: hydrate,
-  copy,
-  disclaimer,
-  ...(enriched ? { enriched } : {}),
-  meta: { ...meta, tone, plan, totalMs: Date.now() - t0 },
-};
-if (typeof cacheSet === 'function') cacheSet(cacheKey, payload);
-return res.json(payload);
+    // normal response path
+    const payload = {
+      productIds: used,
+      products: hydrate,
+      copy,
+      disclaimer,
+      ...(enriched ? { enriched } : {}),
+      meta: { ...meta, tone, plan, totalMs: Date.now() - t0 },
+    };
+    if (typeof cacheSet === 'function') cacheSet(cacheKey, payload);
+    return res.json(payload);
   } catch (e) {
     console.error('POST /v1/recommend error', e);
     res.status(500).json({ error: 'internal_error' });
@@ -970,6 +978,7 @@ app.listen(PORT, () => {
   console.log(`Origin:             ${PUBLIC_BACKEND_ORIGIN}`);
   console.log(`Admin UI:           GET  /embedded  → /admin-ui`);
   console.log(`Admin UI Assets:    GET  /admin-ui/assets/*  (immutable)`);
+  console.log(`Admin UI Static:    GET  /admin-ui/* (favicon/manifest, no index)`);
   console.log(`App Proxy HTML:     GET  /proxy/refina`);
   console.log(`App Proxy APIs:     GET  /proxy/refina/v1/concerns`);
   console.log(`                    GET  /proxy/refina/v1/settings`);
