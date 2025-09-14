@@ -14,6 +14,54 @@ router.use(
   ["/plan", "/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
   validate
 );
+// Version-compatible Admin JWT validator for embedded requests
+async function validateAdminSessionCompat(req, res, next) {
+  try {
+    // Case 1: Old/standard middleware available
+    if (typeof shopify.validateAuthenticatedSession === 'function') {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
+
+    // Case 2: Newer API with dynamic authenticate.admin
+    if (shopify.authenticate && typeof shopify.authenticate.admin === 'function') {
+      await shopify.authenticate.admin(req, res);
+      return next();
+    }
+
+    // Case 3: Manual JWT check (works with App Bridge authenticatedFetch)
+    const auth = req.headers.authorization || '';
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    if (!m) throw new Error('no_bearer');
+
+    const token = m[1];
+    const payload = await shopify.api.session.decodeSessionToken(token);
+    const shopFromDest = String(payload.dest || '')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*/, '');
+
+    // Attach minimal "session" so downstream can resolve shop
+    res.locals.shopify = res.locals.shopify || {};
+    res.locals.shopify.session = { shop: shopFromDest };
+
+    return next();
+  } catch (err) {
+    // Tell App Bridge to reauthorize
+    const shopParam = String(req.query?.shop || '').toLowerCase();
+    const hostParam = String(req.query?.host || '');
+    const rawBase = process.env.HOST || `${req.protocol}://${req.get('host')}`;
+    let base = String(rawBase).replace(/\/+$/, '');
+    if (base.startsWith('http://')) base = base.replace(/^http:\/\//, 'https://');
+    const authUrl = new URL('/api/auth', base);
+    if (shopParam) authUrl.searchParams.set('shop', shopParam);
+    if (hostParam) authUrl.searchParams.set('host', hostParam);
+
+    return res
+      .status(401)
+      .set('X-Shopify-API-Request-Failure-Reauthorize', '1')
+      .set('X-Shopify-API-Request-Failure-Reauthorize-Url', authUrl.toString())
+      .send('reauthorize');
+  }
+}
 
 /* --------------------------- Utilities --------------------------- */
 
@@ -33,18 +81,21 @@ function normalizePlan(data) {
 
 /** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, res) {
-// ✅ First prefer verified shop from JWT-validated Admin session
+  // ✅ Prefer verified shop from JWT-validated Admin session (set by our middleware)
   const sessShop = res?.locals?.shopify?.session?.shop;
   let shop =
-    (typeof sessShop === "string" && sessShop
-      ? sessShop.toLowerCase()
-      : null) ||
+    (typeof sessShop === "string" && sessShop ? sessShop.toLowerCase() : null) ||
     (typeof req.shop === "string" && req.shop ? req.shop.toLowerCase() : null);
 
   const q = req.query || {};
-  if (!shop && typeof q.shop === "string" && q.shop.toLowerCase().endsWith(".myshopify.com")) {
-    shop = q.shop.toLowerCase();
+
+  // Fallback 1: explicit ?shop=<store>.myshopify.com
+  if (!shop && typeof q.shop === "string") {
+    const s = q.shop.toLowerCase().trim();
+    if (s.endsWith(".myshopify.com")) shop = s;
   }
+
+  // Fallback 2: decode ?host= (base64 admin URL)
   if (!shop && typeof q.host === "string") {
     try {
       const decoded = Buffer.from(q.host, "base64").toString("utf8");
@@ -52,14 +103,17 @@ async function resolveShopContext(req, res) {
       const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
       if (m1?.[1]) shop = `${m1[1].toLowerCase()}.myshopify.com`;
       if (!shop && m2?.[1]) shop = `${m2[1].toLowerCase()}.myshopify.com`;
-    } catch { /* no-op */ }
-  }
-  // NEW: final fallback via header
-  if (!shop) {
-    const hdr = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "").toLowerCase().trim();
-    if (hdr.endsWith(".myshopify.com")) {
-      shop = hdr;
+    } catch {
+      /* ignore */
     }
+  }
+
+  // Fallback 3: header (Shopify sometimes forwards this)
+  if (!shop) {
+    const hdr = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "")
+      .toLowerCase()
+      .trim();
+    if (hdr.endsWith(".myshopify.com")) shop = hdr;
   }
 
   if (!shop) {
@@ -69,6 +123,7 @@ async function resolveShopContext(req, res) {
   }
   return { shop };
 }
+
 
 /* ---------- Shopify GraphQL compatibility (works across SDK shapes) ---------- */
 
@@ -282,6 +337,10 @@ router.get("/activated", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
+
+    // Protect Admin-UI initiated endpoints (JWT via App Bridge). Leave /activated open.
+router.use(['/plan','/status','/subscribe','/upgrade','/downgrade','/sync'], validateAdminSessionCompat);
+
 
     // Deep-link to your SPA route (/admin-ui/...) directly (avoid "/" which may 404)
 const hostParam = String(req.query.host || "");
