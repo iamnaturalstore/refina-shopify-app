@@ -109,6 +109,9 @@ router.get("/toplevel", (req, res) => {
 /**
  * OAuth callback target configured in the Partner app.
  * Finishes OAuth then redirects to your embedded Admin UI (deep-link aware).
+ *
+ * Approved change: always redirect TOP FRAME to /admin-ui/,
+ * and if a deep link was requested, pass it via ?return_to=...
  */
 router.get("/callback", async (req, res) => {
   try {
@@ -122,12 +125,15 @@ router.get("/callback", async (req, res) => {
 
     // Honor optional deep-link from the original /api/auth
     const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
-    const targetPath = returnTo || "/admin-ui/";
 
-    // Append shop + host to the SPA route
-    const sep = targetPath.includes("?") ? "&" : "?";
-    const redirectUrl =
-      `${targetPath}${sep}shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}`;
+    // Always send top-frame to app root; carry deep link as a param for the SPA to consume.
+    const basePath = "/admin-ui/"; // iframe entry point
+    const sep = basePath.includes("?") ? "&" : "?";
+    let redirectUrl =
+      `${basePath}${sep}shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&embedded=1`;
+    if (returnTo) {
+      redirectUrl += `&return_to=${encodeURIComponent(returnTo)}`;
+    }
 
     return res.redirect(302, redirectUrl);
   } catch (err) {

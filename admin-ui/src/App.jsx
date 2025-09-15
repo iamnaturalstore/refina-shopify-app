@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import * as P from "@shopify/polaris";
 import { initAppBridge } from "./appBridge";
+import { consumeReturnTo } from "./utils/returnTo"; // NEW
 
 // Real pages
 import Home from "./pages/Home.jsx";
@@ -106,14 +107,22 @@ function TitleBarSync() {
   return null;
 }
 
+// ---------- NEW: consume return_to inside Router context
+function ReturnToSync() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    consumeReturnTo(navigate);
+  }, [navigate]);
+  return null;
+}
+
 // ---------- App
 export default function App() {
-
-
   return (
     <P.Frame>
       <HashRouter>
         <TitleBarSync />
+        <ReturnToSync /> {/* NEW */}
         <TopNav />
         <P.Box padding="400">
           <Routes>
