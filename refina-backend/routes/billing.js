@@ -512,22 +512,22 @@ router.post("/subscribe", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-    let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
-    if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
-    const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
-    const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(
-      shop
-    )}&host=${encodeURIComponent(hostParam)}`;
+let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
+if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
 
-    const PLAN = { name: "Premium", amount: "49.00" };
-    const testFlag =
-      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
-        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
-      process.env.NODE_ENV !== "production";
+// Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
+const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
-    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
-      console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
-    }
+const PLAN = { name: "Premium", amount: "49.00" };
+const testFlag =
+  ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+    .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+  process.env.NODE_ENV !== "production";
+
+if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+  console.log("[Billing]/subscribe returnUrl", returnUrl.length, returnUrl);
+  console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+}
 
     // Safe call with scoped userErrors
     let confirmationUrl = null;
@@ -644,26 +644,27 @@ router.post("/upgrade", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-    const explicitReturn = String(req.body?.returnUrl || "");
-    let returnUrl = explicitReturn;
-    if (!returnUrl) {
-      let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
-      if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
-      const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
-      returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(
-        shop
-      )}&host=${encodeURIComponent(hostParam)}`;
-    }
+const explicitReturn = String(req.body?.returnUrl || "");
+let returnUrl = explicitReturn;
+if (!returnUrl) {
+  let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
+  if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
 
-    const PLAN = { name: "Premium", amount: "49.00" };
-    const testFlag =
-      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
-        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
-      process.env.NODE_ENV !== "production";
+  // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
+  returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+}
 
-    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
-      console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
-    }
+const PLAN = { name: "Premium", amount: "49.00" };
+const testFlag =
+  ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+    .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+  process.env.NODE_ENV !== "production";
+
+if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+  console.log("[Billing]/upgrade returnUrl", returnUrl.length, returnUrl);
+  console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+}
+
 
     // Safe call with scoped userErrors
     let confirmationUrl = null;
