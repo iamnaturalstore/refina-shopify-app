@@ -180,18 +180,54 @@ async function gql(client, query, variables) {
 /* ------------------------ Shared helpers ------------------------ */
 
 async function ensureOfflineSession(shop) {
-  const offlineId = shopify.session.getOfflineId(shop);
-  const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
-  const offlineSession = storage?.loadSession
-    ? await storage.loadSession(offlineId)
-    : null;
-  if (!offlineSession?.accessToken) {
+  // Support both modern and legacy SDK shapes
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
+
+  if (!storage?.loadSession) {
     const err = new Error("reauthorize");
     err.status = 401;
     throw err;
   }
-  return offlineSession;
+
+  // Try multiple candidate IDs for the offline session across SDK versions
+  const candidates = [];
+  try {
+    if (shopify?.session?.getOfflineId) {
+      candidates.push(shopify.session.getOfflineId(shop));
+    }
+  } catch {}
+  try {
+    if (shopify?.api?.session?.getOfflineId) {
+      candidates.push(shopify.api.session.getOfflineId(shop));
+    }
+  } catch {}
+  // Canonical fallback
+  candidates.push(`offline_${shop}`);
+
+  const seen = new Set();
+  for (const id of candidates) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    try {
+      const sess = await storage.loadSession(id);
+      if (sess?.accessToken) return sess;
+    } catch {}
+  }
+
+  const err = new Error("reauthorize");
+  err.status = 401;
+  throw err;
 }
+router.use((req, _res, next) => {
+  if (process.env.DEBUG_AUTH === "1" && req.path.startsWith("/billing/")) {
+    const hasAuth = !!req.headers.authorization;
+    console.log(`[auth-debug] ${req.method} ${req.path} auth=${hasAuth ? "present" : "missing"} shop=${req.query.shop || ""}`);
+  }
+  next();
+});
 
 /**
  * NEW: Try offline first; if missing, fall back to the ONLINE Admin session
