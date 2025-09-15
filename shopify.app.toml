@@ -29,6 +29,7 @@ api_version = "2024-10"
 [access_scopes]
 scopes = "read_products"
 
+
 [auth]
 redirect_urls = [
   "https://refina-app.onrender.com/api/auth/callback",

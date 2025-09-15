@@ -1,4 +1,5 @@
-// refina-backend/routes/billing.js — hardened billing routes (app subscriptions)
+// refina-backend/routes/billing.js — GOLDEN PATH++ (legacy + new endpoints)
+// Full-domain shop keys only; preserves Firestore plan docs; adds fresh-sync plan and upgrade/downgrade
 "use strict";
 
 import express from "express";
@@ -46,68 +47,22 @@ function sendReauth(res, req, opts = {}) {
 
   return res
     .status(401)
+    // CORS + header exposure so the client can read reauth headers
     .set("Access-Control-Allow-Origin", "*")
     .set("Access-Control-Allow-Headers", "*")
     .set(
       "Access-Control-Expose-Headers",
       "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url"
     )
+    // Shopify App Bridge reauth handshake
     .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
     .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
     .send("reauthorize");
 }
 
-/* --------------------- Version-compatible Admin JWT -------------------- */
-async function validateAdminSessionCompat(req, res, next) {
-  try {
-    // 1) Prefer built-in authenticate.admin (works on modern SDKs)
-    if (shopify?.authenticate?.admin) {
-      try {
-        const auth = await shopify.authenticate.admin(req, res);
-        if (auth?.session?.shop) {
-          res.locals.shopify = res.locals.shopify || {};
-          res.locals.shopify.session = auth.session; // may or may not include accessToken (online)
-          return next();
-        }
-      } catch (_e) { /* fall through */ }
-    }
-
-    // 2) App Bridge JWT fallback — decode just to get the shop domain
-    const authz = req.headers.authorization || "";
-    const m = authz.match(/^Bearer\s+(.+)$/i);
-    if (m) {
-      try {
-        const payload = await shopify.api.session.decodeSessionToken(m[1]);
-        const shopFromDest = String(payload.dest || payload.iss || "")
-          .replace(/^https?:\/\//i, "")
-          .replace(/\/.*$/, "");
-        if (shopFromDest.endsWith(".myshopify.com")) {
-          res.locals.shopify = res.locals.shopify || {};
-          res.locals.shopify.session = { shop: shopFromDest }; // no token, but gives us context
-          return next();
-        }
-      } catch (_e) { /* fall through */ }
-    }
-
-    // 3) Legacy cookie guard
-    if (typeof shopify?.validateAuthenticatedSession === "function") {
-      return shopify.validateAuthenticatedSession()(req, res, next);
-    }
-
-    return sendReauth(res, req);
-  } catch (_err) {
-    return sendReauth(res, req);
-  }
-}
-
-// Protect Admin-UI endpoints; keep /plan open (but require auth for fresh=1)
-router.use(
-  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
-  validateAdminSessionCompat
-);
-
 /* --------------------------- Shop resolution --------------------------- */
 
+/** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, res) {
   const sessShop = res?.locals?.shopify?.session?.shop;
   const q = req.query || {};
@@ -149,71 +104,38 @@ async function resolveShopContext(req, res) {
   return { shop };
 }
 
-/* ---------- Shopify GraphQL compatibility & diagnostics ---------- */
+/* ---------- Shopify GraphQL compatibility (works across SDK shapes) ---------- */
 
 function getGraphqlClient(session) {
   const Graphql =
     shopify?.api?.clients?.Graphql ||
     shopify?.clients?.Graphql;
   if (!Graphql) {
-    throw new Error("Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql).");
+    throw new Error(
+      "Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql)."
+    );
   }
   return new Graphql({ session });
 }
 
-/** Unified GQL that throws with rich detail on errors */
 async function gql(client, query, variables) {
-  try {
-    // New client shape: client.query({ data: { query, variables }})
-    if (typeof client.query === "function") {
-      const resp = await client.query({
-        data: variables ? { query, variables } : { query },
-      });
-      const body = resp?.body ?? resp;
-      if (body?.errors?.length) {
-        const msg = body.errors.map(e => e.message || String(e)).join("; ");
-        const err = new Error(`GraphQL errors: ${msg}`);
-        err.details = body.errors;
-        err.kind = "GQL_ERRORS";
-        throw err;
-      }
-      return body?.data ?? null;
-    }
-
-    // Older client: client.request(query, { variables })
-    if (typeof client.request === "function") {
-      const resp = await client.request(query, variables ? { variables } : undefined);
-      const data = resp?.data ?? resp?.body?.data ?? null;
-      const errs = resp?.errors ?? resp?.body?.errors ?? null;
-      if (errs?.length) {
-        const msg = errs.map(e => e.message || String(e)).join("; ");
-        const err = new Error(`GraphQL errors: ${msg}`);
-        err.details = errs;
-        err.kind = "GQL_ERRORS";
-        throw err;
-      }
-      return data;
-    }
-
-    throw new Error("Shopify GraphQL client missing .query/.request");
-  } catch (e) {
-    // Normalize thrown Admin API errors (with response info) so we can log cleanly
-    if (e?.response) {
-      const status = e.response?.code || e.response?.status;
-      const body = e.response?.body || e.response?.data;
-      const err = new Error(`GraphQL request failed (${status})`);
-      err.kind = "GQL_HTTP";
-      err.status = status;
-      err.body = body;
-      throw err;
-    }
-    throw e;
+  if (typeof client.query === "function") {
+    const resp = await client.query({
+      data: variables ? { query, variables } : { query },
+    });
+    return resp?.body?.data;
   }
+  if (typeof client.request === "function") {
+    const resp = await client.request(query, variables ? { variables } : undefined);
+    return resp?.data ?? resp?.body?.data ?? resp;
+  }
+  throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
-/* ------------------------ Session helpers ------------------------ */
+/* ------------------------ Shared helpers ------------------------ */
 
 async function ensureOfflineSession(shop) {
+  // Support both modern and legacy SDK shapes
   const storage =
     (shopify?.config && shopify.config.sessionStorage) ||
     shopify?.sessionStorage ||
@@ -225,9 +147,19 @@ async function ensureOfflineSession(shop) {
     throw err;
   }
 
+  // Try multiple candidate IDs for the offline session across SDK versions
   const candidates = [];
-  try { if (shopify?.session?.getOfflineId) candidates.push(shopify.session.getOfflineId(shop)); } catch {}
-  try { if (shopify?.api?.session?.getOfflineId) candidates.push(shopify.api.session.getOfflineId(shop)); } catch {}
+  try {
+    if (shopify?.session?.getOfflineId) {
+      candidates.push(shopify.session.getOfflineId(shop));
+    }
+  } catch {}
+  try {
+    if (shopify?.api?.session?.getOfflineId) {
+      candidates.push(shopify.api.session.getOfflineId(shop));
+    }
+  } catch {}
+  // Canonical fallback
   candidates.push(`offline_${shop}`);
 
   const seen = new Set();
@@ -237,7 +169,7 @@ async function ensureOfflineSession(shop) {
     try {
       const sess = await storage.loadSession(id);
       if (sess?.accessToken) return sess;
-    } catch { /* try next */ }
+    } catch {}
   }
 
   const err = new Error("reauthorize");
@@ -245,7 +177,6 @@ async function ensureOfflineSession(shop) {
   throw err;
 }
 
-// Small request logger to help diagnose 401 vs 500 quickly
 router.use((req, _res, next) => {
   if (process.env.DEBUG_AUTH === "1" && req.path.startsWith("/billing/")) {
     const hasAuth = !!req.headers.authorization;
@@ -254,24 +185,108 @@ router.use((req, _res, next) => {
   next();
 });
 
-/** Try offline first; then fall back to online session attached by guard */
+/**
+ * Prefer OFFLINE session for gatekeeping (prevents spurious 401s), then try the
+ * official middleware, then manual JWT decode. Only reauth if all fail.
+ */
+async function validateAdminSessionCompat(req, res, next) {
+  try {
+    // 0) If we can resolve the shop and have an OFFLINE session, let it through.
+    // The actual Shopify calls will still use that offline token.
+    let shopForGate = "";
+    try {
+      const { shop } = await resolveShopContext(req, res);
+      shopForGate = shop;
+      await ensureOfflineSession(shop); // throws if missing
+      res.locals.shopify = res.locals.shopify || {};
+      res.locals.shopify.session = res.locals.shopify.session || { shop };
+      return next();
+    } catch {
+      // fall through to online/JWT validation
+    }
+
+    // 1) Best: official middleware (validates App Bridge JWT, handles skew)
+    if (shopify?.authenticate?.admin) {
+      try {
+        const out = await shopify.authenticate.admin(req, res);
+        if (out?.session?.shop) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = out.session;
+          return next();
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 2) Fallback: decode Authorization: Bearer <AB session token>
+    const authz = req.get("Authorization") || req.headers.authorization || "";
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (m) {
+      try {
+        const token = m[1];
+        const payload = await shopify.api.session.decodeSessionToken(token);
+        const hostish = String(payload.dest || payload.iss || "");
+        const shopFromDest = hostish.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        if (/\.myshopify\.com$/i.test(shopFromDest)) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = { shop: shopFromDest };
+          return next();
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 3) Legacy cookie-based validator
+    if (typeof shopify?.validateAuthenticatedSession === "function") {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
+
+    // 4) No joy → reauth
+    return sendReauth(res, req, {
+      return_to: encodeURIComponent("/admin-ui/billing"),
+      shop: shopForGate || String(req.query?.shop || ""),
+    });
+  } catch {
+    return sendReauth(res, req, {
+      return_to: encodeURIComponent("/admin-ui/billing"),
+    });
+  }
+}
+
+// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
+router.use(
+  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
+  validateAdminSessionCompat
+);
+
+/* ----------------------------- Admin client ---------------------------- */
+
+/**
+ * Try offline first; if missing, fall back to the ONLINE Admin session
+ * attached by the guard. Only force reauth if neither exists.
+ */
 async function getAdminClientForShop(req, res, shop) {
+  // 1) Preferred: offline
   try {
     const offline = await ensureOfflineSession(shop);
     return getGraphqlClient(offline);
-  } catch (_e) { /* fall back */ }
-
+  } catch {
+    // continue to online fallback
+  }
+  // 2) Fallback: online session from guard (must include accessToken)
   const online = res?.locals?.shopify?.session;
   if (online?.shop?.toLowerCase?.() === shop && online?.accessToken) {
     return getGraphqlClient(online);
   }
-
+  // 3) Neither available → reauth
   const err = new Error("reauthorize");
   err.status = 401;
   throw err;
 }
 
-/* ----------------------------- GQL helpers ----------------------------- */
+/* ----------------------------- Shopify ops ----------------------------- */
 
 async function readActiveSubscriptions(client) {
   const q = `
@@ -352,18 +367,16 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     name,
     returnUrl,
     test,
-    amount,                // Decimal scalar — string like "49.00" is OK
-    currency,              // e.g. "USD"
+    amount,
+    currency,
     trialDays: 7,
     replacementBehavior: "APPLY_IMMEDIATELY",
   };
-
   const data = await gql(client, mutation, variables);
   const payload = data?.appSubscriptionCreate || {};
-  const errs = payload?.userErrors || [];
   return {
     confirmationUrl: payload?.confirmationUrl || null,
-    userErrors: Array.isArray(errs) ? errs : [],
+    userErrors: payload?.userErrors || [],
   };
 }
 
@@ -383,8 +396,9 @@ async function cancelSubscription(client, id, prorate = true) {
 
 /* ----------------------------- Routes ---------------------------- */
 
-/** GET /api/billing/plan
- *  `fresh=1` → sync from Shopify first (requires a valid session → may 401 reauth)
+/** GET /api/billing/plan → { plan: {level, status} }
+ *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
+ *  NOTE: This route is NOT behind the global JWT guard; we only require auth when fresh=1.
  */
 router.get("/plan", async (req, res) => {
   try {
@@ -399,7 +413,9 @@ router.get("/plan", async (req, res) => {
         const { level, status } = inferPlanFromSubs(subs);
         await writePlan(shop, level, status);
       } catch (err) {
-        if (err?.status === 401) return sendReauth(res, req, { shop });
+        if (err?.status === 401) {
+          return sendReauth(res, req, { shop });
+        }
         throw err;
       }
     }
@@ -417,7 +433,7 @@ router.get("/plan", async (req, res) => {
   }
 });
 
-/** GET /api/billing/activated → read subs, write Firestore, bounce back to Admin UI */
+/** GET /api/billing/activated → reads activeSubscriptions, writes Firestore, redirects back to Admin UI */
 router.get("/activated", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -432,6 +448,7 @@ router.get("/activated", async (req, res) => {
     const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shop
     )}&billing=success`;
+
     return res.redirect(303, redirect);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
@@ -477,14 +494,12 @@ router.post("/subscribe", async (req, res) => {
     )}&host=${encodeURIComponent(hostParam)}`;
 
     const PLAN = { name: "Premium", amount: "49.00" };
-    const test = process.env.NODE_ENV !== "production";
-
     const { confirmationUrl, userErrors } = await createSubscription(client, {
       name: PLAN.name,
       amount: PLAN.amount,
       currency,
       returnUrl,
-      test,
+      test: process.env.NODE_ENV !== "production",
     });
 
     if (confirmationUrl) return res.json({ confirmationUrl });
@@ -502,20 +517,22 @@ router.post("/subscribe", async (req, res) => {
           amount: PLAN.amount,
           currency,
           returnUrl,
-          test,
+          test: process.env.NODE_ENV !== "production",
         });
         if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
       }
     }
 
-    // Surface userErrors to client instead of generic 500
     return res.status(400).json({ error: "Subscription creation failed", userErrors });
   } catch (err) {
     if (err?.status === 401) {
-      return sendReauth(res, req, { return_to: encodeURIComponent("/admin-ui/billing") });
+      return sendReauth(res, req, {
+        return_to: encodeURIComponent("/admin-ui/billing"),
+      });
     }
     console.error("POST /api/billing/subscribe unhandled error", {
-      shop: req.query?.shop, errKind: err?.kind, status: err?.status, body: err?.body, details: err?.details, message: err?.message,
+      shop: req.query?.shop,
+      error: err,
     });
     return res.status(500).json({ error: "Subscribe failed" });
   }
@@ -525,16 +542,17 @@ router.post("/subscribe", async (req, res) => {
 router.post("/sync", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const client = await getAdminClientForShop(req, res, shop);
+    const offlineSession = await ensureOfflineSession(shop);
+    const client = getGraphqlClient(offlineSession);
+
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
+
     return res.json({ ok: true, level, status });
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
-    console.error("POST /api/billing/sync error", {
-      shop: req.query?.shop, errKind: err?.kind, status: err?.status, body: err?.body, details: err?.details, message: err?.message,
-    });
+    console.error("POST /api/billing/sync error", err);
     return res.status(500).json({ error: "Sync failed" });
   }
 });
@@ -543,14 +561,13 @@ router.post("/sync", async (req, res) => {
 router.get("/status", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const client = await getAdminClientForShop(req, res, shop);
+    const offlineSession = await ensureOfflineSession(shop);
+    const client = getGraphqlClient(offlineSession);
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
-    console.error("GET /api/billing/status error", {
-      shop: req.query?.shop, errKind: err?.kind, status: err?.status, body: err?.body, details: err?.details, message: err?.message,
-    });
+    console.error("GET /api/billing/status error", err);
     return res.status(500).json({ error: "Status failed" });
   }
 });
@@ -559,9 +576,8 @@ router.get("/status", async (req, res) => {
 router.post("/upgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-
-    // Prefer offline, but fall back to online if available
-    const client = await getAdminClientForShop(req, res, shop);
+    const offlineSession = await ensureOfflineSession(shop);
+    const client = getGraphqlClient(offlineSession);
 
     const subs = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(subs);
@@ -595,7 +611,6 @@ router.post("/upgrade", async (req, res) => {
 
     if (confirmationUrl) return res.json({ confirmationUrl });
 
-    // If Shopify blocks due to existing active recurring charge, try cancel+retry
     const looksLikeActiveBlock = (userErrors || [])
       .map((e) => e?.message || "")
       .join("; ")
@@ -615,23 +630,20 @@ router.post("/upgrade", async (req, res) => {
       }
     }
 
-    // Surface userErrors to client
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
-    console.error("POST /api/billing/upgrade error", {
-      shop: req.query?.shop, errKind: err?.kind, status: err?.status, body: err?.body, details: err?.details, message: err?.message,
-    });
+    console.error("POST /api/billing/upgrade error", err);
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
 
-/** POST /api/billing/downgrade → cancel active subs; set plan Free */
+/** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
 
-    // Try OFFLINE first, then ONLINE (from guard).
+    // Try OFFLINE first, then ONLINE (from guard). Reauth only if neither exists.
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
@@ -640,15 +652,18 @@ router.post("/downgrade", async (req, res) => {
       .map((s) => s?.id)
       .filter(Boolean);
 
+    // Idempotent: if nothing to cancel, just mark Free + return
     if (activeIds.length === 0) {
       await writePlan(shop, "free", "NONE");
       return res.json({ ok: true, message: "No active subscription" });
     }
 
+    // Cancel all active subscriptions (sequential = safer for Shopify)
     const canceled = [];
     for (const id of activeIds) {
       const { canceled: c, userErrors } = await cancelSubscription(client, id, true);
       if (userErrors?.length) {
+        // Surface first error (usually enough context for UI)
         return res.status(400).json({
           error: "CANCEL_FAILED",
           message: userErrors.map((u) => u?.message || "Cancel failed").join("; "),
@@ -658,18 +673,18 @@ router.post("/downgrade", async (req, res) => {
       if (c) canceled.push(c);
     }
 
+    // Persist plan state last
     await writePlan(shop, "free", "NONE");
     return res.json({ ok: true, canceled });
   } catch (err) {
     if (err?.status === 401) {
+      // Ask the client to reauth and come back to Billing
       return sendReauth(res, req, {
         shop: String(req.query?.shop || ""),
         return_to: encodeURIComponent("/admin-ui/billing"),
       });
     }
-    console.error("POST /api/billing/downgrade error", {
-      shop: req.query?.shop, errKind: err?.kind, status: err?.status, body: err?.body, details: err?.details, message: err?.message,
-    });
+    console.error("POST /api/billing/downgrade error", err);
     return res.status(500).json({ error: "Downgrade failed" });
   }
 });
