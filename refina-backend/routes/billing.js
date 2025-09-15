@@ -499,7 +499,9 @@ router.post("/subscribe", async (req, res) => {
       amount: PLAN.amount,
       currency,
       returnUrl,
-      test: process.env.NODE_ENV !== "production",
+      test: (["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"]
+            .some(k => String(process.env[k] || "").toLowerCase() === "true")
+            || process.env.NODE_ENV !== "production"),
     });
 
     if (confirmationUrl) return res.json({ confirmationUrl });
@@ -517,7 +519,9 @@ router.post("/subscribe", async (req, res) => {
           amount: PLAN.amount,
           currency,
           returnUrl,
-          test: process.env.NODE_ENV !== "production",
+          test: (["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"]
+              .some(k => String(process.env[k] || "").toLowerCase() === "true")
+              || process.env.NODE_ENV !== "production"),
         });
         if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
       }
@@ -599,7 +603,11 @@ router.post("/upgrade", async (req, res) => {
     }
 
     const PLAN = { name: "Premium", amount: "49.00" };
-    const test = process.env.NODE_ENV !== "production";
+    const test =
+      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+      process.env.NODE_ENV !== "production";
+
 
     const { confirmationUrl, userErrors } = await createSubscription(client, {
       name: PLAN.name,
