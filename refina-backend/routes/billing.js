@@ -60,10 +60,10 @@ function sendReauth(res, req, opts = {}) {
     .send("reauthorize");
 }
 
-/* --------------------- Version-compatible Admin JWT -------------------- */
+// Prefer JWT first, then new authenticate.admin, then legacy cookie validator
 async function validateAdminSessionCompat(req, res, next) {
   try {
-    // Prefer App Bridge JWT (Authorization: Bearer ...) because embedded apps use this
+    // 1) App Bridge JWT (Authorization: Bearer ...)
     const authz = req.headers.authorization || "";
     const m = authz.match(/^Bearer\s+(.+)$/i);
     if (m) {
@@ -73,13 +73,12 @@ async function validateAdminSessionCompat(req, res, next) {
         .replace(/^https?:\/\//, "")
         .replace(/\/.*$/, "");
       if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
-
       res.locals.shopify = res.locals.shopify || {};
       res.locals.shopify.session = { shop: shopFromDest };
       return next();
     }
 
-    // Next-best: new SDK shape
+    // 2) Newer SDK
     if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
       const auth = await shopify.authenticate.admin(req, res);
       if (auth?.session?.shop) {
@@ -89,13 +88,13 @@ async function validateAdminSessionCompat(req, res, next) {
       return next();
     }
 
-    // Last resort: legacy cookie-based validator (not ideal for embedded fetch)
+    // 3) Legacy cookie validator (last resort)
     if (typeof shopify.validateAuthenticatedSession === "function") {
       return shopify.validateAuthenticatedSession()(req, res, next);
     }
 
     throw new Error("no_auth");
-  } catch (_err) {
+  } catch {
     return sendReauth(res, req);
   }
 }
