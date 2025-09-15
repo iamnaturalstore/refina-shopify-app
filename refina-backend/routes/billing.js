@@ -542,6 +542,8 @@ router.post("/subscribe", async (req, res) => {
   }
 });
 
+if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
+
 /** POST /api/billing/sync → upserts plans/{shop} from activeSubscriptions */
 router.post("/sync", async (req, res) => {
   try {
