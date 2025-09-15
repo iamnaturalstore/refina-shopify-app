@@ -346,13 +346,13 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
         name: $name
         returnUrl: $returnUrl
         test: $test
+        trialDays: $trialDays
         replacementBehavior: $replacementBehavior
         lineItems: [{
           plan: {
             appRecurringPricingDetails: {
               price: { amount: $amount, currencyCode: $currency }
               interval: EVERY_30_DAYS
-              trialDays: $trialDays
             }
           }
         }]
@@ -363,17 +363,42 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
       }
     }
   `;
+
   const variables = {
     name,
     returnUrl,
-    test,
-    amount,
+    test: !!test,
+    amount: typeof amount === "number" ? amount : Number(amount),
     currency,
-    trialDays: 7,
-    replacementBehavior: "APPLY_IMMEDIATELY",
+    trialDays: Number(process.env.BILLING_TRIAL_DAYS || 7),
+    replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
-  const data = await gql(client, mutation, variables);
+
+  if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+    console.log("[Billing] appSubscriptionCreate vars", {
+      name: variables.name,
+      amount: variables.amount,
+      currency: variables.currency,
+      returnUrl: variables.returnUrl,
+      test: variables.test,
+      trialDays: variables.trialDays,
+      replacementBehavior: variables.replacementBehavior,
+    });
+  }
+
+  let data;
+  try {
+    data = await gql(client, mutation, variables);
+  } catch (e) {
+    console.error("[Billing] GraphQL threw", e?.response?.errors || e?.errors || e);
+    throw e;
+  }
+
   const payload = data?.appSubscriptionCreate || {};
+  if ((payload?.userErrors || []).length) {
+    console.error("[Billing] userErrors", payload.userErrors);
+  }
+
   return {
     confirmationUrl: payload?.confirmationUrl || null,
     userErrors: payload?.userErrors || [],
