@@ -486,6 +486,7 @@ router.post("/subscribe", async (req, res) => {
     }
 
     const currency = await fetchShopCurrency(client);
+
     let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
     if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
@@ -494,15 +495,37 @@ router.post("/subscribe", async (req, res) => {
     )}&host=${encodeURIComponent(hostParam)}`;
 
     const PLAN = { name: "Premium", amount: "49.00" };
-    const { confirmationUrl, userErrors } = await createSubscription(client, {
-      name: PLAN.name,
-      amount: PLAN.amount,
-      currency,
-      returnUrl,
-      test: (["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"]
-            .some(k => String(process.env[k] || "").toLowerCase() === "true")
-            || process.env.NODE_ENV !== "production"),
-    });
+    const testFlag =
+      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+      process.env.NODE_ENV !== "production";
+
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+    }
+
+    // Safe call with scoped userErrors
+    let confirmationUrl = null;
+    let userErrors = [];
+    try {
+      ({ confirmationUrl, userErrors = [] } = await createSubscription(client, {
+        name: PLAN.name,
+        amount: PLAN.amount,
+        currency,
+        returnUrl,
+        test: testFlag,
+      }));
+    } catch (e) {
+      console.error("POST /api/billing/subscribe createSubscription error", e?.response?.errors || e?.errors || e);
+      if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+        return res.status(500).json({
+          error: "Subscribe failed",
+          message: e?.message,
+          graphqlErrors: e?.response?.errors || e?.errors || null,
+        });
+      }
+      return res.status(500).json({ error: "Subscribe failed" });
+    }
 
     if (confirmationUrl) return res.json({ confirmationUrl });
 
@@ -512,18 +535,20 @@ router.post("/subscribe", async (req, res) => {
       .match(/already.*active|existing.*active|active recurring/i);
 
     if (looksLikeActiveBlock && currentSubId) {
-      const cancelled = await cancelSubscription(client, currentSubId, true);
-      if (!cancelled.userErrors?.length) {
-        const retry = await createSubscription(client, {
-          name: PLAN.name,
-          amount: PLAN.amount,
-          currency,
-          returnUrl,
-          test: (["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"]
-              .some(k => String(process.env[k] || "").toLowerCase() === "true")
-              || process.env.NODE_ENV !== "production"),
-        });
-        if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+      try {
+        const cancelled = await cancelSubscription(client, currentSubId, true);
+        if (!cancelled.userErrors?.length) {
+          let retry = await createSubscription(client, {
+            name: PLAN.name,
+            amount: PLAN.amount,
+            currency,
+            returnUrl,
+            test: testFlag,
+          });
+          if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+        }
+      } catch (e) {
+        console.error("POST /api/billing/subscribe retry error", e?.response?.errors || e?.errors || e);
       }
     }
 
@@ -538,8 +563,7 @@ router.post("/subscribe", async (req, res) => {
       shop: req.query?.shop,
       error: err,
     });
-    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
-
+    // Do NOT reference userErrors here; it's out of scope on thrown GraphQL.
     return res.status(500).json({ error: "Subscribe failed" });
   }
 });
@@ -559,8 +583,7 @@ router.post("/sync", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
-    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
-
+    // No userErrors here (not a createSubscription path)
     return res.status(500).json({ error: "Sync failed" });
   }
 });
@@ -576,8 +599,7 @@ router.get("/status", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("GET /api/billing/status error", err);
-    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
-
+    // No userErrors here
     return res.status(500).json({ error: "Status failed" });
   }
 });
@@ -609,19 +631,37 @@ router.post("/upgrade", async (req, res) => {
     }
 
     const PLAN = { name: "Premium", amount: "49.00" };
-    const test =
+    const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
       process.env.NODE_ENV !== "production";
 
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+    }
 
-    const { confirmationUrl, userErrors } = await createSubscription(client, {
-      name: PLAN.name,
-      amount: PLAN.amount,
-      currency,
-      returnUrl,
-      test,
-    });
+    // Safe call with scoped userErrors
+    let confirmationUrl = null;
+    let userErrors = [];
+    try {
+      ({ confirmationUrl, userErrors = [] } = await createSubscription(client, {
+        name: PLAN.name,
+        amount: PLAN.amount,
+        currency,
+        returnUrl,
+        test: testFlag,
+      }));
+    } catch (e) {
+      console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
+      if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+        return res.status(500).json({
+          error: "Upgrade failed",
+          message: e?.message,
+          graphqlErrors: e?.response?.errors || e?.errors || null,
+        });
+      }
+      return res.status(500).json({ error: "Upgrade failed" });
+    }
 
     if (confirmationUrl) return res.json({ confirmationUrl });
 
@@ -631,16 +671,20 @@ router.post("/upgrade", async (req, res) => {
       .match(/already.*active|existing.*active|active recurring/i);
 
     if (looksLikeActiveBlock && currentSubId) {
-      const cancelled = await cancelSubscription(client, currentSubId, true);
-      if (!cancelled.userErrors?.length) {
-        const retry = await createSubscription(client, {
-          name: PLAN.name,
-          amount: PLAN.amount,
-          currency,
-          returnUrl,
-          test,
-        });
-        if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+      try {
+        const cancelled = await cancelSubscription(client, currentSubId, true);
+        if (!cancelled.userErrors?.length) {
+          const retry = await createSubscription(client, {
+            name: PLAN.name,
+            amount: PLAN.amount,
+            currency,
+            returnUrl,
+            test: testFlag,
+          });
+          if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
+        }
+      } catch (e) {
+        console.error("POST /api/billing/upgrade retry error", e?.response?.errors || e?.errors || e);
       }
     }
 
@@ -648,8 +692,7 @@ router.post("/upgrade", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
-    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
-
+    // Do NOT reference userErrors here
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
