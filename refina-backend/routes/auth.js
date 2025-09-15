@@ -6,16 +6,14 @@ import shopify from "../shopify.js";
 
 const router = express.Router();
 
-/* ─────────────────────────────────────────────────────────────
-   Helpers
-   ───────────────────────────────────────────────────────────── */
+/* ───────── helpers ───────── */
 
 function sanitizeReturnTo(p) {
   if (!p || typeof p !== "string") return "";
   try {
-    if (/^https?:\/\//i.test(p)) return "";      // disallow absolute URLs
-    if (!p.startsWith("/admin-ui")) return "";   // only allow our UI scope
-    return p.replace(/\/{2,}/g, "/");            // normalize
+    if (/^https?:\/\//i.test(p)) return "";     // disallow absolute URLs
+    if (!p.startsWith("/admin-ui")) return "";  // only allow our UI scope
+    return p.replace(/\/{2,}/g, "/");           // normalize
   } catch { return ""; }
 }
 
@@ -25,9 +23,7 @@ function getCookie(req, name) {
   for (const p of parts) {
     const eq = p.indexOf("=");
     const k = decodeURIComponent((eq === -1 ? p : p.slice(0, eq)).trim());
-    if (k === name) {
-      return decodeURIComponent((eq === -1 ? "" : p.slice(eq + 1)).trim());
-    }
+    if (k === name) return decodeURIComponent((eq === -1 ? "" : p.slice(eq + 1)).trim());
   }
   return "";
 }
@@ -48,9 +44,7 @@ function storeFromShop(shop) {
   return String(shop || "").toLowerCase().replace(/\.myshopify\.com$/, "");
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Begin OAuth (OFFLINE)
-   ───────────────────────────────────────────────────────────── */
+/* ───────── OAuth (offline) ───────── */
 
 router.get("/", async (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
@@ -61,7 +55,7 @@ router.get("/", async (req, res) => {
   const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
-  // Persist deep link for after OAuth (top frame cannot safely carry dynamic redirect_uri)
+  // Persist deep link for after OAuth; keep redirect_uri static.
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
       httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
@@ -71,12 +65,11 @@ router.get("/", async (req, res) => {
   try {
     await shopify.auth.begin({
       shop,
-      callbackPath: "/api/auth/callback",   // STATIC — must match your app’s whitelist
+      callbackPath: "/api/auth/callback",   // STATIC (must be whitelisted)
       isOnline: false,
       rawRequest: req,
       rawResponse: res,
     });
-    // Redirect to accounts.shopify.com handled by SDK
   } catch (err) {
     const needsTop = err?.status === 410 || /top.?level|cookie/i.test(String(err?.message || ""));
     if (needsTop) {
@@ -91,10 +84,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* ─────────────────────────────────────────────────────────────
-   Top-level handoff required by Shopify OAuth
-   ───────────────────────────────────────────────────────────── */
-
+/* Top-level handoff required by Shopify OAuth */
 router.get("/toplevel", (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
   if (!shop.endsWith(".myshopify.com")) {
@@ -103,10 +93,8 @@ router.get("/toplevel", (req, res) => {
   const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
-  // Shopify SDK marker for top-level initiation
   res.cookie("shopifyTopLevelOAuth", "1", { httpOnly: true, secure: true, sameSite: "strict" });
 
-  // Also persist our deep link here (if flow starts at toplevel)
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
       httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
@@ -127,19 +115,26 @@ router.get("/toplevel", (req, res) => {
   return res.status(200).send(html);
 });
 
-/* ─────────────────────────────────────────────────────────────
-   OAuth callback (OFFLINE complete) → send TOP FRAME to Admin apps/refina
-   ───────────────────────────────────────────────────────────── */
-
+/* OAuth callback (OFFLINE complete) → send TOP FRAME to Admin /apps/refina */
 router.get("/callback", async (req, res) => {
   try {
     const { session } = await shopify.auth.callback({ rawRequest: req, rawResponse: res });
 
+    // ── NEW: force-persist the session, just in case the SDK didn’t.
+    try {
+      const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+      if (storage?.storeSession) await storage.storeSession(session);
+      console.log("[OAuth] stored session:", {
+        id: session?.id, isOnline: session?.isOnline, shop: session?.shop, hasToken: !!session?.accessToken,
+      });
+    } catch (e) {
+      console.warn("[OAuth] storeSession warning:", e?.message || e);
+    }
+
     const shop = session.shop;
     const store = storeFromShop(shop);
 
-    // Don’t send the top frame to our domain (App Bridge would try /apps/admin-ui and 404).
-    // Send it directly to the Shopify Admin app handle instead.
+    // Send the TOP FRAME to Shopify Admin app handle (avoids /apps/admin-ui 404s).
     const adminUrl = new URL(`/store/${store}/apps/refina`, "https://admin.shopify.com");
     return res.redirect(302, adminUrl.toString());
   } catch (err) {
@@ -148,26 +143,17 @@ router.get("/callback", async (req, res) => {
   }
 });
 
-/* ─────────────────────────────────────────────────────────────
-   Embedded entrypoint (application_url in shopify.app.toml)
-   Convert to our SPA route and pass along any deep link
-   ───────────────────────────────────────────────────────────── */
-
+/* Embedded entrypoint (application_url in shopify.app.toml) */
 router.get("/embedded", (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
   if (!shop.endsWith(".myshopify.com")) {
-    // Basic guard; embedded hits always carry shop/host
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
   const host = String(req.query.host || "") || computeHostFromShop(shop);
 
-  // Pull and clear deep-link cookie
   const returnTo = sanitizeReturnTo(getCookie(req, "refina_return_to"));
-  if (returnTo) {
-    res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
-  }
+  if (returnTo) res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
 
-  // Now safely move the IFRAME to our SPA, inside our domain
   const target = new URL("/admin-ui/", baseUrl(req));
   target.searchParams.set("shop", shop);
   target.searchParams.set("host", host);
@@ -176,5 +162,32 @@ router.get("/embedded", (req, res) => {
 
   return res.redirect(302, target.toString());
 });
+
+/* ───────── OPTIONAL: debug-only endpoint to confirm offline session exists ─────────
+   Enable by setting env ENABLE_DEBUG_ROUTES=1 in Render.
+   Does NOT require JWT; safe to disable afterward.
+*/
+if (String(process.env.ENABLE_DEBUG_ROUTES || "") === "1") {
+  router.get("/debug/offline", async (req, res) => {
+    try {
+      const shop = String(req.query.shop || "").toLowerCase();
+      if (!shop.endsWith(".myshopify.com")) return res.status(400).json({ error: "bad shop" });
+      const id = shopify.session.getOfflineId(shop);
+      const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+      const sess = storage?.loadSession ? await storage.loadSession(id) : null;
+      return res.json({
+        shop,
+        offlineId: id,
+        hasSession: !!sess,
+        hasToken: !!sess?.accessToken,
+        isOnline: !!sess?.isOnline,
+        expires: sess?.expires ?? null,
+      });
+    } catch (e) {
+      console.error("/debug/offline error", e);
+      return res.status(500).json({ error: "debug failed" });
+    }
+  });
+}
 
 export default router;
