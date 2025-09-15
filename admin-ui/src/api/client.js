@@ -172,46 +172,66 @@ api.delete = (path, init) => api(path, { ...init, method: "DELETE" });
 
 /* ─────────────────────────────────────────────────────────────
    Feature-specific wrappers
+   - Use the unified `api()` which:
+     • uses App Bridge authenticatedFetch
+     • auto-appends shop/host for relative URLs
+     • follows Shopify 401 reauth headers (top-frame redirect)
+     • returns: { data, status, ok } or throws on non-OK
    ───────────────────────────────────────────────────────────── */
+
+/* ---------------- Analytics API ---------------- */
 export const adminApi = {
   async getAnalyticsSummary({ days = 30, from, to } = {}) {
     const qs = new URLSearchParams();
-    if (from && to) { qs.set("from", from); qs.set("to", to); }
-    else if (days != null) { qs.set("days", String(days)); }
-    const url = `/api/admin/analytics/overview${qs.toString() ? `?${qs}` : ""}`;
-    return api.get(url);
+    if (from && to) {
+      qs.set("from", from);
+      qs.set("to", to);
+    } else if (days != null) {
+      qs.set("days", String(days));
+    }
+    const url = `/api/admin/analytics/overview${qs.toString() ? `?${qs.toString()}` : ""}`;
+    return api.get(url); // → { data, status, ok }
   },
+
   async getAnalyticsEvents({ limit, cursor } = {}) {
     const qs = new URLSearchParams();
     if (limit) qs.set("limit", String(limit));
     if (cursor) qs.set("cursor", cursor);
-    const url = `/api/admin/analytics/logs${qs.toString() ? `?${qs}` : ""}`;
+    const url = `/api/admin/analytics/logs${qs.toString() ? `?${qs.toString()}` : ""}`;
     return api.get(url);
   },
 };
 
+/* ---------------- Billing API ---------------- */
 export const billingApi = {
   async getPlan({ fresh } = {}) {
     // Do NOT force fresh=1 by default. Let callers decide.
     const url = fresh ? `/api/billing/plan?fresh=1` : `/api/billing/plan`;
     return api.get(url);
   },
+
   async upgrade({ returnUrl } = {}) {
-    return api(`/api/billing/upgrade`, { method: "POST", body: { returnUrl } });
+    const payload = returnUrl ? { returnUrl } : {};
+    return api.post(`/api/billing/upgrade`, payload);
   },
+
   async downgrade() {
-    return api(`/api/billing/downgrade`, { method: "POST", body: {} });
+    return api.post(`/api/billing/downgrade`, {});
   },
+
   async status() {
     return api.get(`/api/billing/status`);
   },
+
   async sync() {
-    return api(`/api/billing/sync`, { method: "POST", body: {} });
+    return api.post(`/api/billing/sync`, {});
   },
+
   // Legacy (kept for backwards compat; not used by the new Billing page)
   async subscribe({ plan, returnUrl } = {}) {
-    return api(`/api/billing/subscribe`, { method: "POST", body: { plan, returnUrl } });
+    return api.post(`/api/billing/subscribe`, { plan, returnUrl });
   },
 };
+
 
 export default api;

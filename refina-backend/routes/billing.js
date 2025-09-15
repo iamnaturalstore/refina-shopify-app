@@ -566,33 +566,52 @@ router.post("/upgrade", async (req, res) => {
   }
 });
 
-/** POST /api/billing/downgrade → cancels active subscription; sets plan Free */
+/** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
 
-    // *** Key change: try offline, then online; reauth only if neither is available
+    // Try OFFLINE first, then ONLINE (from guard). Reauth only if neither exists.
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
-    const { activeId } = inferPlanFromSubs(subs);
-    if (!activeId) {
+    const activeIds = (subs || [])
+      .filter((s) => String(s?.status || "").toUpperCase() === "ACTIVE")
+      .map((s) => s?.id)
+      .filter(Boolean);
+
+    // Idempotent: if nothing to cancel, just mark Free + return
+    if (activeIds.length === 0) {
       await writePlan(shop, "free", "NONE");
       return res.json({ ok: true, message: "No active subscription" });
     }
 
-    const { canceled, userErrors } = await cancelSubscription(client, activeId, true);
-    if (userErrors?.length) {
-      return res.status(400).json({
-        error: "CANCEL_FAILED",
-        message: userErrors.map((u) => u?.message || "Cancel failed").join("; "),
-      });
+    // Cancel all active subscriptions (sequential = safer for Shopify)
+    const canceled = [];
+    for (const id of activeIds) {
+      const { canceled: c, userErrors } = await cancelSubscription(client, id, true);
+      if (userErrors?.length) {
+        // Surface first error (usually enough context for UI)
+        return res.status(400).json({
+          error: "CANCEL_FAILED",
+          message: userErrors.map((u) => u?.message || "Cancel failed").join("; "),
+          id,
+        });
+      }
+      if (c) canceled.push(c);
     }
 
+    // Persist plan state last
     await writePlan(shop, "free", "NONE");
     return res.json({ ok: true, canceled });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
+    if (err?.status === 401) {
+      // Ask the client to reauth and come back to Billing
+      return sendReauth(res, req, {
+        shop: String(req.query?.shop || ""),
+        return_to: encodeURIComponent("/admin-ui/billing"),
+      });
+    }
     console.error("POST /api/billing/downgrade error", err);
     return res.status(500).json({ error: "Downgrade failed" });
   }
