@@ -60,61 +60,6 @@ function sendReauth(res, req, opts = {}) {
     .send("reauthorize");
 }
 
-/* --------------------- Version-compatible Admin JWT -------------------- */
-async function validateAdminSessionCompat(req, res, next) {
-  try {
-    // 1) Prefer Shopify's built-in authenticate.admin (works across SDK shapes)
-    if (shopify?.authenticate?.admin) {
-      try {
-        const auth = await shopify.authenticate.admin(req, res);
-        if (auth?.session?.shop) {
-          res.locals.shopify = res.locals.shopify || {};
-          res.locals.shopify.session = auth.session;
-          return next();
-        }
-      } catch (_e) {
-        // fall through to other strategies
-      }
-    }
-
-    // 2) App Bridge JWT (Authorization: Bearer <token>) — decode just to get the shop
-    const authz = req.headers.authorization || "";
-    const m = authz.match(/^Bearer\s+(.+)$/i);
-    if (m) {
-      try {
-        const token = m[1];
-        const payload = await shopify.api.session.decodeSessionToken(token);
-        const shopFromDest = String(payload.dest || payload.iss || "")
-          .replace(/^https?:\/\//, "")
-          .replace(/\/.*$/, "");
-        if (shopFromDest.endsWith(".myshopify.com")) {
-          res.locals.shopify = res.locals.shopify || {};
-          res.locals.shopify.session = { shop: shopFromDest };
-          return next();
-        }
-      } catch (_e) {
-        // don't reauth yet; try legacy below
-      }
-    }
-
-    // 3) Legacy cookie-based validator (older SDKs)
-    if (typeof shopify?.validateAuthenticatedSession === "function") {
-      return shopify.validateAuthenticatedSession()(req, res, next);
-    }
-
-    // If none worked, trigger the App Bridge reauth handshake
-    return sendReauth(res, req);
-  } catch (_err) {
-    return sendReauth(res, req);
-  }
-}
-
-// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
-router.use(
-  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
-  validateAdminSessionCompat
-);
-
 /* --------------------------- Shop resolution --------------------------- */
 
 /** Resolve canonical shop from guard/query; throws 401 on failure. */
@@ -231,6 +176,7 @@ async function ensureOfflineSession(shop) {
   err.status = 401;
   throw err;
 }
+
 router.use((req, _res, next) => {
   if (process.env.DEBUG_AUTH === "1" && req.path.startsWith("/billing/")) {
     const hasAuth = !!req.headers.authorization;
@@ -240,7 +186,85 @@ router.use((req, _res, next) => {
 });
 
 /**
- * NEW: Try offline first; if missing, fall back to the ONLINE Admin session
+ * Prefer OFFLINE session for gatekeeping (prevents spurious 401s), then try the
+ * official middleware, then manual JWT decode. Only reauth if all fail.
+ */
+async function validateAdminSessionCompat(req, res, next) {
+  try {
+    // 0) If we can resolve the shop and have an OFFLINE session, let it through.
+    // The actual Shopify calls will still use that offline token.
+    let shopForGate = "";
+    try {
+      const { shop } = await resolveShopContext(req, res);
+      shopForGate = shop;
+      await ensureOfflineSession(shop); // throws if missing
+      res.locals.shopify = res.locals.shopify || {};
+      res.locals.shopify.session = res.locals.shopify.session || { shop };
+      return next();
+    } catch {
+      // fall through to online/JWT validation
+    }
+
+    // 1) Best: official middleware (validates App Bridge JWT, handles skew)
+    if (shopify?.authenticate?.admin) {
+      try {
+        const out = await shopify.authenticate.admin(req, res);
+        if (out?.session?.shop) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = out.session;
+          return next();
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 2) Fallback: decode Authorization: Bearer <AB session token>
+    const authz = req.get("Authorization") || req.headers.authorization || "";
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (m) {
+      try {
+        const token = m[1];
+        const payload = await shopify.api.session.decodeSessionToken(token);
+        const hostish = String(payload.dest || payload.iss || "");
+        const shopFromDest = hostish.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
+        if (/\.myshopify\.com$/i.test(shopFromDest)) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = { shop: shopFromDest };
+          return next();
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 3) Legacy cookie-based validator
+    if (typeof shopify?.validateAuthenticatedSession === "function") {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
+
+    // 4) No joy → reauth
+    return sendReauth(res, req, {
+      return_to: encodeURIComponent("/admin-ui/billing"),
+      shop: shopForGate || String(req.query?.shop || ""),
+    });
+  } catch {
+    return sendReauth(res, req, {
+      return_to: encodeURIComponent("/admin-ui/billing"),
+    });
+  }
+}
+
+// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
+router.use(
+  ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
+  validateAdminSessionCompat
+);
+
+/* ----------------------------- Admin client ---------------------------- */
+
+/**
+ * Try offline first; if missing, fall back to the ONLINE Admin session
  * attached by the guard. Only force reauth if neither exists.
  */
 async function getAdminClientForShop(req, res, shop) {
@@ -248,21 +272,21 @@ async function getAdminClientForShop(req, res, shop) {
   try {
     const offline = await ensureOfflineSession(shop);
     return getGraphqlClient(offline);
-  } catch (e) {
+  } catch {
     // continue to online fallback
   }
-
-  // 2) Fallback: online session from the guard (must include accessToken)
+  // 2) Fallback: online session from guard (must include accessToken)
   const online = res?.locals?.shopify?.session;
   if (online?.shop?.toLowerCase?.() === shop && online?.accessToken) {
     return getGraphqlClient(online);
   }
-
-  // 3) Neither available → trigger reauth
+  // 3) Neither available → reauth
   const err = new Error("reauthorize");
   err.status = 401;
   throw err;
 }
+
+/* ----------------------------- Shopify ops ----------------------------- */
 
 async function readActiveSubscriptions(client) {
   const q = `
