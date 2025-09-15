@@ -10,15 +10,26 @@ const router = express.Router();
 function sanitizeReturnTo(p) {
   if (!p || typeof p !== "string") return "";
   try {
-    // Disallow full URLs
-    if (/^https?:\/\//i.test(p)) return "";
-    // Ensure it starts with /admin-ui
-    if (!p.startsWith("/admin-ui")) return "";
-    // Normalize to avoid "//"
-    return p.replace(/\/{2,}/g, "/");
+    if (/^https?:\/\//i.test(p)) return "";   // disallow absolute URLs
+    if (!p.startsWith("/admin-ui")) return ""; // only allow our UI scope
+    return p.replace(/\/{2,}/g, "/");          // normalize
   } catch {
     return "";
   }
+}
+
+/** Minimal cookie reader (no cookie-parser required) */
+function getCookie(req, name) {
+  const raw = req.headers?.cookie || "";
+  const parts = raw.split(/; */);
+  for (const p of parts) {
+    const eq = p.indexOf("=");
+    const k = decodeURIComponent((eq === -1 ? p : p.slice(0, eq)).trim());
+    if (k === name) {
+      return decodeURIComponent((eq === -1 ? "" : p.slice(eq + 1)).trim());
+    }
+  }
+  return "";
 }
 
 /**
@@ -33,16 +44,24 @@ router.get("/", async (req, res) => {
 
   // Keep host + optional deep-link path for redirects
   const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
-  const returnToRaw = String(req.query.return_to || "");
-  const returnTo = sanitizeReturnTo(returnToRaw);
+  const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
+
+  // Store desired deep link in a short-lived, httpOnly cookie; keep redirect_uri static.
+  if (returnTo) {
+    res.cookie("refina_return_to", returnTo, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 5 * 60 * 1000, // 5 minutes
+    });
+  }
 
   try {
-    // Start OAuth (offline session); thread return_to through the callback
+    // STATIC callbackPath (must match your Shopify app's whitelisted redirect URLs)
     await shopify.auth.begin({
       shop,
-      callbackPath: returnTo
-        ? `/api/auth/callback?return_to=${encodeURIComponent(returnTo)}`
-        : "/api/auth/callback",
+      callbackPath: "/api/auth/callback",
       isOnline: false,
       rawRequest: req,
       rawResponse: res,
@@ -81,8 +100,7 @@ router.get("/toplevel", (req, res) => {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
   const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
-  const returnToRaw = String(req.query.return_to || "");
-  const returnTo = sanitizeReturnTo(returnToRaw);
+  const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
   // Cookie name/value expected by the Shopify SDK for top-level initiation
   res.cookie("shopifyTopLevelOAuth", "1", {
@@ -90,6 +108,17 @@ router.get("/toplevel", (req, res) => {
     secure: true,
     sameSite: "strict",
   });
+
+  // Persist our deep link here too (when flow starts at /toplevel)
+  if (returnTo) {
+    res.cookie("refina_return_to", returnTo, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 5 * 60 * 1000,
+    });
+  }
 
   const backToAuth =
     `/api/auth?shop=${encodeURIComponent(shop)}` +
@@ -110,8 +139,8 @@ router.get("/toplevel", (req, res) => {
  * OAuth callback target configured in the Partner app.
  * Finishes OAuth then redirects to your embedded Admin UI (deep-link aware).
  *
- * Approved change: always redirect TOP FRAME to /admin-ui/,
- * and if a deep link was requested, pass it via ?return_to=...
+ * Always redirect TOP FRAME to /admin-ui/, and if a deep link was requested,
+ * pass it via ?return_to=... for the SPA to consume.
  */
 router.get("/callback", async (req, res) => {
   try {
@@ -123,16 +152,19 @@ router.get("/callback", async (req, res) => {
     const shop = session.shop;
     const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
 
-    // Honor optional deep-link from the original /api/auth
-    const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
+    // Retrieve and clear the deep-link cookie
+    const returnToCookie = sanitizeReturnTo(getCookie(req, "refina_return_to"));
+    if (returnToCookie) {
+      res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
+    }
 
     // Always send top-frame to app root; carry deep link as a param for the SPA to consume.
     const basePath = "/admin-ui/"; // iframe entry point
     const sep = basePath.includes("?") ? "&" : "?";
     let redirectUrl =
       `${basePath}${sep}shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&embedded=1`;
-    if (returnTo) {
-      redirectUrl += `&return_to=${encodeURIComponent(returnTo)}`;
+    if (returnToCookie) {
+      redirectUrl += `&return_to=${encodeURIComponent(returnToCookie)}`;
     }
 
     return res.redirect(302, redirectUrl);
