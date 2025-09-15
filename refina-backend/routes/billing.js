@@ -64,7 +64,7 @@ function sendReauth(res, req, opts = {}) {
 
 async function validateAdminSessionCompat(req, res, next) {
   try {
-    // Case 1: classic middleware available
+    // Case 1: classic middleware available (attaches res.locals.shopify.session)
     if (typeof shopify.validateAuthenticatedSession === "function") {
       return shopify.validateAuthenticatedSession()(req, res, next);
     }
@@ -73,11 +73,11 @@ async function validateAdminSessionCompat(req, res, next) {
       const auth = await shopify.authenticate.admin(req, res);
       if (auth?.session?.shop) {
         res.locals.shopify = res.locals.shopify || {};
-        res.locals.shopify.session = auth.session;
+        res.locals.shopify.session = auth.session; // online session (has accessToken)
       }
       return next();
     }
-    // Case 3: manual JWT (from App Bridge authenticatedFetch)
+    // Case 3: manual JWT (decode only → no accessToken; still useful for shop context)
     const authz = req.headers.authorization || "";
     const m = authz.match(/^Bearer\s+(.+)$/i);
     if (!m) throw new Error("no_bearer");
@@ -90,7 +90,7 @@ async function validateAdminSessionCompat(req, res, next) {
     if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
 
     res.locals.shopify = res.locals.shopify || {};
-    res.locals.shopify.session = { shop: shopFromDest };
+    res.locals.shopify.session = { shop: shopFromDest }; // note: no accessToken in this branch
     return next();
   } catch (_err) {
     return sendReauth(res, req);
@@ -189,6 +189,31 @@ async function ensureOfflineSession(shop) {
     throw err;
   }
   return offlineSession;
+}
+
+/**
+ * NEW: Try offline first; if missing, fall back to the ONLINE Admin session
+ * attached by the guard. Only force reauth if neither exists.
+ */
+async function getAdminClientForShop(req, res, shop) {
+  // 1) Preferred: offline
+  try {
+    const offline = await ensureOfflineSession(shop);
+    return getGraphqlClient(offline);
+  } catch (e) {
+    // continue to online fallback
+  }
+
+  // 2) Fallback: online session from the guard (must include accessToken)
+  const online = res?.locals?.shopify?.session;
+  if (online?.shop?.toLowerCase?.() === shop && online?.accessToken) {
+    return getGraphqlClient(online);
+  }
+
+  // 3) Neither available → trigger reauth
+  const err = new Error("reauthorize");
+  err.status = 401;
+  throw err;
 }
 
 async function readActiveSubscriptions(client) {
@@ -545,8 +570,9 @@ router.post("/upgrade", async (req, res) => {
 router.post("/downgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
+
+    // *** Key change: try offline, then online; reauth only if neither is available
+    const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
     const { activeId } = inferPlanFromSubs(subs);
