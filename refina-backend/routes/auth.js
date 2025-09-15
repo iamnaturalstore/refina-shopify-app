@@ -6,19 +6,19 @@ import shopify from "../shopify.js";
 
 const router = express.Router();
 
-/** Guard against open redirects; only allow deep links under /admin-ui */
+/* ─────────────────────────────────────────────────────────────
+   Helpers
+   ───────────────────────────────────────────────────────────── */
+
 function sanitizeReturnTo(p) {
   if (!p || typeof p !== "string") return "";
   try {
-    if (/^https?:\/\//i.test(p)) return "";   // disallow absolute URLs
-    if (!p.startsWith("/admin-ui")) return ""; // only allow our UI scope
-    return p.replace(/\/{2,}/g, "/");          // normalize
-  } catch {
-    return "";
-  }
+    if (/^https?:\/\//i.test(p)) return "";      // disallow absolute URLs
+    if (!p.startsWith("/admin-ui")) return "";   // only allow our UI scope
+    return p.replace(/\/{2,}/g, "/");            // normalize
+  } catch { return ""; }
 }
 
-/** Minimal cookie reader (no cookie-parser required) */
 function getCookie(req, name) {
   const raw = req.headers?.cookie || "";
   const parts = raw.split(/; */);
@@ -32,45 +32,53 @@ function getCookie(req, name) {
   return "";
 }
 
-/**
- * Kick off OAuth for a shop.
- * Example: GET /api/auth?shop=refina-demo.myshopify.com[&return_to=/admin-ui/billing]
- */
+function computeHostFromShop(shop) {
+  const s = String(shop || "").toLowerCase().trim();
+  if (!s || !s.endsWith(".myshopify.com")) return "";
+  return Buffer.from(`${s}/admin`).toString("base64");
+}
+
+function baseUrl(req) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "https";
+  const host  = req.get("x-forwarded-host") || req.get("host");
+  return `${proto}://${host}`;
+}
+
+function storeFromShop(shop) {
+  return String(shop || "").toLowerCase().replace(/\.myshopify\.com$/, "");
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Begin OAuth (OFFLINE)
+   ───────────────────────────────────────────────────────────── */
+
 router.get("/", async (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
   if (!shop.endsWith(".myshopify.com")) {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
 
-  // Keep host + optional deep-link path for redirects
-  const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
+  const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
-  // Store desired deep link in a short-lived, httpOnly cookie; keep redirect_uri static.
+  // Persist deep link for after OAuth (top frame cannot safely carry dynamic redirect_uri)
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-      path: "/",
-      maxAge: 5 * 60 * 1000, // 5 minutes
+      httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
     });
   }
 
   try {
-    // STATIC callbackPath (must match your Shopify app's whitelisted redirect URLs)
     await shopify.auth.begin({
       shop,
-      callbackPath: "/api/auth/callback",
+      callbackPath: "/api/auth/callback",   // STATIC — must match your app’s whitelist
       isOnline: false,
       rawRequest: req,
       rawResponse: res,
     });
-    // shopify.auth.begin handles the redirect to accounts.shopify.com
+    // Redirect to accounts.shopify.com handled by SDK
   } catch (err) {
-    // If Shopify requires a top-level OAuth handoff, bounce to /toplevel
-    const needsTop =
-      err?.status === 410 || /top.?level|cookie/i.test(String(err?.message || ""));
+    const needsTop = err?.status === 410 || /top.?level|cookie/i.test(String(err?.message || ""));
     if (needsTop) {
       const to =
         `/api/auth/toplevel?shop=${encodeURIComponent(shop)}` +
@@ -78,45 +86,30 @@ router.get("/", async (req, res) => {
         (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
       return res.redirect(302, to);
     }
-
-    console.error("OAuth begin failed", {
-      shop,
-      host,
-      path: req.originalUrl,
-      message: err?.message,
-      name: err?.name,
-    });
+    console.error("OAuth begin failed", { shop, host, path: req.originalUrl, message: err?.message, name: err?.name });
     return res.status(500).send(`OAuth begin failed: ${err?.message || String(err)}`);
   }
 });
 
-/**
- * Top-level handoff required by Shopify OAuth.
- * Sets the cookie the SDK expects, then top-frame redirects back to /api/auth.
- */
+/* ─────────────────────────────────────────────────────────────
+   Top-level handoff required by Shopify OAuth
+   ───────────────────────────────────────────────────────────── */
+
 router.get("/toplevel", (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
   if (!shop.endsWith(".myshopify.com")) {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
-  const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
+  const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
-  // Cookie name/value expected by the Shopify SDK for top-level initiation
-  res.cookie("shopifyTopLevelOAuth", "1", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "strict",
-  });
+  // Shopify SDK marker for top-level initiation
+  res.cookie("shopifyTopLevelOAuth", "1", { httpOnly: true, secure: true, sameSite: "strict" });
 
-  // Persist our deep link here too (when flow starts at /toplevel)
+  // Also persist our deep link here (if flow starts at toplevel)
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-      path: "/",
-      maxAge: 5 * 60 * 1000,
+      httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
     });
   }
 
@@ -125,7 +118,6 @@ router.get("/toplevel", (req, res) => {
     `&host=${encodeURIComponent(host)}` +
     (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
 
-  // Escape the iframe and continue OAuth at top-window
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Redirecting…</title></head>
 <body>
@@ -135,43 +127,54 @@ router.get("/toplevel", (req, res) => {
   return res.status(200).send(html);
 });
 
-/**
- * OAuth callback target configured in the Partner app.
- * Finishes OAuth then redirects to your embedded Admin UI (deep-link aware).
- *
- * Always redirect TOP FRAME to /admin-ui/, and if a deep link was requested,
- * pass it via ?return_to=... for the SPA to consume.
- */
+/* ─────────────────────────────────────────────────────────────
+   OAuth callback (OFFLINE complete) → send TOP FRAME to Admin apps/refina
+   ───────────────────────────────────────────────────────────── */
+
 router.get("/callback", async (req, res) => {
   try {
-    const { session } = await shopify.auth.callback({
-      rawRequest: req,
-      rawResponse: res,
-    });
+    const { session } = await shopify.auth.callback({ rawRequest: req, rawResponse: res });
 
     const shop = session.shop;
-    const host = req.query.host || Buffer.from(`${shop}/admin`).toString("base64");
+    const store = storeFromShop(shop);
 
-    // Retrieve and clear the deep-link cookie
-    const returnToCookie = sanitizeReturnTo(getCookie(req, "refina_return_to"));
-    if (returnToCookie) {
-      res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
-    }
-
-    // Always send top-frame to app root; carry deep link as a param for the SPA to consume.
-    const basePath = "/admin-ui/"; // iframe entry point
-    const sep = basePath.includes("?") ? "&" : "?";
-    let redirectUrl =
-      `${basePath}${sep}shop=${encodeURIComponent(shop)}&host=${encodeURIComponent(host)}&embedded=1`;
-    if (returnToCookie) {
-      redirectUrl += `&return_to=${encodeURIComponent(returnToCookie)}`;
-    }
-
-    return res.redirect(302, redirectUrl);
+    // Don’t send the top frame to our domain (App Bridge would try /apps/admin-ui and 404).
+    // Send it directly to the Shopify Admin app handle instead.
+    const adminUrl = new URL(`/store/${store}/apps/refina`, "https://admin.shopify.com");
+    return res.redirect(302, adminUrl.toString());
   } catch (err) {
     console.error("OAuth callback failed:", err);
     return res.status(401).send("OAuth failed");
   }
+});
+
+/* ─────────────────────────────────────────────────────────────
+   Embedded entrypoint (application_url in shopify.app.toml)
+   Convert to our SPA route and pass along any deep link
+   ───────────────────────────────────────────────────────────── */
+
+router.get("/embedded", (req, res) => {
+  const shop = String(req.query.shop || "").toLowerCase();
+  if (!shop.endsWith(".myshopify.com")) {
+    // Basic guard; embedded hits always carry shop/host
+    return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
+  }
+  const host = String(req.query.host || "") || computeHostFromShop(shop);
+
+  // Pull and clear deep-link cookie
+  const returnTo = sanitizeReturnTo(getCookie(req, "refina_return_to"));
+  if (returnTo) {
+    res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
+  }
+
+  // Now safely move the IFRAME to our SPA, inside our domain
+  const target = new URL("/admin-ui/", baseUrl(req));
+  target.searchParams.set("shop", shop);
+  target.searchParams.set("host", host);
+  target.searchParams.set("embedded", "1");
+  if (returnTo) target.searchParams.set("return_to", returnTo);
+
+  return res.redirect(302, target.toString());
 });
 
 export default router;
