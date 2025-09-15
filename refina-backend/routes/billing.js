@@ -538,11 +538,11 @@ router.post("/subscribe", async (req, res) => {
       shop: req.query?.shop,
       error: err,
     });
+    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
+
     return res.status(500).json({ error: "Subscribe failed" });
   }
 });
-
-if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
 
 /** POST /api/billing/sync → upserts plans/{shop} from activeSubscriptions */
 router.post("/sync", async (req, res) => {
@@ -559,6 +559,8 @@ router.post("/sync", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
+    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
+
     return res.status(500).json({ error: "Sync failed" });
   }
 });
@@ -574,6 +576,8 @@ router.get("/status", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("GET /api/billing/status error", err);
+    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
+
     return res.status(500).json({ error: "Status failed" });
   }
 });
@@ -644,6 +648,8 @@ router.post("/upgrade", async (req, res) => {
   } catch (err) {
     if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
+    if ((userErrors || []).length) console.error("[Billing] userErrors", userErrors);
+
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
