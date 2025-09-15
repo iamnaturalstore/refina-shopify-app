@@ -61,37 +61,40 @@ function sendReauth(res, req, opts = {}) {
 }
 
 /* --------------------- Version-compatible Admin JWT -------------------- */
-
 async function validateAdminSessionCompat(req, res, next) {
   try {
-    // Case 1: classic middleware available (attaches res.locals.shopify.session)
-    if (typeof shopify.validateAuthenticatedSession === "function") {
-      return shopify.validateAuthenticatedSession()(req, res, next);
+    // Prefer App Bridge JWT (Authorization: Bearer ...) because embedded apps use this
+    const authz = req.headers.authorization || "";
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (m) {
+      const token = m[1];
+      const payload = await shopify.api.session.decodeSessionToken(token);
+      const shopFromDest = String(payload.dest || payload.iss || "")
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "");
+      if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
+
+      res.locals.shopify = res.locals.shopify || {};
+      res.locals.shopify.session = { shop: shopFromDest };
+      return next();
     }
-    // Case 2: newer API (authenticate.admin)
+
+    // Next-best: new SDK shape
     if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
       const auth = await shopify.authenticate.admin(req, res);
       if (auth?.session?.shop) {
         res.locals.shopify = res.locals.shopify || {};
-        res.locals.shopify.session = auth.session; // online session (has accessToken)
+        res.locals.shopify.session = auth.session;
       }
       return next();
     }
-    // Case 3: manual JWT (decode only → no accessToken; still useful for shop context)
-    const authz = req.headers.authorization || "";
-    const m = authz.match(/^Bearer\s+(.+)$/i);
-    if (!m) throw new Error("no_bearer");
 
-    const token = m[1];
-    const payload = await shopify.api.session.decodeSessionToken(token);
-    const shopFromDest = String(payload.dest || payload.iss || "")
-      .replace(/^https?:\/\//, "")
-      .replace(/\/.*$/, "");
-    if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
+    // Last resort: legacy cookie-based validator (not ideal for embedded fetch)
+    if (typeof shopify.validateAuthenticatedSession === "function") {
+      return shopify.validateAuthenticatedSession()(req, res, next);
+    }
 
-    res.locals.shopify = res.locals.shopify || {};
-    res.locals.shopify.session = { shop: shopFromDest }; // note: no accessToken in this branch
-    return next();
+    throw new Error("no_auth");
   } catch (_err) {
     return sendReauth(res, req);
   }
