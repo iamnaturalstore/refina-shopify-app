@@ -60,41 +60,51 @@ function sendReauth(res, req, opts = {}) {
     .send("reauthorize");
 }
 
-// Prefer JWT first, then new authenticate.admin, then legacy cookie validator
+/* --------------------- Version-compatible Admin JWT -------------------- */
 async function validateAdminSessionCompat(req, res, next) {
   try {
-    // 1) App Bridge JWT (Authorization: Bearer ...)
+    // 1) Prefer Shopify's built-in authenticate.admin (works across SDK shapes)
+    if (shopify?.authenticate?.admin) {
+      try {
+        const auth = await shopify.authenticate.admin(req, res);
+        if (auth?.session?.shop) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = auth.session;
+          return next();
+        }
+      } catch (_e) {
+        // fall through to other strategies
+      }
+    }
+
+    // 2) App Bridge JWT (Authorization: Bearer <token>) — decode just to get the shop
     const authz = req.headers.authorization || "";
     const m = authz.match(/^Bearer\s+(.+)$/i);
     if (m) {
-      const token = m[1];
-      const payload = await shopify.api.session.decodeSessionToken(token);
-      const shopFromDest = String(payload.dest || payload.iss || "")
-        .replace(/^https?:\/\//, "")
-        .replace(/\/.*$/, "");
-      if (!shopFromDest.endsWith(".myshopify.com")) throw new Error("bad_dest");
-      res.locals.shopify = res.locals.shopify || {};
-      res.locals.shopify.session = { shop: shopFromDest };
-      return next();
-    }
-
-    // 2) Newer SDK
-    if (shopify.authenticate && typeof shopify.authenticate.admin === "function") {
-      const auth = await shopify.authenticate.admin(req, res);
-      if (auth?.session?.shop) {
-        res.locals.shopify = res.locals.shopify || {};
-        res.locals.shopify.session = auth.session;
+      try {
+        const token = m[1];
+        const payload = await shopify.api.session.decodeSessionToken(token);
+        const shopFromDest = String(payload.dest || payload.iss || "")
+          .replace(/^https?:\/\//, "")
+          .replace(/\/.*$/, "");
+        if (shopFromDest.endsWith(".myshopify.com")) {
+          res.locals.shopify = res.locals.shopify || {};
+          res.locals.shopify.session = { shop: shopFromDest };
+          return next();
+        }
+      } catch (_e) {
+        // don't reauth yet; try legacy below
       }
-      return next();
     }
 
-    // 3) Legacy cookie validator (last resort)
-    if (typeof shopify.validateAuthenticatedSession === "function") {
+    // 3) Legacy cookie-based validator (older SDKs)
+    if (typeof shopify?.validateAuthenticatedSession === "function") {
       return shopify.validateAuthenticatedSession()(req, res, next);
     }
 
-    throw new Error("no_auth");
-  } catch {
+    // If none worked, trigger the App Bridge reauth handshake
+    return sendReauth(res, req);
+  } catch (_err) {
     return sendReauth(res, req);
   }
 }
