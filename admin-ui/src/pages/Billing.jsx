@@ -64,14 +64,14 @@ function getReauthInfo(err) {
   const url = h["x-shopify-api-request-failure-reauthorize-url"] || "";
   return need ? { need: true, url } : { need: false, url: "" };
 }
-function redirectTop(urlOrPath = "/embedded", extra = {}) {
+function redirectTop(urlOrPath = "/", extra = {}) {
   const url = buildEmbeddedUrl(urlOrPath, extra);
-   try {
-     const redirect = Redirect.create(app);
-     redirect.dispatch(Redirect.Action.REMOTE, url);
-   } catch {
+  try {
+    const redirect = Redirect.create(app);
+    redirect.dispatch(Redirect.Action.REMOTE, url);
+  } catch {
     try { window.top.location.href = url; } catch { window.location.href = url; }
-   }
+  }
 }
 
 export default function Billing() {

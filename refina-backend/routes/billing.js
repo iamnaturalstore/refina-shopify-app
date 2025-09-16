@@ -469,7 +469,7 @@ router.get("/activated", async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
-    // Build ABSOLUTE redirect back to your embedded entry on YOUR domain.
+    // Build ABSOLUTE redirect back to your app on YOUR domain (root path).
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
 
     const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
@@ -483,12 +483,12 @@ router.get("/activated", async (req, res) => {
       base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
     }
 
-    const redirect = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+    const redirect = `${base}/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
     return res.redirect(303, redirect);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
 
-    // Fall back to embedded (absolute)
+    // Fall back to root (absolute)
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
 
@@ -503,10 +503,11 @@ router.get("/activated", async (req, res) => {
       base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
     }
 
-    const fallback = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shopParam)}&billing=error`;
+    const fallback = `${base}/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shopParam)}&billing=error`;
     return res.redirect(303, fallback);
   }
 });
+
 
 /** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
 router.post("/subscribe", async (req, res) => {
