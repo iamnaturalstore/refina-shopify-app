@@ -512,11 +512,18 @@ router.post("/subscribe", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
-if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
+// Prefer a clean origin from env; fall back to absoluteAppUrl(req)
+const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
+let origin = originCandidate;
+try {
+  origin = new URL(originCandidate).origin;              // strips any path/query
+} catch {
+  // last-ditch: regex to extract scheme+host
+  origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+}
 
-// Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-const returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+// Keep the returnUrl SHORT: only 'shop'. /activated computes 'host' itself.
+const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
 const PLAN = { name: "Premium", amount: "49.00" };
 const testFlag =
@@ -525,8 +532,9 @@ const testFlag =
   process.env.NODE_ENV !== "production";
 
 if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+  console.log("[Billing]/subscribe origin", { originCandidate, origin });
   console.log("[Billing]/subscribe returnUrl", returnUrl.length, returnUrl);
-  console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+  console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, test: testFlag });
 }
 
     // Safe call with scoped userErrors
@@ -647,11 +655,21 @@ router.post("/upgrade", async (req, res) => {
 const explicitReturn = String(req.body?.returnUrl || "");
 let returnUrl = explicitReturn;
 if (!returnUrl) {
-  let hostBase = (process.env.HOST || absoluteAppUrl(req)).replace(/\/$/, "");
-  if (hostBase.startsWith("http://")) hostBase = hostBase.replace(/^http:\/\//, "https://");
+  // Prefer a clean origin from env; fall back to absoluteAppUrl(req)
+  const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
+  let origin = originCandidate;
+  try {
+    origin = new URL(originCandidate).origin;            // strips any path/query
+  } catch {
+    origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+  }
 
-  // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-  returnUrl = `${hostBase}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+  // Keep the returnUrl SHORT: only 'shop'. /activated computes 'host' itself.
+  returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+
+  if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+    console.log("[Billing]/upgrade origin", { originCandidate, origin });
+  }
 }
 
 const PLAN = { name: "Premium", amount: "49.00" };
@@ -662,9 +680,8 @@ const testFlag =
 
 if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
   console.log("[Billing]/upgrade returnUrl", returnUrl.length, returnUrl);
-  console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, returnUrl, test: testFlag });
+  console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, test: testFlag });
 }
-
 
     // Safe call with scoped userErrors
     let confirmationUrl = null;
