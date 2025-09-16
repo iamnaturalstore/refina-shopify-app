@@ -33,11 +33,7 @@ scopes = "read_products"
 [auth]
 redirect_urls = [
   "https://refina-app.onrender.com/api/auth/callback",
-  "https://refina-app.onrender.com/auth/callback",
-  "https://refina-app.onrender.com/embedded", 
-  "https://refina-app.onrender.com/admin-ui", 
-  "https://refina-app.onrender.com/billing/thanks", 
-  "https://refina-app.onrender.com/api/billing/activated"
+  "https://refina-app.onrender.com/auth/callback"
 ]
 
 [app_proxy]
