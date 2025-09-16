@@ -85,7 +85,29 @@ function getAuthedFetch() {
   return fetch; // ultimate fallback (will likely 401, handled below)
 }
 
-function forceTopFrameRedirect(url) {
+/* ─────────────────────────────────────────────────────────────
+   Safe top-frame redirect helpers
+   - Always normalize to an absolute URL on our origin
+   - Auto-attach host/shop if missing
+   ───────────────────────────────────────────────────────────── */
+export function buildEmbeddedUrl(pathOrUrl = "/embedded", extraParams = {}) {
+  const qs = new URLSearchParams(window.location.search || "");
+  const host = qs.get("host") || getHost();
+  const shop = qs.get("shop") || getShop();
+
+  // Normalize to absolute URL; absolute inputs remain absolute.
+  const u = new URL(pathOrUrl, window.location.origin);
+
+  if (host && !u.searchParams.get("host")) u.searchParams.set("host", host);
+  if (shop && !u.searchParams.get("shop")) u.searchParams.set("shop", shop);
+  for (const [k, v] of Object.entries(extraParams || {})) {
+    if (v != null) u.searchParams.set(k, String(v));
+  }
+  return u.toString();
+}
+
+export function forceTopFrameRedirect(urlOrPath = "/embedded", extraParams = {}) {
+  const url = buildEmbeddedUrl(urlOrPath, extraParams); // always absolute & includes host/shop
   try {
     if (app) {
       const redirect = Redirect.create(app);
@@ -232,6 +254,5 @@ export const billingApi = {
     return api.post(`/api/billing/subscribe`, { plan, returnUrl });
   },
 };
-
 
 export default api;

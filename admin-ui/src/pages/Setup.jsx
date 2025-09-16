@@ -13,6 +13,7 @@ import {
   Banner,
   InlineStack,
 } from "@shopify/polaris";
+import { buildEmbeddedUrl } from "../api/client"; // added: normalize URL for top-frame redirects
 
 function getFromQS(key) {
   const q = new URLSearchParams(window.location.search || "");
@@ -92,11 +93,13 @@ export default function Setup() {
   const blockUrl = `https://${shop}/admin/themes/current/editor?template=product&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
 
   const openTop = (url) => {
+    // Normalize to absolute URL and ensure host/shop are included
+    const abs = buildEmbeddedUrl(url || "/embedded");
     try {
-      // Ensure we escape the iframe and land in the Theme Editor
-      window.top.location.href = url;
+      // Ensure we escape the iframe and land in the Theme Editor (top window)
+      window.top.location.href = abs;
     } catch {
-      window.location.href = url;
+      window.location.href = abs;
     }
   };
 
@@ -128,7 +131,9 @@ export default function Setup() {
                 <ol style={{ margin: 0, paddingLeft: 18 }}>
                   <li>Click one of the buttons above.</li>
                   <li>In the Theme Editor, toggle the embed or add the block.</li>
-                  <li>Click <strong>Save</strong>, then Preview your store.</li>
+                  <li>
+                    Click <strong>Save</strong>, then Preview your store.
+                  </li>
                 </ol>
               </BlockStack>
             </BlockStack>

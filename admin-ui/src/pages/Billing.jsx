@@ -18,6 +18,8 @@ import { CheckIcon } from "@shopify/polaris-icons";
 import { api, billingApi } from "../api/client.js";
 import app from "../appBridge";
 import { Redirect } from "@shopify/app-bridge/actions";
+import { buildEmbeddedUrl } from "../api/client"; // adjust relative path if needed
+
 
 const PENDING_KEY = "refina:billing:pending";
 
@@ -62,13 +64,14 @@ function getReauthInfo(err) {
   const url = h["x-shopify-api-request-failure-reauthorize-url"] || "";
   return need ? { need: true, url } : { need: false, url: "" };
 }
-function redirectTop(url) {
-  try {
-    const redirect = Redirect.create(app);
-    redirect.dispatch(Redirect.Action.REMOTE, url);
-  } catch {
+function redirectTop(urlOrPath = "/embedded", extra = {}) {
+  const url = buildEmbeddedUrl(urlOrPath, extra);
+   try {
+     const redirect = Redirect.create(app);
+     redirect.dispatch(Redirect.Action.REMOTE, url);
+   } catch {
     try { window.top.location.href = url; } catch { window.location.href = url; }
-  }
+   }
 }
 
 export default function Billing() {

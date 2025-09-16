@@ -35,7 +35,7 @@ export function buildShareHref({ shop, host /* storeId deprecated */ }) {
   }
 
   const url = new URL(window.location.href);
-  url.pathname = "/admin-ui";
+  url.pathname = "/embedded";
   const qs = url.searchParams;
   qs.set("shop", shopFull);
   qs.set("host", hostVal);
