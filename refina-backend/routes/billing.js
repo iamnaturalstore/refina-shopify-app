@@ -469,22 +469,37 @@ router.get("/activated", async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
+    // Build absolute redirect back to the embedded entry
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
-    const redirect = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
+    const base =
+      (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+        .toString()
+        .replace(/\/$/, ""); // ensure no trailing slash
+
+    const redirect = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shop
     )}&billing=success`;
 
     return res.redirect(303, redirect);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
+
+    // Fall back to embedded with error, also absolute
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
-    const fallback = `/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
+    const base =
+      (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+        .toString()
+        .replace(/\/$/, "");
+
+    const fallback = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shopParam
     )}&billing=error`;
+
     return res.redirect(303, fallback);
   }
 });
+
 
 /** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
 router.post("/subscribe", async (req, res) => {
