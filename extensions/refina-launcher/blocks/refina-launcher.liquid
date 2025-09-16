@@ -9,11 +9,10 @@ Refina Theme App Embed (Launcher, production)
 {{ 'concierge.js'  | asset_url | script_tag }}
 
 {%- assign page_type = request.page_type | downcase -%}
-{%- assign position =
-  block.settings.side == 'left'
-  | default: false
-  | ternary: 'bottom-left', 'bottom-right'
--%}
+{%- assign position = 'bottom-right' -%}
+{%- if block.settings.side == 'left' -%}
+  {%- assign position = 'bottom-left' -%}
+{%- endif -%}
 
 <div
   id="refina-launcher"
