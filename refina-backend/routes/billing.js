@@ -513,12 +513,14 @@ router.post("/subscribe", async (req, res) => {
     const currency = await fetchShopCurrency(client);
 
 // Prefer a clean origin from env; fall back to absoluteAppUrl(req)
-const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
+const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+  .trim()
+  .replace(/\/$/, "");
+
 let origin = originCandidate;
 try {
-  origin = new URL(originCandidate).origin;              // strips any path/query
+  origin = new URL(originCandidate).origin;            // strips any path/query
 } catch {
-  // last-ditch: regex to extract scheme+host
   origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
 }
 
@@ -652,25 +654,21 @@ router.post("/upgrade", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-const explicitReturn = String(req.body?.returnUrl || "");
-let returnUrl = explicitReturn;
-if (!returnUrl) {
-  // Prefer a clean origin from env; fall back to absoluteAppUrl(req)
-  const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
-  let origin = originCandidate;
-  try {
-    origin = new URL(originCandidate).origin;            // strips any path/query
-  } catch {
-    origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
-  }
+// DO NOT trust/accept req.body.returnUrl — it can exceed 255.
+// Always compute a short, sanitized returnUrl from the app origin.
+const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+  .trim()
+  .replace(/\/$/, "");
 
-  // Keep the returnUrl SHORT: only 'shop'. /activated computes 'host' itself.
-  returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
-
-  if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
-    console.log("[Billing]/upgrade origin", { originCandidate, origin });
-  }
+let origin = originCandidate;
+try {
+  origin = new URL(originCandidate).origin;            // strips any path/query
+} catch {
+  origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
 }
+
+// Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
+const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
 const PLAN = { name: "Premium", amount: "49.00" };
 const testFlag =
@@ -679,6 +677,7 @@ const testFlag =
   process.env.NODE_ENV !== "production";
 
 if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+  console.log("[Billing]/upgrade origin", { originCandidate, origin });
   console.log("[Billing]/upgrade returnUrl", returnUrl.length, returnUrl);
   console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, test: testFlag });
 }
