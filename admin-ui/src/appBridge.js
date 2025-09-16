@@ -1,3 +1,4 @@
+// admin-ui/src/appBridge.js
 import createApp from "@shopify/app-bridge";
 import * as actions from "@shopify/app-bridge/actions";
 
@@ -54,6 +55,15 @@ function ensureAppBridge() {
   // Hard guards for embedded Admin
   if (!shop) throw new Error("[AppBridge] Missing 'shop' (<shop>.myshopify.com) in URL.");
   if (!host) throw new Error("[AppBridge] Missing 'host' in URL.");
+
+  // ⬇️ Minimal guard: if top-level on "/embedded", normalize to "/" before App Bridge re-embeds
+  try {
+    if (window.top === window.self && window.location.pathname === "/embedded") {
+      const u = new URL(window.location.href);
+      u.pathname = "/";
+      window.history.replaceState({}, "", u.toString());
+    }
+  } catch {}
 
   const apiKey = requireApiKey();
   _app = createApp({ apiKey, host, forceRedirect: true });
