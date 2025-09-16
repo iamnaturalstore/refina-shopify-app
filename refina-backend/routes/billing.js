@@ -458,7 +458,7 @@ router.get("/plan", async (req, res) => {
   }
 });
 
-/** GET /api/billing/activated → reads activeSubscriptions, writes Firestore, redirects back to embedded app */
+/** GET /api/billing/activated → set plan, then 303 directly to embedded Admin URL */
 router.get("/activated", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -469,44 +469,39 @@ router.get("/activated", async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
-    // Build ABSOLUTE redirect back to your app on YOUR domain (root path).
+    // Build the embedded Admin URL for your app (no reliance on local re-embed).
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
+    const storeSlug = String(shop).replace(/\.myshopify\.com$/i, ""); // e.g. "refina-demo"
+    const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";     // your Partner "Handle"
 
-    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-      .toString()
-      .trim()
-      .replace(/\/$/, "");
-    let base = originCandidate;
-    try {
-      base = new URL(originCandidate).origin; // strip any path/query if present
-    } catch {
-      base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
-    }
+    const adminEmbedUrl =
+      `https://admin.shopify.com/store/${encodeURIComponent(storeSlug)}` +
+      `/apps/${encodeURIComponent(appHandle)}` +
+      `?host=${encodeURIComponent(hostParam)}` +
+      `&shop=${encodeURIComponent(shop)}` +
+      `&billing=success`;
 
-    const redirect = `${base}/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
-    return res.redirect(303, redirect);
+    return res.redirect(303, adminEmbedUrl);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
 
-    // Fall back to root (absolute)
+    // Fallback: still go to embedded Admin URL, but with billing=error
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
+    const storeSlug = String(shopParam).replace(/\.myshopify\.com$/i, "");
+    const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";
 
-    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-      .toString()
-      .trim()
-      .replace(/\/$/, "");
-    let base = originCandidate;
-    try {
-      base = new URL(originCandidate).origin;
-    } catch {
-      base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
-    }
+    const adminEmbedUrlFallback =
+      `https://admin.shopify.com/store/${encodeURIComponent(storeSlug)}` +
+      `/apps/${encodeURIComponent(appHandle)}` +
+      `?host=${encodeURIComponent(hostParam)}` +
+      `&shop=${encodeURIComponent(shopParam)}` +
+      `&billing=error`;
 
-    const fallback = `${base}/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shopParam)}&billing=error`;
-    return res.redirect(303, fallback);
+    return res.redirect(303, adminEmbedUrlFallback);
   }
 });
+
 
 
 /** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
