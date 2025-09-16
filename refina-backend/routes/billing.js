@@ -469,14 +469,21 @@ router.get("/activated", async (req, res) => {
     const { level, status } = inferPlanFromSubs(subs);
     await writePlan(shop, level, status);
 
-    // Build absolute redirect back to the embedded entry
+    // Build ABSOLUTE redirect back to your SPA entry on YOUR domain.
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
-    const base =
-      (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-        .toString()
-        .replace(/\/$/, ""); // ensure no trailing slash
 
-    const redirect = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
+    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+      .toString()
+      .trim()
+      .replace(/\/$/, "");
+    let base = originCandidate;
+    try {
+      base = new URL(originCandidate).origin; // strip any path/query if present
+    } catch {
+      base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+    }
+
+    const redirect = `${base}/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shop
     )}&billing=success`;
 
@@ -484,15 +491,21 @@ router.get("/activated", async (req, res) => {
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
 
-    // Fall back to embedded with error, also absolute
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
-    const base =
-      (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-        .toString()
-        .replace(/\/$/, "");
 
-    const fallback = `${base}/embedded?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
+    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+      .toString()
+      .trim()
+      .replace(/\/$/, "");
+    let base = originCandidate;
+    try {
+      base = new URL(originCandidate).origin;
+    } catch {
+      base = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+    }
+
+    const fallback = `${base}/admin-ui/?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(
       shopParam
     )}&billing=error`;
 
