@@ -1,35 +1,393 @@
-._container_1gq9f_2{max-width:900px;margin:2rem auto;padding:var(--rf-spacing, 12px);font-family:var(--rf-font-family, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif);color:var(--rf-color-text, #111111)}._heading_1gq9f_11{text-align:center;font-size:1.8rem;font-weight:700;color:var(--rf-color-primary, #d10000);margin-top:calc(var(--rf-spacing, 12px) * 2);margin-bottom:var(--rf-spacing, 12px)}._subtext_1gq9f_21{text-align:center;font-size:1.1rem;margin-bottom:calc(var(--rf-spacing, 12px) * 1.5);color:var(--rf-text-muted, #475569)}._concernButtons_1gq9f_29{display:flex;justify-content:center;flex-wrap:wrap;gap:calc(var(--rf-spacing, 12px) * .5);margin-bottom:calc(var(--rf-spacing, 12px) * 1.5)}._concernButtons_1gq9f_29 button{padding:calc(var(--rf-spacing, 12px) * .5) var(--rf-spacing, 12px);background-color:var(--rf-muted, #f5f5f5);border:1px solid var(--rf-border, #ddd);border-radius:999px;font-size:.95rem;cursor:pointer;transition:background-color .2s ease;color:var(--rf-color-text, #111111)}._concernButtons_1gq9f_29 button:hover{background-color:var(--rf-muted-hover, #ebebeb)}._textarea_1gq9f_53{width:100%;min-height:80px;padding:calc(var(--rf-spacing, 12px) * .75);font-size:1rem;border:1px solid var(--rf-border, #ccc);border-radius:var(--rf-radius, 12px);margin-bottom:var(--rf-spacing, 12px);resize:vertical;color:var(--rf-color-text, #111111);background:var(--rf-surface, #ffffff)}._askButton_1gq9f_67{display:block;margin:0 auto calc(var(--rf-spacing, 12px) * 2) auto;background-color:var(--rf-color-primary, #d10000);color:var(--rf-on-primary, #ffffff);font-weight:700;padding:calc(var(--rf-spacing, 12px) * .75) calc(var(--rf-spacing, 12px) * 1.5);border:none;border-radius:var(--rf-radius, 12px);cursor:pointer;font-size:1rem;box-shadow:var(--rf-shadow, 0 8px 28px rgba(0,0,0,.12))}._askButton_1gq9f_67:disabled{background-color:var(--rf-disabled, #999);cursor:not-allowed}._response_1gq9f_87{background-color:var(--rf-surface-alt, #f9f9f9);padding:var(--rf-spacing, 12px);border-radius:var(--rf-radius, 12px);font-size:1rem;margin-bottom:calc(var(--rf-spacing, 12px) * 1.5);border-left:4px solid var(--rf-color-primary, #d10000);color:var(--rf-color-text, #111111)}._grid_1gq9f_98{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--rf-spacing, 12px)}._card_1gq9f_105{background-color:var(--rf-surface, #ffffff);border:1px solid var(--rf-border, #eee);border-radius:var(--rf-radius, 12px);padding:var(--rf-spacing, 12px);cursor:pointer;transition:box-shadow .2s ease;position:relative;color:var(--rf-color-text, #111111)}._card_1gq9f_105:hover{box-shadow:var(--rf-shadow, 0 8px 28px rgba(0, 0, 0, .12))}._image_1gq9f_120{width:100%;height:180px;object-fit:cover;border-radius:var(--rf-radius, 12px);margin-bottom:calc(var(--rf-spacing, 12px) * .5)}._modalOverlay_1gq9f_129{position:fixed;top:0;left:0;width:100%;height:100%;background-color:var(--rf-overlay, rgba(0, 0, 0, .6));display:flex;align-items:center;justify-content:center;z-index:999}._modal_1gq9f_129{background-color:var(--rf-surface, #ffffff);padding:calc(var(--rf-spacing, 12px) * 2);border-radius:var(--rf-radius, 12px);max-width:500px;width:90%;text-align:center;max-height:90vh;overflow:auto;color:var(--rf-color-text, #111111);box-shadow:var(--rf-shadow, 0 8px 28px rgba(0,0,0,.12))}._modal_1gq9f_129 img{width:100%;height:auto;margin-bottom:var(--rf-spacing, 12px);border-radius:var(--rf-radius, 12px);max-height:50vh;object-fit:contain}._buyNow_1gq9f_166{display:inline-block;margin-top:var(--rf-spacing, 12px);padding:calc(var(--rf-spacing, 12px) * .75) calc(var(--rf-spacing, 12px) * 1.5);background-color:var(--rf-color-primary, #d10000);color:var(--rf-on-primary, #ffffff);font-weight:700;text-decoration:none;border-radius:var(--rf-radius, 12px);transition:background-color .2s ease;box-shadow:var(--rf-shadow, 0 8px 28px rgba(0,0,0,.12))}._buyNow_1gq9f_166:hover{background-color:var(--rf-color-primary-hover, #b00000)}._productTitle_1gq9f_181{font-size:1.1rem;font-weight:600;margin:.5rem 0 .25rem;color:var(--rf-color-text, #333)}._productDescription_1gq9f_187{font-size:.95rem;color:var(--rf-text-muted, #666);line-height:1.4}._responseBox_1gq9f_194{background-color:var(--rf-surface-alt, #f9f9f9);padding:var(--rf-spacing, 12px);margin:calc(var(--rf-spacing, 12px) * 1.5) 0;border-left:5px solid var(--rf-color-primary, #d10000);border-radius:var(--rf-radius, 12px)}._responseBox_1gq9f_194 h2{font-size:1.25rem;font-weight:700;margin-bottom:calc(var(--rf-spacing, 12px) * .5);color:var(--rf-color-primary, #d10000)}._responseBox_1gq9f_194 p{font-size:1rem;line-height:1.5;color:var(--rf-color-text, #333)}._chip_1gq9f_214{padding:calc(var(--rf-spacing, 12px) * .5) var(--rf-spacing, 12px);background-color:var(--rf-muted, #f5f5f5);border:1px solid var(--rf-border, #ddd);border-radius:999px;font-size:.95rem;cursor:pointer;transition:background-color .2s ease,transform .05s ease;color:var(--rf-color-text, #111111)}._chip_1gq9f_214:hover{background-color:var(--rf-muted-hover, #ebebeb)}._chip_1gq9f_214:active{transform:translateY(1px)}._dots_1gq9f_228{display:inline-block;overflow:hidden;vertical-align:bottom;width:0;animation:_revealDots_1gq9f_1 1.2s steps(3,end) infinite}._dots_1gq9f_228:after{content:"..."}@keyframes _revealDots_1gq9f_1{0%{width:0}to{width:1.2em}}._badges_1gq9f_242{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 8px}._badge_1gq9f_242{font-size:12px;background:var(--rf-badge-bg, #f1f5f9);border:1px solid var(--rf-border, #e5e7eb);padding:2px 8px;border-radius:999px;color:var(--rf-badge-fg, #334155)}._price_1gq9f_256{margin-top:6px;font-weight:600;color:var(--rf-color-text, #222)}._teaser_1gq9f_263{font-size:.9rem;color:var(--rf-text-subtle, #475569);margin:4px 0 6px}._topPickBadge_1gq9f_270{position:absolute;top:8px;left:8px;background:var(--rf-badge-strong-bg, #111);color:var(--rf-on-badge-strong, #fff);font-size:12px;padding:4px 8px;border-radius:999px}._modalSubtitle_1gq9f_282{text-align:left;margin:.25rem 0 1rem;color:var(--rf-text-subtle, #475569);font-size:.95rem}._reasonsList_1gq9f_288{text-align:left;margin:.75rem 0 1rem;padding-left:1.1rem}._reasonsList_1gq9f_288 li{margin:.2rem 0;line-height:1.35;font-size:.95rem;text-align:left}
+/* ==========================================================================
+   Refina concierge.css — Launcher & minimal widget styles
+   Version: 2.4.1 • 2025-09-17
+   Marker: Refina launcher failsafe
+   Path: extensions/refina-launcher/assets/concierge.css
+   Notes:
+   - Scoped to id/attr/class so it won’t leak into themes
+   - Uses CSS vars for easy theming from JS or Theme settings
+   ========================================================================== */
 
-/* --- Refina launcher failsafe (appended) --- */
-#refina-fab,
+/* ------------------------------
+   Design tokens (overridable)
+   ------------------------------ */
+
+:root {
+  --rf-z: 2147483000;                   /* very high to clear most apps */
+  --rf-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
+
+  /* Colors (defaults use Refina plum) */
+  --rf-color-primary: #6e56cf;
+  --rf-color-primary-contrast: #ffffff;
+  --rf-color-primary-hover: #5a46b0;
+  --rf-color-primary-active: #493a90;
+
+  --rf-color-ring: rgba(110, 86, 207, 0.5);
+  --rf-shadow: 0 12px 28px rgba(17, 17, 17, 0.18), 0 2px 6px rgba(17, 17, 17, 0.12);
+
+  /* Sizing */
+  --rf-size: 56px;            /* default fab size */
+  --rf-size-sm: 48px;
+  --rf-size-lg: 64px;
+
+  /* Layout & spacing */
+  --rf-gap: 10px;
+  --rf-pad: 14px;
+  --rf-radius: 9999px;        /* circular pill by default */
+  --rf-offset-x: 20px;
+  --rf-offset-y: 20px;
+
+  /* Text */
+  --rf-label-weight: 600;
+  --rf-label-size: 14px;
+  --rf-label-color: #ffffff;
+
+  /* Icon */
+  --rf-icon-size: 22px;
+}
+
+/* Allow themes / scripts to override inside a scope container if desired */
+[data-refina-theme] {
+  font-family: var(--rf-font-family);
+}
+
+/* ------------------------------------------------------------
+   Base selector group (supports new + legacy)
+   ------------------------------------------------------------ */
 #refina-launcher,
-.refina-fab,
+[data-refina-launcher],
 .refina-launcher,
-[data-refina-launcher]{
-  display:block !important;
-  visibility:visible !important;
-  opacity:1 !important;
-  position:fixed !important;
-  right:24px;
-  bottom:24px;
-  pointer-events:auto !important;
-  z-index:2147483647 !important;
+.refina-fab {
+  all: unset;
+  position: fixed;
+  inset: auto var(--rf-offset-x) var(--rf-offset-y) auto; /* bottom-right default */
+  z-index: var(--rf-z);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rf-gap);
+  width: var(--rf-size);
+  height: var(--rf-size);
+  padding-inline: var(--rf-pad);
+  border-radius: var(--rf-radius);
+  background: var(--rf-color-primary);
+  color: var(--rf-color-primary-contrast);
+  box-shadow: var(--rf-shadow);
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  text-decoration: none;
+  font: 600 var(--rf-label-size)/1 var(--rf-font-family);
+  transform: translateZ(0);
+  transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
-/* neutralize common hiding attributes/classes if present */
+
+/* Label (optional) */
+#refina-launcher .rf-label,
+[data-refina-launcher] .rf-label,
+.refina-launcher .rf-label,
+.refina-fab .rf-label {
+  color: var(--rf-label-color);
+  font-weight: var(--rf-label-weight);
+  white-space: nowrap;
+}
+
+/* Icon (svg or img inside) */
+#refina-launcher .rf-icon,
+[data-refina-launcher] .rf-icon,
+.refina-launcher .rf-icon,
+.refina-fab .rf-icon {
+  display: inline-block;
+  inline-size: var(--rf-icon-size);
+  block-size: var(--rf-icon-size);
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+/* Hover / active states */
+#refina-launcher:hover,
+[data-refina-launcher]:hover,
+.refina-launcher:hover,
+.refina-fab:hover {
+  background: var(--rf-color-primary-hover);
+  transform: translateZ(0) scale(1.04);
+}
+
+#refina-launcher:active,
+[data-refina-launcher]:active,
+.refina-launcher:active,
+.refina-fab:active {
+  background: var(--rf-color-primary-active);
+  transform: translateZ(0) scale(0.98);
+}
+
+/* Focus ring (keyboard) */
+#refina-launcher:focus-visible,
+[data-refina-launcher]:focus-visible,
+.refina-launcher:focus-visible,
+.refina-fab:focus-visible {
+  outline: 0;
+  box-shadow:
+    0 0 0 3px var(--rf-color-primary-contrast),
+    0 0 0 6px var(--rf-color-ring),
+    var(--rf-shadow);
+}
+
+/* Disabled/hidden controls */
+#refina-launcher[aria-disabled="true"],
+[data-refina-launcher][aria-disabled="true"],
+.refina-launcher[aria-disabled="true"],
+.refina-fab[aria-disabled="true"] {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 #refina-launcher[hidden],
-[data-refina-launcher][hidden]{
-  display:block !important;
+[data-refina-launcher][hidden],
+.refina-launcher[hidden],
+.refina-fab[hidden],
+#refina-launcher.rf-hidden,
+[data-refina-launcher].rf-hidden,
+.refina-launcher.rf-hidden,
+.refina-fab.rf-hidden {
+  opacity: 0 !important;
+  transform: translateZ(0) scale(0.98) !important;
+  pointer-events: none !important;
 }
-#refina-launcher.hidden,
-[data-refina-launcher].hidden,
-#refina-launcher.sr-only,
-[data-refina-launcher].sr-only{
-  display:block !important;
-  clip:auto !important;
-  clip-path:none !important;
-  width:auto !important;
-  height:auto !important;
-  position:fixed !important;
-  right:24px;
-  bottom:24px;
+
+/* -------------------------------------
+   Position variants (via data-position)
+   ------------------------------------- */
+#refina-launcher[data-position="bottom-right"],
+[data-refina-launcher][data-position="bottom-right"],
+.refina-launcher[data-position="bottom-right"],
+.refina-fab[data-position="bottom-right"] {
+  inset: auto var(--rf-offset-x) var(--rf-offset-y) auto;
+}
+
+#refina-launcher[data-position="bottom-left"],
+[data-refina-launcher][data-position="bottom-left"],
+.refina-launcher[data-position="bottom-left"],
+.refina-fab[data-position="bottom-left"] {
+  inset: auto auto var(--rf-offset-y) var(--rf-offset-x);
+}
+
+#refina-launcher[data-position="top-right"],
+[data-refina-launcher][data-position="top-right"],
+.refina-launcher[data-position="top-right"],
+.refina-fab[data-position="top-right"] {
+  inset: var(--rf-offset-y) var(--rf-offset-x) auto auto;
+}
+
+#refina-launcher[data-position="top-left"],
+[data-refina-launcher][data-position="top-left"],
+.refina-launcher[data-position="top-left"],
+.refina-fab[data-position="top-left"] {
+  inset: var(--rf-offset-y) auto auto var(--rf-offset-x);
+}
+
+/* ----------------------
+   Size variants (data-*)
+   ---------------------- */
+#refina-launcher[data-size="sm"],
+[data-refina-launcher][data-size="sm"],
+.refina-launcher[data-size="sm"],
+.refina-fab[data-size="sm"] {
+  width: var(--rf-size-sm);
+  height: var(--rf-size-sm);
+  --rf-icon-size: 20px;
+  --rf-label-size: 13px;
+}
+
+#refina-launcher[data-size="lg"],
+[data-refina-launcher][data-size="lg"],
+.refina-launcher[data-size="lg"],
+.refina-fab[data-size="lg"] {
+  width: var(--rf-size-lg);
+  height: var(--rf-size-lg);
+  --rf-icon-size: 24px;
+  --rf-label-size: 15px;
+}
+
+/* Pill vs circle (when label present) */
+#refina-launcher[data-variant="pill"],
+[data-refina-launcher][data-variant="pill"],
+.refina-launcher[data-variant="pill"],
+.refina-fab[data-variant="pill"] {
+  padding-inline: calc(var(--rf-pad) + 2px);
+  min-width: calc(var(--rf-size) + 48px);
+  justify-content: center;
+}
+
+/* Circle (icon-only) */
+#refina-launcher[data-variant="circle"],
+[data-refina-launcher][data-variant="circle"],
+.refina-launcher[data-variant="circle"],
+.refina-fab[data-variant="circle"] {
+  width: var(--rf-size);
+  min-width: var(--rf-size);
+  padding-inline: 0;
+}
+
+/* --------------------------
+   Light / dark theme helpers
+   -------------------------- */
+#refina-launcher[data-theme="light"],
+[data-refina-launcher][data-theme="light"],
+.refina-launcher[data-theme="light"],
+.refina-fab[data-theme="light"] {
+  --rf-color-primary-contrast: #111111;
+  --rf-label-color: #111111;
+  color: var(--rf-color-primary-contrast);
+  background: #ffffff;
+  border: 1px solid rgba(17,17,17,0.08);
+}
+
+#refina-launcher[data-theme="dark"],
+[data-refina-launcher][data-theme="dark"],
+.refina-launcher[data-theme="dark"],
+.refina-fab[data-theme="dark"] {
+  --rf-label-color: #ffffff;
+}
+
+/* --------------------------
+   Entrance animation (subtle)
+   -------------------------- */
+@keyframes rf-pop {
+  from { transform: translateZ(0) scale(0.9); opacity: 0; }
+  to   { transform: translateZ(0) scale(1);   opacity: 1; }
+}
+
+#refina-launcher,
+[data-refina-launcher],
+.refina-launcher,
+.refina-fab {
+  animation: rf-pop 160ms ease-out;
+}
+
+/* --------------------------
+   Reduced motion respect
+   -------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  #refina-launcher,
+  [data-refina-launcher],
+  .refina-launcher,
+  .refina-fab {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* --------------------------
+   Small screens adjustments
+   -------------------------- */
+@media (max-width: 480px) {
+  :root {
+    --rf-offset-x: 16px;
+    --rf-offset-y: 16px;
+  }
+  #refina-launcher[data-variant="pill"],
+  [data-refina-launcher][data-variant="pill"],
+  .refina-launcher[data-variant="pill"],
+  .refina-fab[data-variant="pill"] {
+    min-width: calc(var(--rf-size) + 36px);
+  }
+}
+
+/* -------------------------------------
+   Dragging helper (if you allow drag)
+   ------------------------------------- */
+#refina-launcher.is-dragging,
+[data-refina-launcher].is-dragging,
+.refina-launcher.is-dragging,
+.refina-fab.is-dragging {
+  transition: none !important;
+  cursor: grabbing !important;
+}
+
+/* -------------------------------------
+   Print: hide launcher
+   ------------------------------------- */
+@media print {
+  #refina-launcher,
+  [data-refina-launcher],
+  .refina-launcher,
+  .refina-fab {
+    display: none !important;
+  }
+}
+
+/* ------------------------------------------------------------
+   Minimal overlay container (optional)
+   If your script injects a root for the concierge panel/modal.
+   Safe, isolated styles only — no global resets.
+   ------------------------------------------------------------ */
+#refina-concierge-root {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--rf-z) - 1);
+  pointer-events: none;
+}
+
+#refina-concierge-root .rf-portal {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto; /* panel content manages its own interactivity */
+}
+
+/* Backdrop helper (toggle with a class from JS if needed) */
+#refina-concierge-root .rf-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(17,17,17,0.4);
+  backdrop-filter: saturate(120%) blur(2px);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+#refina-concierge-root .rf-backdrop.is-visible {
+  opacity: 1;
+}
+
+/* Panel shell (you’ll likely style it further in component CSS) */
+#refina-concierge-root .rf-panel {
+  position: absolute;
+  right: var(--rf-offset-x);
+  bottom: calc(var(--rf-offset-y) + var(--rf-size) + 12px);
+  width: min(420px, 92vw);
+  max-height: min(80vh, 720px);
+  border-radius: 18px;
+  background: #ffffff;
+  color: #111111;
+  box-shadow: var(--rf-shadow);
+  overflow: hidden;
+  transform: translateY(6px);
+  opacity: 0;
+  transition: transform 160ms ease, opacity 160ms ease;
+  will-change: transform, opacity;
+}
+
+#refina-concierge-root .rf-panel.is-visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Close button (optional) */
+#refina-concierge-root .rf-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: #444;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+#refina-concierge-root .rf-close:hover {
+  background: rgba(17,17,17,0.06);
 }
