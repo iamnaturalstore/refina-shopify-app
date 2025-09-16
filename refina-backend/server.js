@@ -515,6 +515,12 @@ app.get('/proxy/refina/v1/concerns', requireAppProxy, rateLimitAppProxy, async (
   }
 });
 
+// Serve the Admin SPA at root (/) too
+app.get("/", setAdminCsp, (_req, res) => {
+  res.sendFile(path.join(ADMIN_UI_DIR, "index.html"));
+});
+
+
 function shorten(text = '', max = 240) {
   const s = String(text).replace(/\s+/g, ' ').trim();
   return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
