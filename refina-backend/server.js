@@ -45,6 +45,7 @@ const CACHE_TTL_MS = Number(process.env.BFF_CACHE_TTL_MS || 24 * 60 * 60 * 1000)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ADMIN_UI_DIR = path.join(__dirname, 'admin-ui-dist');
+const adminUiIndex = path.join(ADMIN_UI_DIR, 'index.html'); // ← added
 
 // Where your storefront assets (concierge.(js|css)) are hosted (Netlify)
 const ASSETS_BASE_URL = String(process.env.ASSETS_BASE_URL || 'https://refina.netlify.app').replace(
@@ -362,11 +363,9 @@ app.get(/^\/admin(?:\/.*)?$/, setAdminCsp, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, 'index.html'));
 });
 
-// Embedded entry → /admin-ui, preserve ?host=&shop=
+// Embedded entry → serve Admin UI index (no redirect)
 app.get('/embedded', (req, res) => {
-  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-  res.set('Cache-Control', 'no-store');
-  res.redirect(302, `/admin-ui/${qs}`);
+  res.sendFile(adminUiIndex);
 });
 
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
