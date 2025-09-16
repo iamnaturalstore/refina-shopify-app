@@ -1,18 +1,27 @@
 {%- comment -%}
 Refina Theme App Embed (Launcher, production)
+- Place in: extensions/refina-launcher/blocks/refina-launcher.liquid
 - Loads launcher assets from the extension bundle
-- Outputs a single launcher mount with data-* config from Theme App Embed
-- Editor-safe behavior is implemented inside the asset JS
+- Renders a visible fallback label/icon so the button shows even if JS doesn’t run
 {%- endcomment -%}
 
-{%- assign ver = block.settings.asset_version | default: 'v3' -%}
-
 {{ 'concierge.css' | asset_url | stylesheet_tag }}
-<script type="module" src="{{ 'concierge.js' | asset_url }}" defer></script>
+{{ 'concierge.js'  | asset_url | script_tag }}
 
-{%- assign page_type = template.name | downcase -%}
+{%- assign page_type = request.page_type | downcase -%}
+{%- assign position =
+  block.settings.side == 'left'
+  | default: false
+  | ternary: 'bottom-left', 'bottom-right'
+-%}
+
 <div
+  id="refina-launcher"
   data-refina-launcher
+  data-position="{{ position }}"
+  data-variant="pill"
+  data-size="lg"
+
   data-heading="{{ block.settings.heading }}"
   data-subheading="{{ block.settings.subheading }}"
   data-cta-text="{{ block.settings.cta_text }}"
@@ -31,7 +40,15 @@ Refina Theme App Embed (Launcher, production)
   data-show-prices="{{ block.settings.show_prices }}"
   data-shop="{{ shop.permanent_domain }}"
   data-page-type="{{ page_type }}"
-></div>
+>
+  <!-- Visible fallback, replaced/enhanced by JS when it loads -->
+  <span class="rf-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="22" height="22" role="presentation" focusable="false">
+      <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79L20 21.5 21.5 20 15.5 14zm-6 0A4.5 4.5 0 1114 9.5 4.5 4.5 0 019.5 14z" />
+    </svg>
+  </span>
+  <span class="rf-label">{{ block.settings.cta_text }}</span>
+</div>
 
 {% schema %}
 {
@@ -47,20 +64,20 @@ Refina Theme App Embed (Launcher, production)
     { "type": "color", "id": "primary_color", "label": "Primary Color (Buttons)", "default": "#111827" },
     { "type": "color", "id": "accent_color", "label": "Accent Color (Highlights)", "default": "#10B981" },
     { "type": "select", "id": "border_radius", "label": "Border Radius", "options": [
-        { "value": "sm", "label": "Small" },
-        { "value": "md", "label": "Medium" },
-        { "value": "lg", "label": "Large" },
-        { "value": "2xl", "label": "2XL" }
-    ], "default": "lg"},
+      { "value": "sm", "label": "Small" },
+      { "value": "md", "label": "Medium" },
+      { "value": "lg", "label": "Large" },
+      { "value": "2xl", "label": "2XL" }
+    ], "default": "lg" },
     { "type": "select", "id": "button_style", "label": "Button Style", "options": [
-        { "value": "solid", "label": "Solid" },
-        { "value": "outline", "label": "Outline" }
-    ], "default": "solid"},
+      { "value": "solid", "label": "Solid" },
+      { "value": "outline", "label": "Outline" }
+    ], "default": "solid" },
     { "type": "range", "id": "grid_columns", "label": "Product Grid Columns", "min": 2, "max": 4, "step": 1, "default": 3 },
 
     { "type": "header", "content": "Behavior & Visibility" },
     { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
-        { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
+      { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
     ]},
     { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
     { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
