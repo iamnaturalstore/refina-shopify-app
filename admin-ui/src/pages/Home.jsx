@@ -14,9 +14,11 @@ import {
   Icon,
   ProgressBar,
   Spinner,
+  Tabs, // NEW: Tabs control for Overview ↔ Setup
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
 import { api, adminApi, getShop } from "../api/client.js";
+import { useLocation, useNavigate } from "react-router-dom"; // NEW
 
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
@@ -33,7 +35,11 @@ function labelFromLevel(level) {
 }
 function parsePlanResponse(j) {
   const p = j?.plan || j || {};
-  return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString(), reauthorize: !!j?.reauthorize };
+  return {
+    level: normalizeLevel(p.level),
+    status: (p.status || p.state || "unknown").toString(),
+    reauthorize: !!j?.reauthorize,
+  };
 }
 function pct(n, d) {
   const N = Number(n || 0);
@@ -47,10 +53,54 @@ function fmt(n) {
   return isFinite(x) ? x.toLocaleString() : "—";
 }
 
+// Extract current host param reliably (top-level search OR hash query)
+function getCurrentHost() {
+  const search = new URLSearchParams(window.location.search || "");
+  const hashQ = (window.location.hash || "").split("?")[1] || "";
+  const hash = new URLSearchParams(hashQ);
+  return search.get("host") || hash.get("host") || "";
+}
+
 export default function Home() {
   const shop = React.useMemo(() => getShop(), []);
-  const shopQS = React.useMemo(() => (shop ? `?shop=${encodeURIComponent(shop)}` : ""), [shop]);
+  const host = React.useMemo(() => getCurrentHost(), []);
+  const qs = React.useMemo(() => {
+    const params = new URLSearchParams();
+    if (host) params.set("host", host);
+    if (shop) params.set("shop", shop);
+    const s = params.toString();
+    return s ? `?${s}` : "";
+  }, [host, shop]);
 
+  const location = useLocation(); // NEW
+  const navigate = useNavigate(); // NEW
+
+  // ── Tabs (URL-driven) ──────────────────────────────────────────────────
+  const tabs = React.useMemo(
+    () => [
+      { id: "overview", content: "Overview" },
+      { id: "setup", content: "Setup" },
+    ],
+    []
+  );
+
+  const selectedTab = React.useMemo(() => {
+    const path = String(location?.pathname || "/");
+    return path.startsWith("/setup") ? 1 : 0;
+  }, [location?.pathname]);
+
+  const onTabSelect = React.useCallback(
+    (index) => {
+      if (index === 0) {
+        navigate(`/${qs}`); // Overview → "/"
+      } else {
+        navigate(`/setup${qs}`); // Setup → "/setup"
+      }
+    },
+    [navigate, qs]
+  );
+
+  // ── data state ─────────────────────────────────────────────────────────
   const [err, setErr] = React.useState("");
   const [reauthHint, setReauthHint] = React.useState(false);
   const [plan, setPlan] = React.useState({ level: "free", status: "unknown" });
@@ -67,7 +117,13 @@ export default function Home() {
         adminApi.getAnalyticsEvents({ limit: 5 }),
       ]);
       setOverview(over || {});
-      const items = Array.isArray(ev?.rows) ? ev.rows : Array.isArray(ev?.logs) ? ev.logs : Array.isArray(ev) ? ev : [];
+      const items = Array.isArray(ev?.rows)
+        ? ev.rows
+        : Array.isArray(ev?.logs)
+        ? ev.logs
+        : Array.isArray(ev)
+        ? ev
+        : [];
       setLogs(items.slice(0, 5));
       console.log("[Home] Analytics refresh successful.");
     } catch (e) {
@@ -83,13 +139,17 @@ export default function Home() {
       try {
         console.log("[Home] Fetching initial data...");
         // NOTE: NO fresh=1 here — Home reads cached Firestore plan only.
-        const [{ data: planData }, { data: settingsData }, { data: overviewData }, { data: logsData }] =
-          await Promise.all([
-            api.get(`/api/billing/plan`),
-            api.get(`/api/admin/store-settings`),
-            adminApi.getAnalyticsSummary({ days: 30 }),
-            adminApi.getAnalyticsEvents({ limit: 5 }),
-          ]);
+        const [
+          { data: planData },
+          { data: settingsData },
+          { data: overviewData },
+          { data: logsData },
+        ] = await Promise.all([
+          api.get(`/api/billing/plan`),
+          api.get(`/api/admin/store-settings`),
+          adminApi.getAnalyticsSummary({ days: 30 }),
+          adminApi.getAnalyticsEvents({ limit: 5 }),
+        ]);
 
         console.log("[Home] Fetched Plan:", planData);
         console.log("[Home] Fetched Settings:", settingsData);
@@ -159,6 +219,34 @@ export default function Home() {
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
+      {/* Tabs — selected index is derived from the current pathname.
+          Changing tab navigates to the target route, not an in-page toggle. */}
+      <Box paddingBlockEnd="300">
+        <Tabs tabs={tabs} selected={selectedTab} onSelect={onTabSelect} />
+      </Box>
+
+      {/* “Finish setup” callout — deep-links to /setup with host/shop preserved */}
+      <Box paddingBlockEnd="400">
+        <Card>
+          <Box padding="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text as="h3" variant="headingSm">
+                  Finish setup
+                </Text>
+                <Text as="p" tone="subdued">
+                  Enable app embed • Choose category • Verify launcher visible
+                </Text>
+              </BlockStack>
+              <Button variant="primary" onClick={() => navigate(`/setup${qs}`)}>
+                Go to Setup
+              </Button>
+            </InlineStack>
+          </Box>
+        </Card>
+      </Box>
+
+      {/* Existing Home content remains the Overview tab’s content */}
       <Card>
         <Box padding="400">
           <InlineStack align="space-between" blockAlign="center">
@@ -170,18 +258,18 @@ export default function Home() {
                 <Badge tone={badgeTone}>{levelLabel}</Badge>
               </Tooltip>
               {plan?.status && <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>}
-              <Button url={`#/billing${shopQS}`}>Manage billing</Button>
+              <Button url={`#/billing${qs}`}>Manage billing</Button>
             </InlineStack>
           </InlineStack>
         </Box>
         <Divider />
         <Box padding="400">
           <InlineStack gap="300">
-            <Button variant="primary" url={`#/analytics${shopQS}`}>
+            <Button variant="primary" url={`#/analytics${qs}`}>
               View analytics
             </Button>
-            <Button url={`#/settings${shopQS}`}>Settings</Button>
-            <Button url={`#/billing${shopQS}`}>Billing</Button>
+            <Button url={`#/settings${qs}`}>Settings</Button>
+            <Button url={`#/billing${qs}`}>Billing</Button>
           </InlineStack>
         </Box>
       </Card>
@@ -191,7 +279,7 @@ export default function Home() {
           <Banner
             tone="info"
             title="Billing needs a quick re-check"
-            action={{ content: "Open Billing", url: `#/billing${shopQS}` }}
+            action={{ content: "Open Billing", url: `#/billing${qs}` }}
             onDismiss={() => setReauthHint(false)}
           >
             <p>
@@ -309,7 +397,7 @@ export default function Home() {
               {level === "premium" ? (
                 <Badge tone="success">Premium</Badge>
               ) : (
-                <Button variant="primary" url={`#/billing${shopQS}`}>
+                <Button variant="primary" url={`#/billing${qs}`}>
                   {level === "free" ? "Upgrade to Pro" : "Upgrade to Premium"}
                 </Button>
               )}
@@ -328,18 +416,21 @@ export default function Home() {
                     <Text as="h3" variant="headingSm">
                       Recommended next steps
                     </Text>
-                    <Badge tone={checklistDone === 2 ? "success" : "attention"}>{checklistDone}/2</Badge>
+                    <Badge tone={checklistDone === 2 ? "success" : "attention"}>
+                      {checklistDone}/2
+                    </Badge>
                   </InlineStack>
                   <InlineStack gap="150" blockAlign="center">
                     <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
                     <Text as="span">
-                      Set your <strong>tone</strong> in <a href={`#/settings${shopQS}`}>Settings</a>
+                      Set your <strong>tone</strong> in <a href={`#/settings${qs}`}>Settings</a>
                     </Text>
                   </InlineStack>
                   <InlineStack gap="150" blockAlign="center">
                     <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
                     <Text as="span">
-                      Choose your <strong>category</strong> in <a href={`#/settings${shopQS}`}>Settings</a>
+                      Choose your <strong>category</strong> in{" "}
+                      <a href={`#/settings${qs}`}>Settings</a>
                     </Text>
                   </InlineStack>
                 </BlockStack>
@@ -376,7 +467,7 @@ export default function Home() {
                           </Box>
                         );
                       })}
-                      <Button url={`#/analytics${shopQS}`} plain>
+                      <Button url={`#/analytics${qs}`} plain>
                         See full log
                       </Button>
                     </BlockStack>

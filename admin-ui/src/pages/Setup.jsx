@@ -1,8 +1,12 @@
 // admin-ui/src/pages/Setup.jsx
-// Polaris Setup page with deep links to enable the App Embed and add the App Block.
-// Uses full <shop>.myshopify.com and your VITE_SHOPIFY_API_KEY at build time.
+// Reviewer-friendly Setup page with:
+//  • Enable Theme App Embed (Redirect to Theme Editor)
+//  • Choose/store Category (writes via /api/admin/store-settings)
+//  • Verify launcher (open storefront preview)
+//  • Start plan/trial (link to Billing)
+// All links preserve host/shop; Admin paths use App Bridge Redirect with safe fallbacks.
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   Page,
   Layout,
@@ -12,8 +16,12 @@ import {
   Button,
   Banner,
   InlineStack,
+  TextField,
+  Divider,
+  Badge,
 } from "@shopify/polaris";
-import { buildEmbeddedUrl } from "../api/client"; // added: normalize URL for top-frame redirects
+import { buildEmbeddedUrl, api } from "../api/client"; // buildEmbeddedUrl for top-frame redirects; api for save
+import { initAppBridge } from "../appBridge";
 
 function getFromQS(key) {
   const q = new URLSearchParams(window.location.search || "");
@@ -36,12 +44,23 @@ function toMyshopifyDomain(raw) {
   return s.endsWith(".myshopify.com") ? s : `${s}.myshopify.com`;
 }
 
+function getHostShopQS() {
+  const search = new URLSearchParams(window.location.search || "");
+  const hashQ = (window.location.hash || "").split("?")[1] || "";
+  const hash = new URLSearchParams(hashQ);
+  const host = hash.get("host") || search.get("host") || "";
+  const shop = hash.get("shop") || search.get("shop") || "";
+  const params = new URLSearchParams();
+  if (host) params.set("host", host);
+  if (shop) params.set("shop", shop);
+  const s = params.toString();
+  return s ? `?${s}` : "";
+}
+
 export default function Setup() {
   const apiKey = import.meta.env.VITE_SHOPIFY_API_KEY;
-  const embedHandle =
-    import.meta.env.VITE_REFINA_EMBED_HANDLE || "refina-embed"; // <- confirm handle
-  const blockHandle =
-    import.meta.env.VITE_REFINA_BLOCK_HANDLE || "refina-launcher"; // <- confirm handle
+  const embedHandle = import.meta.env.VITE_REFINA_EMBED_HANDLE || "refina-embed";
+  const blockHandle = import.meta.env.VITE_REFINA_BLOCK_HANDLE || "refina-launcher";
 
   const shop = useMemo(() => {
     return (
@@ -53,7 +72,96 @@ export default function Setup() {
       ) || ""
     );
   }, []);
+  const qs = useMemo(getHostShopQS, []);
 
+  const [category, setCategory] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Load current store settings so we can prefill Category
+  useEffect(() => {
+    let on = true;
+    (async () => {
+      setLoading(true);
+      setErr("");
+      try {
+        const { data } = await api.get(`/api/admin/store-settings`);
+        // accept either {settings:{category}} or {category}
+        const current =
+          data?.settings?.category ?? data?.category ?? "";
+        if (on) setCategory(String(current || ""));
+      } catch (e) {
+        if (on) setErr(`Failed to load settings: ${e?.message || "Unknown error"}`);
+      } finally {
+        if (on) setLoading(false);
+      }
+    })();
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  // Admin redirects with App Bridge (preferred) + graceful fallback to top
+  const redirectAdmin = useCallback((adminPathWithQuery) => {
+    // E.g. "themes/current/editor?context=apps&activateAppId=API_KEY/handle"
+    try {
+      const ctx = initAppBridge();
+      const Redirect = ctx?.actions?.Redirect;
+      if (ctx?.app && Redirect) {
+        const r = Redirect.create(ctx.app);
+        r.dispatch(Redirect.Action.ADMIN_PATH, adminPathWithQuery);
+        return;
+      }
+    } catch {
+      /* ignore and fall back */
+    }
+    // Fallback: direct top navigation (stays safe in review)
+    const abs = buildEmbeddedUrl(`/admin/${adminPathWithQuery}`);
+    try {
+      window.top.location.href = abs;
+    } catch {
+      window.location.href = abs;
+    }
+  }, []);
+
+  const openThemeEmbed = useCallback(() => {
+    const path = `themes/current/editor?context=apps&template=index&activateAppId=${apiKey}/${embedHandle}`;
+    redirectAdmin(path);
+  }, [apiKey, embedHandle, redirectAdmin]);
+
+  const openAddBlock = useCallback(() => {
+    const path = `themes/current/editor?template=product&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
+    redirectAdmin(path);
+  }, [apiKey, blockHandle, redirectAdmin]);
+
+  const openStorefrontPreview = useCallback(() => {
+    if (!shop) return;
+    const url = `https://${shop}/?refina_preview=1`;
+    window.open(url, "_blank", "noopener");
+  }, [shop]);
+
+  const saveCategory = useCallback(async () => {
+    setSaveBusy(true);
+    setSaveOk(false);
+    setErr("");
+    try {
+      // Prefer a structured payload; backend will merge into store settings
+      await api.post(`/api/admin/store-settings`, {
+        settings: { category: String(category || "").trim() },
+      });
+      setSaveOk(true);
+    } catch (e) {
+      setErr(`Failed to save category: ${e?.message || "Unknown error"}`);
+    } finally {
+      setSaveBusy(false);
+      // Hide success after a short delay (visual feedback only)
+      setTimeout(() => setSaveOk(false), 1800);
+    }
+  }, [category]);
+
+  // Guardrails for missing config
   if (!apiKey) {
     return (
       <Page title="Setup">
@@ -61,7 +169,7 @@ export default function Setup() {
           <Layout.Section>
             <Banner title="Missing API key" tone="critical">
               <p>
-                VITE_SHOPIFY_API_KEY is not defined. Add it to your Admin UI
+                <code>VITE_SHOPIFY_API_KEY</code> is not defined. Add it to your Admin UI
                 build environment.
               </p>
             </Banner>
@@ -89,53 +197,98 @@ export default function Setup() {
     );
   }
 
-  const embedUrl = `https://${shop}/admin/themes/current/editor?context=apps&template=index&activateAppId=${apiKey}/${embedHandle}`;
-  const blockUrl = `https://${shop}/admin/themes/current/editor?template=product&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
-
-  const openTop = (url) => {
-    // Normalize to absolute URL and ensure host/shop are included
-    const abs = buildEmbeddedUrl(url || "/embedded");
-    try {
-      // Ensure we escape the iframe and land in the Theme Editor (top window)
-      window.top.location.href = abs;
-    } catch {
-      window.location.href = abs;
-    }
-  };
-
   return (
-    <Page title="Set up Refina">
+    <Page title="Set up Refina" subtitle="3 quick steps to get your app live">
       <Layout>
+        <Layout.Section>
+          {err && (
+            <Banner tone="critical" title="Something went wrong" onDismiss={() => setErr("")}>
+              <p>{err}</p>
+            </Banner>
+          )}
+        </Layout.Section>
+
+        {/* Step 1: Enable Theme App Embed */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text as="p" variant="bodyLg">
-                Enable the Refina launcher and (optionally) add the Refina block
-                to your product template. After you click a button, the Theme
-                Editor opens — make sure to click <strong>Save</strong>.
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingSm">1) Enable the Theme App Embed</Text>
+                <Badge tone="subdued">Required</Badge>
+              </InlineStack>
+              <Text as="p">
+                We’ll open the Theme Editor in Shopify. Toggle the Refina <strong>App embed</strong>, then click <strong>Save</strong>.
               </Text>
-
               <InlineStack gap="300" wrap={false}>
-                <Button onClick={() => openTop(embedUrl)} variant="primary">
-                  Enable App Embed (launcher)
+                <Button variant="primary" onClick={openThemeEmbed}>Open Theme Editor</Button>
+                <Button onClick={openAddBlock}>Add App Block (optional)</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* Step 2: Choose your Category */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingSm">2) Choose your store category</Text>
+                {saveOk ? <Badge tone="success">Saved</Badge> : <Badge tone="attention">Pending</Badge>}
+              </InlineStack>
+              <Text as="p" tone="subdued">
+                This helps Refina tailor recommendations to your catalog.
+              </Text>
+              <TextField
+                label="Category"
+                autoComplete="off"
+                value={category}
+                onChange={setCategory}
+                placeholder="e.g., Beauty, Skincare, Supplements"
+                disabled={loading}
+              />
+              <InlineStack gap="200">
+                <Button onClick={saveCategory} loading={saveBusy} variant="primary">
+                  Save category
                 </Button>
-                <Button onClick={() => openTop(blockUrl)}>
-                  Add App Block (product template)
+                <Button url={`#/${qs}`} tone="subdued">
+                  Back to Home
                 </Button>
               </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-              <BlockStack gap="150">
-                <Text as="h3" variant="headingSm">
-                  Checklist
-                </Text>
-                <ol style={{ margin: 0, paddingLeft: 18 }}>
-                  <li>Click one of the buttons above.</li>
-                  <li>In the Theme Editor, toggle the embed or add the block.</li>
-                  <li>
-                    Click <strong>Save</strong>, then Preview your store.
-                  </li>
-                </ol>
-              </BlockStack>
+        {/* Step 3: Verify launcher */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingSm">3) Verify the launcher is visible</Text>
+                <Badge tone="subdued">Check</Badge>
+              </InlineStack>
+              <Text as="p" tone="subdued">
+                Open your storefront preview and look for the Refina launcher (usually bottom-right). If it’s hidden, ensure the App embed is enabled and saved.
+              </Text>
+              <InlineStack gap="300" wrap={false}>
+                <Button onClick={openStorefrontPreview}>Open storefront preview</Button>
+                <Button url={`#/billing${qs}`} variant="tertiary">Start plan / trial</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* Helpful footer */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="p" tone="subdued">
+                Tip: All admin links are embedded. Theme Editor opens as a Shopify Admin page; storefront opens in a new tab.
+              </Text>
+              <Divider />
+              <InlineStack gap="200">
+                <Button url={`#/${qs}`} variant="secondary">Back to Home</Button>
+                <Button url={`#/billing${qs}`} variant="secondary">Go to Billing</Button>
+              </InlineStack>
             </BlockStack>
           </Card>
         </Layout.Section>
