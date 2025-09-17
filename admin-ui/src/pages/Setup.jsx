@@ -58,9 +58,9 @@ function getHostShopQS() {
 }
 
 export default function Setup() {
-  const apiKey = import.meta.env.VITE_SHOPIFY_API_KEY;
-  const embedHandle = import.meta.env.VITE_REFINA_EMBED_HANDLE || "refina-embed";
-  const blockHandle = import.meta.env.VITE_REFINA_BLOCK_HANDLE || "refina-launcher";
+  const apiKey = import.meta.env.VITE_SHOPIFY_API_KEY; // (kept for future use if needed)
+  const themeExtId = import.meta.env.VITE_THEME_EXTENSION_ID; // NEW: Theme app extension UUID
+  const embedHandle = import.meta.env.VITE_REFINA_EMBED_HANDLE || "refina-launcher"; // default updated
 
   const shop = useMemo(() => {
     return (
@@ -105,7 +105,7 @@ export default function Setup() {
 
   // Admin redirects with App Bridge (preferred) + graceful fallback to top
   const redirectAdmin = useCallback((adminPathWithQuery) => {
-    // E.g. "themes/current/editor?context=apps&activateAppId=API_KEY/handle"
+    // E.g. "themes/current/editor?context=apps&activateAppId=<extId>/<handle>"
     try {
       const ctx = initAppBridge();
       const Redirect = ctx?.actions?.Redirect;
@@ -127,15 +127,11 @@ export default function Setup() {
   }, []);
 
   const openThemeEmbed = useCallback(() => {
-    const path = `themes/current/editor?context=apps&template=index&activateAppId=${apiKey}/${embedHandle}`;
+    const path = `themes/current/editor?context=apps&template=index&activateAppId=${themeExtId}/${embedHandle}&target=newAppsSection/app-embed`;
     redirectAdmin(path);
-  }, [apiKey, embedHandle, redirectAdmin]);
+  }, [themeExtId, embedHandle, redirectAdmin]);
 
-  const openAddBlock = useCallback(() => {
-    const path = `themes/current/editor?template=product&addAppBlockId=${apiKey}/${blockHandle}&target=mainSection`;
-    redirectAdmin(path);
-  }, [apiKey, blockHandle, redirectAdmin]);
-
+  // (Storefront preview handled via a real link in JSX; keep helper only if needed elsewhere)
   const openStorefrontPreview = useCallback(() => {
     if (!shop) return;
     const url = `https://${shop}/?refina_preview=1`;
@@ -161,16 +157,16 @@ export default function Setup() {
     }
   }, [category]);
 
-  // Guardrails for missing config
-  if (!apiKey) {
+  // Guardrails for missing config (use Theme Extension ID as the gate)
+  if (!themeExtId) {
     return (
       <Page title="Setup">
         <Layout>
           <Layout.Section>
-            <Banner title="Missing API key" tone="critical">
+            <Banner title="Missing Theme Extension ID" tone="critical">
               <p>
-                <code>VITE_SHOPIFY_API_KEY</code> is not defined. Add it to your Admin UI
-                build environment.
+                <code>VITE_THEME_EXTENSION_ID</code> is not defined. Add it to your Admin UI
+                build environment so the Theme Editor deep link can activate the Refina app embed.
               </p>
             </Banner>
           </Layout.Section>
@@ -221,7 +217,6 @@ export default function Setup() {
               </Text>
               <InlineStack gap="300" wrap={false}>
                 <Button variant="primary" onClick={openThemeEmbed}>Open Theme Editor</Button>
-                <Button onClick={openAddBlock}>Add App Block (optional)</Button>
               </InlineStack>
             </BlockStack>
           </Card>
@@ -270,7 +265,7 @@ export default function Setup() {
                 Open your storefront preview and look for the Refina launcher (usually bottom-right). If it’s hidden, ensure the App embed is enabled and saved.
               </Text>
               <InlineStack gap="300" wrap={false}>
-                <Button onClick={openStorefrontPreview}>Open storefront preview</Button>
+                <Button url={`https://${shop}/?refina_preview=1`} external>Open storefront preview</Button>
                 <Button url={`#/billing${qs}`} variant="tertiary">Start plan / trial</Button>
               </InlineStack>
             </BlockStack>
