@@ -216,7 +216,7 @@ export default function Setup() {
                 We’ll open the Theme Editor in Shopify. Toggle the Refina <strong>App embed</strong>, then click <strong>Save</strong>.
               </Text>
               <InlineStack gap="300" wrap={false}>
-                <Button variant="primary" url={`https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${themeExtId}/${embedHandle}&target=newAppsSection/app-embed`} external>Open Theme Editor</Button>
+                <Button variant="primary" url={`https://${shop}/admin/themes/current/editor?context=apps&target=newAppsSection/app-embed`} external>Open Theme Editor</Button>
               </InlineStack>
             </BlockStack>
           </Card>
