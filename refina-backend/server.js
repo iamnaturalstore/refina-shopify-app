@@ -363,10 +363,61 @@ app.get(/^\/admin(?:\/.*)?$/, setAdminCsp, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, 'index.html'));
 });
 
-// Embedded entry → serve Admin UI index (no redirect)
-app.get('/embedded', (req, res) => {
-  res.sendFile(adminUiIndex);
+// Embedded entry → preflight for OFFLINE session, then serve Admin UI index
+app.get('/embedded', async (req, res) => {
+  try {
+    // 1) Resolve canonical shop + host from query (or derive from host)
+    const raw = String(req.query.shop || req.query.storeId || '').toLowerCase().trim();
+    let shop = toMyshopifyDomain(raw);
+    let host = String(req.query.host || '').trim();
+
+    if (!shop && host) {
+      try {
+        const decoded = Buffer.from(host, 'base64').toString('utf8'); // "<shop>.myshopify.com/admin" OR "admin.shopify.com/store/<slug>"
+        const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
+        const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
+        if (m1?.[1]) shop = toMyshopifyDomain(m1[1]);
+        if (!shop && m2?.[1]) shop = toMyshopifyDomain(m2[1]);
+      } catch { /* ignore */ }
+    }
+    if (shop && !host) {
+      try { host = Buffer.from(`${shop}/admin`).toString('base64'); } catch { host = ''; }
+    }
+
+    // 2) If we can’t resolve a shop, just serve the UI (App Bridge can still recover via host on first paint)
+    if (!shop) {
+      return res.sendFile(adminUiIndex);
+    }
+
+    // 3) Check for an existing OFFLINE session; if missing → bounce through OAuth once
+    try {
+      const offlineId = shopify.session.getOfflineId(shop);
+      const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+      const sess = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+      if (!sess || !sess.accessToken) {
+        const u = new URL('/api/auth', `${req.protocol}://${req.get('host')}`);
+        u.searchParams.set('shop', shop);
+        if (host) u.searchParams.set('host', host);
+        // After OAuth, come back to our Admin UI
+        u.searchParams.set('return_to', encodeURIComponent('/admin-ui'));
+        return res.redirect(302, u.toString());
+      }
+    } catch {
+      const u = new URL('/api/auth', `${req.protocol}://${req.get('host')}`);
+      u.searchParams.set('shop', shop);
+      if (host) u.searchParams.set('host', host);
+      u.searchParams.set('return_to', encodeURIComponent('/admin-ui'));
+      return res.redirect(302, u.toString());
+    }
+
+    // 4) Offline session exists → serve Admin UI
+    return res.sendFile(adminUiIndex);
+  } catch (e) {
+    console.error('/embedded preflight error', e?.message || e);
+    return res.sendFile(adminUiIndex);
+  }
 });
+
 
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {

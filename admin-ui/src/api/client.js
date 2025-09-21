@@ -57,6 +57,24 @@ function getHost() {
   }
   return host || "";
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Reauth helpers (fallback when headers are missing)
+   ───────────────────────────────────────────────────────────── */
+function sameOrigin(urlOrPath) {
+  try {
+    const u = new URL(urlOrPath, window.location.origin);
+    return u.origin === window.location.origin;
+  } catch { return false; }
+}
+function isProtectedApi(urlOrPath) {
+  try {
+    const p = new URL(urlOrPath, window.location.origin).pathname;
+    // Treat our privileged API namespaces as requiring a valid session
+    return /^\/api\/(billing|admin|auth|semantic|privacy)\b/.test(p);
+  } catch { return false; }
+}
+
 export function withContext(path) {
   const url = new URL(path, window.location.origin);
   const params = new URLSearchParams(url.search);
@@ -135,7 +153,7 @@ export async function api(path, init = {}) {
       }
     : { ...init, headers: { Accept: "application/json", ...(init.headers || {}) } };
 
-  const fetchInit = { cache: "no-store", ...baseInit };
+  const fetchInit = { cache: "no-store", credentials: "include", ...baseInit };
   const f = getAuthedFetch();
   const res = await f(finalUrl, fetchInit);
 
@@ -152,6 +170,25 @@ export async function api(path, init = {}) {
         // Park concurrent callers while the first one navigates
         return new Promise(() => {});
       }
+
+        // If we got 401/403 *without* Shopify reauth headers, but it's our protected API,
+  // fail forward by forcing a top-frame bounce through /api/auth.
+  if ((res.status === 401 || res.status === 403) && sameOrigin(finalUrl) && isProtectedApi(finalUrl)) {
+    if (__reauthInFlight) {
+      return new Promise(() => {});
+    }
+    __reauthInFlight = true;
+
+    const shop = getShop();
+    const host = getHost();
+    const to = buildEmbeddedUrl("/api/auth", { shop, host });
+
+    // eslint-disable-next-line no-console
+    console.log("[api] 401/403 without reauth headers → forcing /api/auth");
+    forceTopFrameRedirect(to);
+    return new Promise(() => {});
+  }
+
       __reauthInFlight = true;
 
       // Upgrade to absolute URL and ALWAYS append shop/host

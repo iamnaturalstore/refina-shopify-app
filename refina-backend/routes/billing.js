@@ -661,8 +661,12 @@ router.get("/status", async (req, res) => {
 router.post("/upgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
+
+    // ⬇️ Tolerant client selection:
+    //    - Prefer OFFLINE session
+    //    - Fall back to ONLINE (from guard) if offline not created yet
+    //    - Reauth only if neither exists
+    const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(subs);
@@ -672,33 +676,33 @@ router.post("/upgrade", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-// DO NOT trust/accept req.body.returnUrl — it can exceed 255.
-// Always compute a short, sanitized returnUrl from the app origin.
-const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-  .trim()
-  .replace(/\/$/, "");
+    // DO NOT trust/accept req.body.returnUrl — it can exceed 255.
+    // Always compute a short, sanitized returnUrl from the app origin.
+    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+      .trim()
+      .replace(/\/$/, "");
 
-let origin = originCandidate;
-try {
-  origin = new URL(originCandidate).origin;            // strips any path/query
-} catch {
-  origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
-}
+    let origin = originCandidate;
+    try {
+      origin = new URL(originCandidate).origin;            // strips any path/query
+    } catch {
+      origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+    }
 
-// Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+    // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
+    const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
-const PLAN = { name: "Premium", amount: "49.00" };
-const testFlag =
-  ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
-    .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
-  process.env.NODE_ENV !== "production";
+    const PLAN = { name: "Premium", amount: "49.00" };
+    const testFlag =
+      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+      process.env.NODE_ENV !== "production";
 
-if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
-  console.log("[Billing]/upgrade origin", { originCandidate, origin });
-  console.log("[Billing]/upgrade returnUrl", returnUrl.length, returnUrl);
-  console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, test: testFlag });
-}
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.log("[Billing]/upgrade origin", { originCandidate, origin });
+      console.log("[Billing]/upgrade returnUrl", returnUrl.length, returnUrl);
+      console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, test: testFlag });
+    }
 
     // Safe call with scoped userErrors
     let confirmationUrl = null;
@@ -756,6 +760,7 @@ if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
+
 
 /** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {

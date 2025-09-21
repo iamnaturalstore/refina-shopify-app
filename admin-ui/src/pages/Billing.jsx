@@ -57,13 +57,28 @@ function parsePlanResponse(jsonResponse) {
   return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
 }
 
-// Extract Shopify reauth headers (Axios lowercases keys)
+// Extract Shopify reauth headers (Axios lowercases keys) + fallback when headers are missing
 function getReauthInfo(err) {
   const h = err?.response?.headers || {};
-  const need = String(h["x-shopify-api-request-failure-reauthorize"] || "").trim() === "1";
-  const url = h["x-shopify-api-request-failure-reauthorize-url"] || "";
-  return need ? { need: true, url } : { need: false, url: "" };
+  const needHdr = String(h["x-shopify-api-request-failure-reauthorize"] || "").trim() === "1";
+  const urlHdr = h["x-shopify-api-request-failure-reauthorize-url"] || "";
+
+  if (needHdr) return { need: true, url: urlHdr };
+
+  // Fallback: plain Error from our api() wrapper (no headers).
+  // If the message suggests 401/403 or an auth/session issue, synthesize a safe /api/auth URL.
+  const msg = String(err?.message || "").toLowerCase();
+  const looksUnauthorized = /\b(401|403)\b/.test(msg) || /reauthoriz|unauth|forbid|token|session/.test(msg);
+
+  if (looksUnauthorized) {
+    // buildEmbeddedUrl adds host/shop automatically from persisted context
+    const to = buildEmbeddedUrl("/api/auth");
+    return { need: true, url: to };
+    }
+
+  return { need: false, url: "" };
 }
+
 function redirectTop(urlOrPath = "/", extra = {}) {
   const url = buildEmbeddedUrl(urlOrPath, extra);
   try {
