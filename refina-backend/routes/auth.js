@@ -180,7 +180,11 @@ router.get("/callback", async (req, res) => {
     // Auth: x-admin-secret = ADMIN_SHARED_SECRET
     // ────────────────────────────────────────────────────────────────
     try {
-      const origin = process.env.PUBLIC_BACKEND_ORIGIN || baseUrl(req);
+      const origin =
+          process.env.BACKFILL_PUBLIC_BACKEND_ORIGIN ||
+          process.env.PUBLIC_BACKEND_ORIGIN ||
+        baseUrl(req);
+
       const adminSecret = process.env.ADMIN_SHARED_SECRET || "";
       if (adminSecret && shop) {
         fetch(
