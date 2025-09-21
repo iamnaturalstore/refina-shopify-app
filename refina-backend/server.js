@@ -35,6 +35,9 @@ import { toMyshopifyDomain } from './utils/resolveStore.js';
 import shopify from './shopify.js';
 import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 
+// Product Indexing on Install
+import mountBackfillRoutes from './routes/backfill.js';
+
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
@@ -371,6 +374,9 @@ app.use(
   '/admin-ui',
   express.static(ADMIN_UI_DIR, { index: false, maxAge: '1h' })
 );
+
+// Index on Install 
+mountBackfillRoutes(app);
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
