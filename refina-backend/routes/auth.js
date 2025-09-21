@@ -11,10 +11,12 @@ const router = express.Router();
 function sanitizeReturnTo(p) {
   if (!p || typeof p !== "string") return "";
   try {
-    if (/^https?:\/\//i.test(p)) return "";     // disallow absolute URLs
-    if (!p.startsWith("/admin-ui")) return "";  // only allow our UI scope
-    return p.replace(/\/{2,}/g, "/");           // normalize
-  } catch { return ""; }
+    if (/^https?:\/\//i.test(p)) return ""; // disallow absolute URLs
+    if (!p.startsWith("/admin-ui")) return ""; // only allow our UI scope
+    return p.replace(/\/{2,}/g, "/"); // normalize
+  } catch {
+    return "";
+  }
 }
 
 function getCookie(req, name) {
@@ -36,7 +38,7 @@ function computeHostFromShop(shop) {
 
 function baseUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
-  const host  = req.get("x-forwarded-host") || req.get("host");
+  const host = req.get("x-forwarded-host") || req.get("host");
   return `${proto}://${host}`;
 }
 
@@ -68,14 +70,18 @@ router.get("/", async (req, res) => {
   // Persist deep link for after OAuth; keep redirect_uri static.
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
-      httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 5 * 60 * 1000,
     });
   }
 
   try {
     await shopify.auth.begin({
       shop,
-      callbackPath: "/api/auth/callback",   // STATIC (must be whitelisted)
+      callbackPath: "/api/auth/callback", // STATIC (must be whitelisted)
       isOnline: false,
       rawRequest: req,
       rawResponse: res,
@@ -90,11 +96,17 @@ router.get("/", async (req, res) => {
         (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
       return res.redirect(302, to);
     }
-    console.error("OAuth begin failed", { shop, host, path: req.originalUrl, message: err?.message, name: err?.name });
+
+    console.error("OAuth begin failed", {
+      shop,
+      host,
+      path: req.originalUrl,
+      message: err?.message,
+      name: err?.name,
+    });
     return res.status(500).send(`OAuth begin failed: ${err?.message || String(err)}`);
   }
 });
-
 
 /* Top-level handoff required by Shopify OAuth */
 router.get("/toplevel", (req, res) => {
@@ -102,14 +114,23 @@ router.get("/toplevel", (req, res) => {
   if (!shop.endsWith(".myshopify.com")) {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
+
   const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
-  res.cookie("shopifyTopLevelOAuth", "1", { httpOnly: true, secure: true, sameSite: "strict" });
+  res.cookie("shopifyTopLevelOAuth", "1", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+  });
 
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
-      httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: 5 * 60 * 1000,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+      path: "/",
+      maxAge: 5 * 60 * 1000,
     });
   }
 
@@ -124,20 +145,27 @@ router.get("/toplevel", (req, res) => {
 <script>window.top.location.href=${JSON.stringify(backToAuth)};</script>
 <p>Redirecting…</p>
 </body></html>`;
+
   return res.status(200).send(html);
 });
 
 /* OAuth callback (OFFLINE complete) → send TOP FRAME to Admin /apps/refina */
 router.get("/callback", async (req, res) => {
   try {
-    const { session } = await shopify.auth.callback({ rawRequest: req, rawResponse: res });
+    const { session } = await shopify.auth.callback({
+      rawRequest: req,
+      rawResponse: res,
+    });
 
-    // ── NEW: force-persist the session, just in case the SDK didn’t.
+    // ── Force-persist the session, just in case the SDK didn’t.
     try {
       const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
       if (storage?.storeSession) await storage.storeSession(session);
       console.log("[OAuth] stored session:", {
-        id: session?.id, isOnline: session?.isOnline, shop: session?.shop, hasToken: !!session?.accessToken,
+        id: session?.id,
+        isOnline: session?.isOnline,
+        shop: session?.shop,
+        hasToken: !!session?.accessToken,
       });
     } catch (e) {
       console.warn("[OAuth] storeSession warning:", e?.message || e);
@@ -145,6 +173,28 @@ router.get("/callback", async (req, res) => {
 
     const shop = session.shop;
     const store = storeFromShop(shop);
+
+    // ────────────────────────────────────────────────────────────────
+    // ✅ Fire-and-forget: call the existing admin backfill worker directly
+    // Path: POST /api/admin/backfill-products?shop=<shop>
+    // Auth: x-admin-secret = ADMIN_SHARED_SECRET
+    // ────────────────────────────────────────────────────────────────
+    try {
+      const origin = process.env.PUBLIC_BACKEND_ORIGIN || baseUrl(req);
+      const adminSecret = process.env.ADMIN_SHARED_SECRET || "";
+      if (adminSecret && shop) {
+        fetch(
+          `${origin}/api/admin/backfill-products?shop=${encodeURIComponent(shop)}`,
+          {
+            method: "POST",
+            headers: { "x-admin-secret": adminSecret },
+            keepalive: true,
+          }
+        ).catch(() => {});
+      }
+    } catch {
+      // Intentionally swallow to avoid impacting redirect
+    }
 
     // Send the TOP FRAME to Shopify Admin app handle (avoids /apps/admin-ui 404s).
     const adminUrl = new URL(`/store/${store}/apps/refina`, "https://admin.shopify.com");
@@ -161,8 +211,8 @@ router.get("/embedded", (req, res) => {
   if (!shop.endsWith(".myshopify.com")) {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
   }
-  const host = String(req.query.host || "") || computeHostFromShop(shop);
 
+  const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(getCookie(req, "refina_return_to"));
   if (returnTo) res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
 
@@ -184,9 +234,11 @@ if (String(process.env.ENABLE_DEBUG_ROUTES || "") === "1") {
     try {
       const shop = String(req.query.shop || "").toLowerCase();
       if (!shop.endsWith(".myshopify.com")) return res.status(400).json({ error: "bad shop" });
+
       const id = shopify.session.getOfflineId(shop);
       const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
       const sess = storage?.loadSession ? await storage.loadSession(id) : null;
+
       return res.json({
         shop,
         offlineId: id,
