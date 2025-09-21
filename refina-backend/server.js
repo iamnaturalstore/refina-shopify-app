@@ -534,12 +534,12 @@ app.get('/proxy/refina', (_req, res) => {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Refina Concierge</title>
-  <link rel="stylesheet" href="/apps/refina/concierge.css?${cacheBust}" crossorigin="anonymous"/>
-  <link rel="preload" as="script" href="/apps/refina/concierge.js?${cacheBust}" crossorigin="anonymous"/>
+  <link rel="stylesheet" href="concierge.css?${cacheBust}" crossorigin="anonymous"/>
+  <link rel="preload" as="script" href="concierge.js?${cacheBust}" crossorigin="anonymous"/>
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/apps/refina/concierge.js?${cacheBust}" defer crossorigin="anonymous"></script>
+  <script type="module" src="concierge.js?${cacheBust}" defer crossorigin="anonymous"></script>
 </body>
 </html>`);
 });
@@ -910,6 +910,42 @@ app.use(
     logLevel: 'warn',
   })
 );
+
+// Aliases so direct hits to /apps/refina/* also work (Theme Editor & direct backend URLs)
+app.use(
+  '/apps/refina/concierge.js',
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: () => '/concierge.js',
+    logLevel: 'warn',
+  })
+);
+app.use(
+  '/apps/refina/concierge.css',
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: () => '/concierge.css',
+    logLevel: 'warn',
+  })
+);
+app.use(
+  '/apps/refina/chunks',
+  createProxyMiddleware({
+    target: ASSETS_BASE_URL,
+    changeOrigin: true,
+    ws: false,
+    pathRewrite: (p) => p.replace(/^\/apps\/refina\/chunks/, '/chunks'),
+    logLevel: 'warn',
+  })
+);
+
+// Quiet the favicon warning in Theme Editor/site previews
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
 
 // ALSO expose storefront analytics ingest on App Proxy base
 app.use('/proxy/refina/v1/analytics/ingest', requireAppProxy, rateLimitAppProxy, analyticsIngestRouter);
