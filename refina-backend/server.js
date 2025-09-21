@@ -332,6 +332,31 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+// ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
+const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
+let CANONICAL_HOST = '';
+try {
+  CANONICAL_HOST = CANONICAL_ORIGIN ? new URL(CANONICAL_ORIGIN).host : '';
+} catch {}
+
+app.use((req, res, next) => {
+  // Only enforce if a canonical host is configured
+  if (!CANONICAL_HOST) return next();
+
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const host  = req.get('x-forwarded-host') || req.get('host') || '';
+
+  const needsProto = proto !== 'https';
+  const needsHost  = host && CANONICAL_HOST && host.toLowerCase() !== CANONICAL_HOST.toLowerCase();
+
+  if (needsProto || needsHost) {
+    const url = new URL(req.originalUrl || '/', `https://${CANONICAL_HOST}`);
+    return res.redirect(302, url.toString());
+  }
+  return next();
+});
+
+
 // ───────────────────────── Admin UI (embedded) ─────────────────────────
 // ✅ Option A: serve built Admin UI from ADMIN_UI_DIR consistently
 
@@ -363,50 +388,58 @@ app.get(/^\/admin(?:\/.*)?$/, setAdminCsp, (_req, res) => {
   res.sendFile(path.join(ADMIN_UI_DIR, 'index.html'));
 });
 
-// Embedded entry → preflight for OFFLINE session, then serve Admin UI index
+// Embedded entry → preflight for OFFLINE session; bounce to top-level OAuth if missing
 app.get('/embedded', async (req, res) => {
   try {
-    // 1) Resolve canonical shop + host from query (or derive from host)
-    const raw = String(req.query.shop || req.query.storeId || '').toLowerCase().trim();
-    let shop = toMyshopifyDomain(raw);
+    // 1) Resolve canonical shop + host
+    const toMyshop = (raw) => {
+      const s = String(raw || '').trim().toLowerCase();
+      if (!s) return '';
+      return s.endsWith('.myshopify.com') ? s : `${s}.myshopify.com`;
+    };
+
+    let shop = toMyshop(req.query.shop || req.query.storeId || '');
     let host = String(req.query.host || '').trim();
 
     if (!shop && host) {
       try {
-        const decoded = Buffer.from(host, 'base64').toString('utf8'); // "<shop>.myshopify.com/admin" OR "admin.shopify.com/store/<slug>"
+        const decoded = Buffer.from(host, 'base64').toString('utf8'); // "<shop>.myshopify.com/admin" or "admin.shopify.com/store/<slug>"
         const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
         const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
-        if (m1?.[1]) shop = toMyshopifyDomain(m1[1]);
-        if (!shop && m2?.[1]) shop = toMyshopifyDomain(m2[1]);
+        if (m1?.[1]) shop = toMyshop(m1[1]);
+        if (!shop && m2?.[1]) shop = toMyshop(m2[1]);
       } catch { /* ignore */ }
     }
     if (shop && !host) {
       try { host = Buffer.from(`${shop}/admin`).toString('base64'); } catch { host = ''; }
     }
 
-    // 2) If we can’t resolve a shop, just serve the UI (App Bridge can still recover via host on first paint)
+    // 2) If we can’t resolve a shop, still serve the Admin UI (App Bridge can recover via host later)
     if (!shop) {
       return res.sendFile(adminUiIndex);
     }
 
-    // 3) Check for an existing OFFLINE session; if missing → bounce through OAuth once
+    // 3) Check for an existing OFFLINE session; if missing → do a TOP-LEVEL hop before OAuth
     try {
       const offlineId = shopify.session.getOfflineId(shop);
       const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
       const sess = storage?.loadSession ? await storage.loadSession(offlineId) : null;
+
       if (!sess || !sess.accessToken) {
-        const u = new URL('/api/auth', `${req.protocol}://${req.get('host')}`);
+        const base = `https://${req.get('x-forwarded-host') || req.get('host')}`;
+        const u = new URL('/api/auth/toplevel', base);
         u.searchParams.set('shop', shop);
         if (host) u.searchParams.set('host', host);
-        // After OAuth, come back to our Admin UI
-        u.searchParams.set('return_to', encodeURIComponent('/admin-ui'));
+        // After OAuth, return to our Admin UI (embedded)
+        u.searchParams.set('return_to', '/admin-ui');
         return res.redirect(302, u.toString());
       }
     } catch {
-      const u = new URL('/api/auth', `${req.protocol}://${req.get('host')}`);
+      const base = `https://${req.get('x-forwarded-host') || req.get('host')}`;
+      const u = new URL('/api/auth/toplevel', base);
       u.searchParams.set('shop', shop);
       if (host) u.searchParams.set('host', host);
-      u.searchParams.set('return_to', encodeURIComponent('/admin-ui'));
+      u.searchParams.set('return_to', '/admin-ui');
       return res.redirect(302, u.toString());
     }
 
@@ -417,6 +450,7 @@ app.get('/embedded', async (req, res) => {
     return res.sendFile(adminUiIndex);
   }
 });
+
 
 
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes

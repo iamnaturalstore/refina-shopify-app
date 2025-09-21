@@ -55,6 +55,16 @@ router.get("/", async (req, res) => {
   const host = String(req.query.host || "") || computeHostFromShop(shop);
   const returnTo = sanitizeReturnTo(String(req.query.return_to || ""));
 
+  // ✅ Proactive top-level hop: if the marker cookie isn't set, go to /toplevel first.
+  const hasTop = getCookie(req, "shopifyTopLevelOAuth") === "1";
+  if (!hasTop) {
+    const toplevel = new URL("/api/auth/toplevel", baseUrl(req));
+    toplevel.searchParams.set("shop", shop);
+    if (host) toplevel.searchParams.set("host", host);
+    if (returnTo) toplevel.searchParams.set("return_to", returnTo);
+    return res.redirect(302, toplevel.toString());
+  }
+
   // Persist deep link for after OAuth; keep redirect_uri static.
   if (returnTo) {
     res.cookie("refina_return_to", returnTo, {
@@ -71,6 +81,7 @@ router.get("/", async (req, res) => {
       rawResponse: res,
     });
   } catch (err) {
+    // If something still complains about top-level/cookies, bounce once more.
     const needsTop = err?.status === 410 || /top.?level|cookie/i.test(String(err?.message || ""));
     if (needsTop) {
       const to =
@@ -83,6 +94,7 @@ router.get("/", async (req, res) => {
     return res.status(500).send(`OAuth begin failed: ${err?.message || String(err)}`);
   }
 });
+
 
 /* Top-level handoff required by Shopify OAuth */
 router.get("/toplevel", (req, res) => {
