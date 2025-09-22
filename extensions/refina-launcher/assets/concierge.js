@@ -117,7 +117,7 @@
     let lastFocus = null;
 
     function buildIframeUrl() {
-      const base = new URL(`https://${shopDomain}/apps/refina`);
+      const base = new URL(`https://${shopDomain}/apps/refina`);get
       // Pass all theme settings as URL params (camelCase -> kebab-case)
       for (const key in settings) {
         if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
