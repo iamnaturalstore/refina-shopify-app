@@ -335,7 +335,19 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+// 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
+// (Moved ABOVE the canonical redirect middleware)
+app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
+  // If you already have a real handler elsewhere, delegate to it:
+  if (typeof handleAnalyticsIngest === 'function') return handleAnalyticsIngest(req, res, next);
+
+  // Minimal no-op fallback so the widget doesn't break (keeps status 2xx):
+  // swap this out if you need to persist events.
+  res.status(204).end();
+});
+
 // ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
+// (Unchanged, just moved BELOW the early /apps/refina/v1/* mounts)
 const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
 let CANONICAL_HOST = '';
 try {
@@ -358,7 +370,6 @@ app.use((req, res, next) => {
   }
   return next();
 });
-
 
 // ───────────────────────── Admin UI (embedded) ─────────────────────────
 // ✅ Option A: serve built Admin UI from ADMIN_UI_DIR consistently
@@ -456,7 +467,6 @@ app.get('/embedded', async (req, res) => {
     return res.sendFile(adminUiIndex);
   }
 });
-
 
 // ───────────────────── Refina Concierge (widget) ─────────────────────
 // Serve the widget bundle where the launcher expects it
