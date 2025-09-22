@@ -23,6 +23,7 @@ import privacyWebhooksRoutes from './routes/privacyWebhooks.js';
 import semanticRoutes from './routes/semantic.js';
 
 // BFF helpers that power Gemini & copy shaping
+import recommendRouter from './routes/recommend.js';
 import { callGemini } from './bff/ai/gemini.js';
 import { buildGeminiPrompt } from './bff/ai/buildGeminiPrompt.js';
 import {
