@@ -346,6 +346,10 @@ app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
   res.status(204).end();
 });
 
+// ✅ Mount the original recommendations router BEFORE the canonical redirect
+// (Assumes `import recommendRouter from './routes/recommend.js'` is declared at the top of this file)
+app.use('/apps/refina/v1', recommendRouter);
+
 // ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
 // (Unchanged, just moved BELOW the early /apps/refina/v1/* mounts)
 const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
@@ -460,7 +464,7 @@ app.get('/embedded', async (req, res) => {
       return res.redirect(302, u.toString());
     }
 
-    // 4) Offline session exists → serve Admin UI
+    // 4) Offline session exists → serve the Admin UI
     return res.sendFile(adminUiIndex);
   } catch (e) {
     console.error('/embedded preflight error', e?.message || e);
