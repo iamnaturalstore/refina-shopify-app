@@ -369,7 +369,7 @@ app.use(
   express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' })
 );
 
-// 2) Root-level static (favicon, manifest, robots, etc.) — no index
+// 2) Root-level static (favicon, manifest, robots, etc.) — no inxpressdex
 app.use(
   '/admin-ui',
   express.static(ADMIN_UI_DIR, { index: false, maxAge: '1h' })
@@ -456,6 +456,35 @@ app.get('/embedded', async (req, res) => {
     return res.sendFile(adminUiIndex);
   }
 });
+
+
+// ───────────────────── Refina Concierge (widget) ─────────────────────
+// Serve the widget bundle where the launcher expects it
+app.use(
+  '/proxy/refina',
+  express.static(path.join(process.cwd(), 'public/concierge'), { index: false, maxAge: '1h' })
+);
+
+// Minimal API the bundle calls
+app.get('/apps/refina/v1/concerns', (_req, res) => {
+  res.json({
+    concerns: [
+      { id: 'dryness', label: 'Dryness' },
+      { id: 'acne',    label: 'Acne' },
+      { id: 'aging',   label: 'Aging' },
+    ],
+  });
+});
+
+app.post('/apps/refina/v1/recommend', (req, res) => {
+  const { concerns = [], profile = {} } = req.body || {};
+  // TODO: plug in your real matching logic
+  const products = [
+    { id: 'sku_123', title: 'Hydrating Serum', price: 29, url: '/p/hydrating-serum' },
+  ];
+  res.json({ products, concerns, profile });
+});
+
 
 
 
