@@ -35,6 +35,9 @@ import { toMyshopifyDomain } from './utils/resolveStore.js';
 import shopify from './shopify.js';
 import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 
+// Product Indexing on Install
+import mountBackfillRoutes from './routes/backfill.js';
+
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
@@ -332,7 +335,19 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+// 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
+// (Moved ABOVE the canonical redirect middleware)
+app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
+  // If you already have a real handler elsewhere, delegate to it:
+  if (typeof handleAnalyticsIngest === 'function') return handleAnalyticsIngest(req, res, next);
+
+  // Minimal no-op fallback so the widget doesn't break (keeps status 2xx):
+  // swap this out if you need to persist events.
+  res.status(204).end();
+});
+
 // ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
+// (Unchanged, just moved BELOW the early /apps/refina/v1/* mounts)
 const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
 let CANONICAL_HOST = '';
 try {
@@ -356,7 +371,6 @@ app.use((req, res, next) => {
   return next();
 });
 
-
 // ───────────────────────── Admin UI (embedded) ─────────────────────────
 // ✅ Option A: serve built Admin UI from ADMIN_UI_DIR consistently
 
@@ -366,11 +380,14 @@ app.use(
   express.static(path.join(ADMIN_UI_DIR, 'assets'), { immutable: true, maxAge: '1y' })
 );
 
-// 2) Root-level static (favicon, manifest, robots, etc.) — no index
+// 2) Root-level static (favicon, manifest, robots, etc.) — no inxpressdex
 app.use(
   '/admin-ui',
   express.static(ADMIN_UI_DIR, { index: false, maxAge: '1h' })
 );
+
+// Index on Install 
+mountBackfillRoutes(app);
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
@@ -450,6 +467,34 @@ app.get('/embedded', async (req, res) => {
     return res.sendFile(adminUiIndex);
   }
 });
+
+// ───────────────────── Refina Concierge (widget) ─────────────────────
+// Serve the widget bundle where the launcher expects it
+app.use(
+  '/proxy/refina',
+  express.static(path.join(process.cwd(), 'public/concierge'), { index: false, maxAge: '1h' })
+);
+
+// Minimal API the bundle calls
+app.get('/apps/refina/v1/concerns', (_req, res) => {
+  res.json({
+    concerns: [
+      { id: 'dryness', label: 'Dryness' },
+      { id: 'acne',    label: 'Acne' },
+      { id: 'aging',   label: 'Aging' },
+    ],
+  });
+});
+
+app.post('/apps/refina/v1/recommend', (req, res) => {
+  const { concerns = [], profile = {} } = req.body || {};
+  // TODO: plug in your real matching logic
+  const products = [
+    { id: 'sku_123', title: 'Hydrating Serum', price: 29, url: '/p/hydrating-serum' },
+  ];
+  res.json({ products, concerns, profile });
+});
+
 
 
 
