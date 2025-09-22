@@ -3,7 +3,6 @@
 // Delegates to BFF at /proxy/refina/v1/recommend and adapts the response
 // to the legacy shape expected by callers of getGeminiResponse().
 
-//
 // ───────────────────────────
 // Domain intents (normalized)
 // ───────────────────────────
@@ -29,44 +28,77 @@ function isHairProduct(p = {}) {
   const t = String(p.productType || "").toLowerCase();
   const tags = (p.tags || []).map((x) => String(x).toLowerCase());
   const kw = (p.keywords || []).map((x) => String(x).toLowerCase());
-  const hay = [t, (p.category || "").toLowerCase(), (p.description || "").toLowerCase(), ...tags, ...kw].join(" ");
+  const hay = [
+    t,
+    (p.category || "").toLowerCase(),
+    (p.description || "").toLowerCase(),
+    ...tags,
+    ...kw,
+  ].join(" ");
   return /\bhair|scalp|shampoo|conditioner|spray|hairspray|styling|frizz|curl\b/.test(hay);
 }
 
 // Optional, light client-side type token bias (not sent to BFF; BFF does the heavy lifting)
 function filterByTypeToken(concern, products) {
-  const tokens = String(concern || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const tokens = String(concern || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
   if (!tokens.length) return products;
+
   const TYPE_HINTS = new Set([
-    "cleanser","wash","toner","essence","serum","treatment","exfoliator","exfoliant",
-    "moisturiser","moisturizer","mask","sunscreen","spf","oil","shampoo","conditioner",
-    "spray","hairspray","gel","mousse","leave-in","lotion","butter","cream"
+    "cleanser",
+    "wash",
+    "toner",
+    "essence",
+    "serum",
+    "treatment",
+    "exfoliator",
+    "exfoliant",
+    "moisturiser",
+    "moisturizer",
+    "mask",
+    "sunscreen",
+    "spf",
+    "oil",
+    "shampoo",
+    "conditioner",
+    "spray",
+    "hairspray",
+    "gel",
+    "mousse",
+    "leave-in",
+    "lotion",
+    "butter",
+    "cream",
   ]);
-  const typeToken = tokens.find((w) =>
-    TYPE_HINTS.has(w) ||
-    products.some((p) =>
-      String(p.productTypeNormalized || p.productType || "")
-        .toLowerCase()
-        .includes(w)
-    )
+
+  const typeToken = tokens.find(
+    (w) =>
+      TYPE_HINTS.has(w) ||
+      products.some((p) =>
+        String(p.productTypeNormalized || p.productType || "").toLowerCase().includes(w)
+      )
   );
   if (!typeToken) return products;
+
   const filtered = products.filter((p) =>
-    String(p.productTypeNormalized || p.productType || "")
-      .toLowerCase()
-      .includes(typeToken)
+    String(p.productTypeNormalized || p.productType || "").toLowerCase().includes(typeToken)
   );
   return filtered.length >= 3 ? filtered : products;
 }
 
-//
 // ───────────────────────────
 // Follow-up heuristics (UI chips)
 // ───────────────────────────
 function heuristicFollowUps(concern = "") {
   const ups = [];
   if (detectHairIntent(concern)) {
-    ups.push("Oil or serum for your hair?", "Focus on scalp or lengths?", "Frizz control or curl definition?");
+    ups.push(
+      "Oil or serum for your hair?",
+      "Focus on scalp or lengths?",
+      "Frizz control or curl definition?"
+    );
   } else if (detectMakeupIntent(concern)) {
     ups.push("Lip oil or lipstick?", "Matte or dewy finish?", "Do you prefer clean/vegan formulas?");
   } else if (detectBodyIntent(concern)) {
@@ -77,7 +109,6 @@ function heuristicFollowUps(concern = "") {
   return ups.slice(0, 3);
 }
 
-//
 // ───────────────────────────
 // Response mapping helpers
 // ───────────────────────────
@@ -104,13 +135,13 @@ function buildScoresByIdFromEnriched(enriched) {
   if (!enriched || typeof enriched !== "object") return scoresById;
 
   const pri = enriched.primary || {};
-  if (pri.id && typeof pri.score === "number") scoresById[pri.id] = Math.max(0, Math.min(1, pri.score));
+  if (pri.id && typeof pri.score === "number")
+    scoresById[pri.id] = Math.max(0, Math.min(1, pri.score));
 
   // You can add alt scores later if your BFF provides them.
   return scoresById;
 }
 
-//
 // ───────────────────────────
 // Public API (browser)
 // ───────────────────────────
@@ -132,7 +163,7 @@ export async function getGeminiResponse({
   tone,
   products = [],
   context = null,
-  maxPicks = 3
+  maxPicks = 3,
 }) {
   // Optional local hints (do not affect BFF; purely for future UI affordances)
   let hinted = Array.isArray(products) ? products : [];
@@ -143,50 +174,65 @@ export async function getGeminiResponse({
   hinted = filterByTypeToken(concern, hinted);
 
   try {
+    // --- APPROVED DIFF (A): resolve storeId from querystring or #root[data-shop] ---
+    const storeId =
+      new URLSearchParams(location.search).get("shop") ||
+      document.getElementById("root")?.dataset.shop ||
+      "";
+
     // Call your BFF (Shopify App Proxy path). The BFF derives storeId from HMAC.
     const res = await fetch("/proxy/refina/v1/recommend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Keep payload minimal: the BFF fetches catalog + settings and handles plan gating.
-      body: JSON.stringify({ concern: String(concern || "").trim() })
+      // --- APPROVED DIFF (A): change POST body to include { storeId, concern } ---
+      body: JSON.stringify({ storeId, concern: String(concern || "").trim() }),
     });
 
     if (!res.ok) throw new Error(`BFF HTTP ${res.status}`);
     const payload = await res.json();
 
     // Expecting: { productIds, products[], copy{why,rationale,extras}, enriched?, meta? }
-    const productIds = Array.isArray(payload.productIds) ? payload.productIds.slice(0, Number(maxPicks) || 3) : [];
+    const productIds = Array.isArray(payload.productIds)
+      ? payload.productIds.slice(0, Number(maxPicks) || 3)
+      : [];
 
     // 🔔 Report analytics to backend (non-blocking). Uses helper injected by storefront bootstrap.
     try {
-      const idsFromProducts = Array.isArray(payload.products) ? payload.products.map(p => p.id) : [];
-      (window.RefinaAnalytics && window.RefinaAnalytics.report) && window.RefinaAnalytics.report({
-        type: "concern",
-        concern: String(concern || "").trim(),
-        productIds: idsFromProducts.length ? idsFromProducts : productIds,
-        plan: (window.__REFINA__ && window.__REFINA__.plan) || "unknown",
-        model: (payload && payload.meta && (payload.meta.model || payload.meta.provider)) || "",
-        explanation: ""
-      });
+      const idsFromProducts = Array.isArray(payload.products)
+        ? payload.products.map((p) => p.id)
+        : [];
+      (window.RefinaAnalytics && window.RefinaAnalytics.report) &&
+        window.RefinaAnalytics.report({
+          type: "concern",
+          concern: String(concern || "").trim(),
+          productIds: idsFromProducts.length ? idsFromProducts : productIds,
+          plan: (window.__REFINA__ && window.__REFINA__.plan) || "unknown",
+          model: (payload && payload.meta && (payload.meta.model || payload.meta.provider)) || "",
+          explanation: "",
+        });
     } catch (_) {}
 
     const enriched = payload.enriched || null;
 
     // Prefer enriched concierge paragraph; fall back to legacy copy.why or explanation
     const friendly =
-      (enriched && enriched.explanation && (enriched.explanation.friendlyParagraph || enriched.explanation.oneLiner)) ||
+      (enriched &&
+        enriched.explanation &&
+        (enriched.explanation.friendlyParagraph || enriched.explanation.oneLiner)) ||
       (payload.explanation || "") ||
       (payload.copy && payload.copy.why) ||
       "";
 
     // Build reasons/scores maps if enriched is present
     const reasonsById = buildReasonsByIdFromEnriched(enriched);
-    const scoresById  = buildScoresByIdFromEnriched(enriched);
+    const scoresById = buildScoresByIdFromEnriched(enriched);
 
     // Follow-ups: if you later add followUps server-side, prefer them; else heuristic
-    const followUps = Array.isArray(payload.followUps) && payload.followUps.length
-      ? payload.followUps.slice(0, 3)
-      : heuristicFollowUps(concern);
+    const followUps =
+      Array.isArray(payload.followUps) && payload.followUps.length
+        ? payload.followUps.slice(0, 3)
+        : heuristicFollowUps(concern);
 
     return {
       productIds,
@@ -195,7 +241,7 @@ export async function getGeminiResponse({
       reasonsById,
       scoresById,
       enriched,
-      meta: payload.meta || {}
+      meta: payload.meta || {},
     };
   } catch (err) {
     // Network or server error — keep UI responsive with a graceful fallback
@@ -207,7 +253,7 @@ export async function getGeminiResponse({
       reasonsById: {},
       scoresById: {},
       enriched: null,
-      meta: { source: "client-fallback" }
+      meta: { source: "client-fallback" },
     };
   }
 }

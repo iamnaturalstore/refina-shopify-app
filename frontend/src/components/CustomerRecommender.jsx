@@ -97,10 +97,17 @@ export default function CustomerRecommender() {
     setLastQuery(q);
 
     try {
+      // --- APPROVED DIFF: resolve storeId from ?shop= or #root[data-shop] ---
+      const storeId =
+        new URLSearchParams(location.search).get("shop") ||
+        document.getElementById("root")?.dataset.shop ||
+        "";
+
       const resp = await fetch(`${API_PREFIX}/recommend`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ concern: q })
+        // --- APPROVED DIFF: include { storeId, concern } in body ---
+        body: JSON.stringify({ storeId, concern: q })
       });
       if (!resp.ok) throw new Error(`recommend ${resp.status}`);
 
