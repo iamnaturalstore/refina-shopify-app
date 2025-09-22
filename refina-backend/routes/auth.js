@@ -178,30 +178,13 @@ router.get("/callback", async (req, res) => {
     // ✅ Fire-and-forget: call the existing admin backfill worker directly
     // Path: POST /api/admin/backfill-products?shop=<shop>
     // Auth: x-admin-secret = ADMIN_SHARED_SECRET
-    // Also kick the indexer bootstrap for the same shop (non-blocking).
-    // Path: POST /api/admin/indexer/bootstrap?shop=<shop>
     // ────────────────────────────────────────────────────────────────
     try {
-      const origin =
-        process.env.BACKFILL_PUBLIC_BACKEND_ORIGIN ||
-        process.env.PUBLIC_BACKEND_ORIGIN ||
-        baseUrl(req);
-
+      const origin = process.env.PUBLIC_BACKEND_ORIGIN || baseUrl(req);
       const adminSecret = process.env.ADMIN_SHARED_SECRET || "";
       if (adminSecret && shop) {
-        // Backfill products
         fetch(
           `${origin}/api/admin/backfill-products?shop=${encodeURIComponent(shop)}`,
-          {
-            method: "POST",
-            headers: { "x-admin-secret": adminSecret },
-            keepalive: true,
-          }
-        ).catch(() => {});
-
-        // Indexer bootstrap (fire-and-forget; idempotent on server)
-        fetch(
-          `${origin}/api/admin/indexer/bootstrap?shop=${encodeURIComponent(shop)}`,
           {
             method: "POST",
             headers: { "x-admin-secret": adminSecret },
