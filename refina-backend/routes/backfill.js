@@ -1,6 +1,14 @@
 // refina-backend/routes/backfill.js
+//
+// Baseline importer (kept) + NEW queue endpoint that chains Import → Index.
+// - Keeps existing POST /api/admin/backfill-products
+// - Adds     POST /api/backfill/queue?shop=<shop>.myshopify.com
+//   which calls the importer and then spawns the indexer worker.
+//
+// Auth for both: header x-admin-secret === process.env.ADMIN_SHARED_SECRET
 
 import express from "express";
+import { spawn } from "node:child_process";
 import shopify from "../shopify.js";
 import { dbAdmin, FieldValue } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
@@ -57,9 +65,9 @@ async function loadOfflineSession(shop) {
 }
 
 export default function mountBackfillRoutes(app) {
-  const router = express.Router();
-
-  // Simple admin guard (header or ?secret=)
+  // ───────────────────────────────────────────────────────────
+  // Shared admin guard
+  // ───────────────────────────────────────────────────────────
   function requireAdmin(req, res, next) {
     const sec = req.get("x-admin-secret") || req.query.secret;
     if (!process.env.ADMIN_SHARED_SECRET || sec !== process.env.ADMIN_SHARED_SECRET) {
@@ -68,6 +76,11 @@ export default function mountBackfillRoutes(app) {
     next();
   }
 
+  // ───────────────────────────────────────────────────────────
+  // EXISTING ADMIN ROUTER: /api/admin/backfill-products (kept)
+  // ───────────────────────────────────────────────────────────
+  const adminRouter = express.Router();
+
   /**
    * POST /api/admin/backfill-products?shop=<full-domain>
    * Body (optional): { shop: "<full-domain>" }
@@ -75,25 +88,20 @@ export default function mountBackfillRoutes(app) {
    * Uses the OFFLINE session to fetch products via REST and upsert into:
    *   products/<shop>/items/<id>
    */
-  router.post("/backfill-products", requireAdmin, async (req, res) => {
+  adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
     res.set("Cache-Control", "no-store");
     res.set("X-RF-Handler", "admin-backfill-products");
 
     try {
-      const rawShop =
-        String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
+      const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
       const shop = toMyshopifyDomain(rawShop);
       if (!shop) {
-        return res
-          .status(400)
-          .json({ ok: false, error: "missing_or_invalid_shop" });
+        return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
       }
 
       const session = await loadOfflineSession(shop);
       if (!session?.accessToken) {
-        return res
-          .status(401)
-          .json({ ok: false, error: "no_offline_session" });
+        return res.status(401).json({ ok: false, error: "no_offline_session" });
       }
 
       const apiVersion = shopify.config.apiVersion;
@@ -111,9 +119,7 @@ export default function mountBackfillRoutes(app) {
         });
 
         if (!resp.ok) {
-          return res
-            .status(502)
-            .json({ ok: false, error: `shopify_${resp.status}` });
+          return res.status(502).json({ ok: false, error: `shopify_${resp.status}` });
         }
 
         const data = await resp.json();
@@ -155,5 +161,91 @@ export default function mountBackfillRoutes(app) {
     }
   });
 
-  app.use("/api/admin", router);
+  app.use("/api/admin", adminRouter);
+
+  // ───────────────────────────────────────────────────────────
+  // NEW QUEUE ROUTER: /api/backfill/queue (import → index)
+  // ───────────────────────────────────────────────────────────
+  const queueRouter = express.Router();
+
+  // Internal helper to call our importer via same host (reuses auth + logic)
+  async function callInternalImporter(req, shop) {
+    const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+    const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
+    const url = `${scheme}://${host}/api/admin/backfill-products?shop=${encodeURIComponent(shop)}`;
+
+    const r = await fetch(url, {
+      method: "POST",
+      headers: {
+        "x-admin-secret": req.get("x-admin-secret") || "",
+      },
+      keepalive: true,
+    });
+
+    if (!r.ok) {
+      const txt = await r.text().catch(() => "");
+      const err = new Error(`importer HTTP ${r.status}: ${txt.slice(0, 200)}`);
+      err.statusCode = 502;
+      throw err;
+    }
+    return r.json().catch(() => ({}));
+  }
+
+  // Fire-and-forget indexer worker spawn
+  function spawnIndexer(shop) {
+    const args = [
+      "refina-backend/workers/indexer.mjs",
+      "bootstrap",
+      "--store",
+      shop,
+      "--commit",
+    ];
+    const child = spawn(process.execPath, args, {
+      stdio: ["ignore", "ignore", "inherit"], // keep stderr for logs
+      detached: false,
+      env: process.env,
+    });
+    child.on("exit", (code) => {
+      console.error(`[backfill] indexer exit code=${code} shop=${shop}`);
+    });
+    return { pid: child.pid };
+  }
+
+  /**
+   * POST /api/backfill/queue?shop=<full-domain>
+   * Auth: x-admin-secret
+   * Behavior: Import products (idempotent), then spawn indexer (non-blocking).
+   * Response: 202 { ok:true, queued:true, shop, import:{...}, indexer:{pid} }
+   */
+  queueRouter.post("/queue", requireAdmin, express.json(), async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    try {
+      const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
+      const shop = toMyshopifyDomain(rawShop);
+      if (!shop) {
+        return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
+      }
+
+      // 1) Import
+      const importResult = await callInternalImporter(req, shop);
+
+      // 2) Index (fire-and-forget)
+      const { pid } = spawnIndexer(shop);
+
+      // 3) 202 Accepted
+      return res.status(202).json({
+        ok: true,
+        queued: true,
+        shop,
+        import: importResult || null,
+        indexer: { pid },
+      });
+    } catch (err) {
+      const code = err?.statusCode || 500;
+      return res.status(code).json({ ok: false, error: String(err?.message || "queue_failed") });
+    }
+  });
+
+  app.use("/api/backfill", queueRouter);
 }
