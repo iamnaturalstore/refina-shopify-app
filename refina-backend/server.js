@@ -391,6 +391,7 @@ app.use(
 
 // Index on Install 
 mountBackfillRoutes(app);
+console.log("[backfill] mounted admin+queue routes");
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
