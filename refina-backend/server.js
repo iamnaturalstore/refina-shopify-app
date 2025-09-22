@@ -23,6 +23,7 @@ import privacyWebhooksRoutes from './routes/privacyWebhooks.js';
 import semanticRoutes from './routes/semantic.js';
 
 // BFF helpers that power Gemini & copy shaping
+import recommendRouter from './routes/recommend.js';
 import { callGemini } from './bff/ai/gemini.js';
 import { buildGeminiPrompt } from './bff/ai/buildGeminiPrompt.js';
 import {
@@ -335,6 +336,8 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+app.use('/apps/refina/v1', recommendRouter);
+
 // 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
 // (Moved ABOVE the canonical redirect middleware)
 app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
@@ -485,18 +488,6 @@ app.get('/apps/refina/v1/concerns', (_req, res) => {
     ],
   });
 });
-
-app.post('/apps/refina/v1/recommend', (req, res) => {
-  const { concerns = [], profile = {} } = req.body || {};
-  // TODO: plug in your real matching logic
-  const products = [
-    { id: 'sku_123', title: 'Hydrating Serum', price: 29, url: '/p/hydrating-serum' },
-  ];
-  res.json({ products, concerns, profile });
-});
-
-
-
 
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {

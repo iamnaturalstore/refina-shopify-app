@@ -105,6 +105,24 @@ function pick(obj, keys) {
   return o;
 }
 
+// --- NEW small helpers (approved) ---
+function ensureAbsolute(u, storeId) {
+  const url = String(u || "").trim();
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/")) return `https://${storeId}${url}`;
+  // treat as product handle/path fragment
+  return `https://${storeId}/${url}`;
+}
+function pickPrimaryImage(p, storeId) {
+  const candidate =
+    p.image ||
+    (Array.isArray(p.images) && p.images.length ? p.images[0] : "") ||
+    p.image_url ||
+    "";
+  return ensureAbsolute(candidate, storeId);
+}
+
 // --- Core retrieval ---
 async function embedText(text) {
   const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
@@ -167,7 +185,7 @@ const router = express.Router();
  */
 router.post("/recommend", async (req, res) => {
   try {
-    if (!genAI) return res.json({ productIds: [], explanation: "", followUps: [], reasonsById: {}, scoresById: {}, matches: [] });
+    if (!genAI) return res.json({ productIds: [], products: [], explanation: "", followUps: [], reasonsById: {}, scoresById: {}, matches: [] });
 
     const { storeId, concern } = req.body || {};
     if (!storeId || !concern) {
@@ -183,6 +201,20 @@ router.post("/recommend", async (req, res) => {
 
     // 1) Vector retrieval
     const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
+
+    // --- NEW short-circuit when no embeddings (approved) ---
+    if (!allEmb.length) {
+      return res.json({
+        productIds: [],
+        products: [],
+        explanation: "index not available for this store yet",
+        followUps: [],
+        reasonsById: {},
+        scoresById: {},
+        matches: [],
+      });
+    }
+
     const scored = allEmb
       .map((e) => ({ ...e, sim: cosine(qVec, e.vector || []) }))
       .sort((a, b) => b.sim - a.sim);
@@ -270,8 +302,34 @@ router.post("/recommend", async (req, res) => {
       reason: reasonsById[id] || "",
     }));
 
+    // --- NEW enrichment of products[] (approved) ---
+    const enrichedDocs = await loadProductsByIds(storeId, uniqueIds);
+    const enriched = enrichedDocs.map((p) => {
+      const title = p.title || p.name || "";
+      const price = p.price != null ? p.price : undefined;
+      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+
+      // URL: prefer stored absolute, else stored relative, else build from handle/id
+      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+      if (!urlCandidate && p.path) urlCandidate = p.path;
+      const url = ensureAbsolute(urlCandidate, storeId);
+
+      const imgAbs = pickPrimaryImage(p, storeId);
+
+      return {
+        id: p.id,
+        title,
+        price,
+        ...(price_formatted ? { price_formatted } : {}),
+        image: imgAbs,
+        image_url: imgAbs,
+        url,
+      };
+    });
+
     return res.json({
       productIds: uniqueIds,
+      products: enriched,
       explanation: String(json.explanation || ""),
       followUps: Array.isArray(json.followUps) ? json.followUps.slice(0, 3) : [],
       reasonsById,
@@ -282,6 +340,7 @@ router.post("/recommend", async (req, res) => {
     console.error("❌ /api/recommend error:", err);
     return res.json({
       productIds: [],
+      products: [],
       explanation: "",
       followUps: [],
       reasonsById: {},

@@ -231,12 +231,16 @@ function dedupeEntities(list) {
 // ─────────────────────────────────────────────────────────────
 async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
   const batch = db.batch();
-  const linkRef = db.doc(`stores/${storeId}/entityIndex/${productId}`);
+
+  // ⬅️ CHANGED: canonical embedding doc path
+  const linkRef = db.doc(`productEmbeddings/${storeId}/items/${productId}`);
+
   const slugs = uniq(extraction.entities.map(e => slugify(e.name)));
   const evidence = (extraction.entities || []).map(e => ({
     slug: slugify(e.name),
     evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
   }));
+
   batch.set(linkRef, {
     productId,
     entities: slugs.slice(0, 64),
@@ -244,10 +248,14 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
     updatedAt: nowTs(),
     schemaVersion: 1,
   }, { merge: true });
+
   for (const ent of extraction.entities) {
     const slug = slugify(ent.name);
     if (!slug) continue;
-    const ref = db.doc(`stores/${storeId}/entities/${slug}`);
+
+    // ⬅️ CHANGED: canonical per-product entity facts path
+    const ref = db.doc(`products/${storeId}/items/${productId}/entities/${slug}`);
+
     batch.set(ref, {
       name: ent.name,
       type: ent.type,
@@ -261,13 +269,17 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
       schemaVersion: 1,
     }, { merge: true });
   }
+
   await batch.commit().catch(async (e) => {
     if (/arrayUnion/i.test(String(e?.message || ""))) {
       const batch2 = db.batch();
       for (const ent of extraction.entities) {
         const slug = slugify(ent.name);
         if (!slug) continue;
-        const ref = db.doc(`stores/${storeId}/entities/${slug}`);
+
+        // ⬅️ CHANGED: same canonical path as above
+        const ref = db.doc(`products/${storeId}/items/${productId}/entities/${slug}`);
+
         batch2.set(ref, {
           name: ent.name,
           type: ent.type,
