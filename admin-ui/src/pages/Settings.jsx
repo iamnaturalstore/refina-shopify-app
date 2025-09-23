@@ -44,9 +44,12 @@ export default function Settings() {
   const [error, setError] = React.useState(null);
   const [successBanner, setSuccessBanner] = React.useState(null);
 
+  // normalize helper for case-insensitive category handling
+  const normalize = (s) => String(s || "").trim().toLowerCase();
+
   // --- Form Fields ---
   const [brandName, setBrandName] = React.useState("");
-  const [category, setCategory] = React.useState("Generic");
+  const [category, setCategory] = React.useState("generic");
   const [tone, setTone] = React.useState("expert");
 
   // Track initial snapshot to determine "dirty"
@@ -55,7 +58,7 @@ export default function Settings() {
     if (!initialState) return false;
     return (
       initialState.brandName !== brandName ||
-      initialState.category !== category ||
+      initialState.category !== category || // both normalized to lowercase
       initialState.tone !== tone
     );
   }, [initialState, brandName, category, tone]);
@@ -67,7 +70,7 @@ export default function Settings() {
     const s = json?.settings && typeof json.settings === "object" ? json.settings : json || {};
     return {
       brandName: s.brandName || "",
-      category: s.category || "Generic",
+      category: normalize(s.category || "generic"), // persist & compare lowercase
       tone: s.tone || "expert",
     };
   };
@@ -110,7 +113,8 @@ export default function Settings() {
     setError(null);
     setSuccessBanner(null);
     try {
-      const payload = { brandName, category, tone };
+      // persist lowercase category
+      const payload = { brandName, category: normalize(category), tone };
       // Server alias accepts POST /api/admin/store-settings and merges fields
       const { data } = await api.post("/api/admin/store-settings", payload);
       const saved = normalizeLoaded(data);
@@ -181,14 +185,14 @@ export default function Settings() {
                 <Select
                   label="Primary product category"
                   options={[
-                    { label: "General E-commerce", value: "Generic" },
+                    { label: "General E-commerce", value: "generic" },
                     { label: "Beauty & Skincare", value: "beauty" },
                     { label: "Fashion & Apparel", value: "fashion" },
                     { label: "Home Goods", value: "home" },
                     { label: "Outdoors & Sporting Goods", value: "outdoors" },
                   ]}
                   value={category}
-                  onChange={setCategory}
+                  onChange={(v) => setCategory(normalize(v))}
                   helpText="Helps the AI use the correct terminology (e.g., 'ingredients' vs. 'materials')."
                 />
                 <Select

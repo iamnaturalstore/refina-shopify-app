@@ -226,35 +226,40 @@ export default function Setup() {
         </Layout.Section>
 
         {/* Step 2: Choose your Category */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">2) Choose your store category</Text>
-                {saveOk ? <Badge tone="success">Saved</Badge> : <Badge tone="attention">Pending</Badge>}
-              </InlineStack>
-              <Text as="p" tone="subdued">
-                This helps Refina tailor recommendations to your catalog.
-              </Text>
-              <TextField
-                label="Category"
-                autoComplete="off"
-                value={category}
-                onChange={setCategory}
-                placeholder="e.g., Beauty, Skincare, Supplements"
-                disabled={loading}
-              />
-              <InlineStack gap="200">
-                <Button onClick={saveCategory} loading={saveBusy} variant="primary">
-                  Save category
-                </Button>
-                <Button url={`#/${qs}`} tone="subdued">
-                  Back to Home
-                </Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+<Layout.Section>
+  <Card>
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h3" variant="headingSm">2) Choose your store category</Text>
+        {String(category || "").trim().length > 0 ? (
+          <Badge tone="success">Complete</Badge>
+        ) : (
+          <Badge tone="attention">Pending</Badge>
+        )}
+      </InlineStack>
+      <Text as="p" tone="subdued">
+        This helps Refina tailor recommendations to your catalog.
+      </Text>
+      <TextField
+        label="Category"
+        autoComplete="off"
+        value={category}
+        onChange={setCategory}
+        placeholder="e.g., Beauty, Skincare, Supplements"
+        disabled={loading}
+      />
+      <InlineStack gap="200">
+        <Button onClick={saveCategory} loading={saveBusy} variant="primary">
+          Save category
+        </Button>
+        <Button url={`#/${qs}`} tone="subdued">
+          Back to Home
+        </Button>
+      </InlineStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
+
 
         {/* Step 3: Verify launcher */}
         <Layout.Section>
