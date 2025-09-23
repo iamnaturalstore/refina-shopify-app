@@ -121,17 +121,26 @@ export default function CustomerRecommender() {
       setReasonsById(rbi);
 
       try {
-        console.log("[Recommender] Reporting analytics event for concern:", q);
-        const analyticsPayload = {
-          type: "concern",
-          event: "recommendation_received",
-          concern: q,
-          productIds: products.map(p => p.id),
-          meta: {
-             plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
-             model: (data?.meta?.model || data?.meta?.source) || ""
-          }
-        };
+  console.log("[Recommender] Reporting analytics event for concern:", q);
+
+  // Resolve storeId the same way as for /recommend
+  const storeId =
+    new URLSearchParams(location.search).get("shop") ||
+    document.getElementById("root")?.dataset.shop ||
+    "";
+
+  const analyticsPayload = {
+    storeId, // ✅ include canonical shop id
+    type: "concern",
+    event: "recommendation_received",
+    concern: q,
+    productIds: products.map(p => p.id),
+    meta: {
+      plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+      model: (data?.meta?.model || data?.meta?.source) || ""
+    }
+  };
+
         
         fetch(`${API_PREFIX}/analytics/ingest`, {
           method: 'POST',
