@@ -611,7 +611,14 @@ app.get('/proxy/refina/v1/settings', requireAppProxy, rateLimitAppProxy, async (
       return t;
     };
 
-    const payload = deepMerge(DEFAULT_SETTINGS, saved);
+        const payload = deepMerge(DEFAULT_SETTINGS, saved);
+    // Canonicalize category and provide a display label
+    const lcCategory = String(payload.category || "").trim().toLowerCase();
+    payload.category = lcCategory;
+    payload.categoryLabel = lcCategory
+      ? lcCategory.replace(/\b\w/g, (c) => c.toUpperCase())
+      : "";
+
     res.set('Cache-Control', 'public, max-age=60');
     return res.status(200).json(payload);
   } catch (err) {
@@ -619,6 +626,7 @@ app.get('/proxy/refina/v1/settings', requireAppProxy, rateLimitAppProxy, async (
     res.set('Cache-Control', 'no-store');
     return res.status(500).json({ error: 'settings_fetch_failed' });
   }
+
 });
 
 app.get('/proxy/refina/v1/concerns', requireAppProxy, rateLimitAppProxy, async (req, res) => {

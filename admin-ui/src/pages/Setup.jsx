@@ -80,6 +80,9 @@ export default function Setup() {
   const [saveOk, setSaveOk] = useState(false);
   const [err, setErr] = useState("");
 
+  // Diffs 1) — normalize helper (case-insensitive handling)
+  const normalize = (s) => String(s || "").trim().toLowerCase();
+
   // Load current store settings so we can prefill Category
   useEffect(() => {
     let on = true;
@@ -91,7 +94,7 @@ export default function Setup() {
         // accept either {settings:{category}} or {category}
         const current =
           data?.settings?.category ?? data?.category ?? "";
-        if (on) setCategory(String(current || ""));
+        if (on) setCategory(normalize(current));
       } catch (e) {
         if (on) setErr(`Failed to load settings: ${e?.message || "Unknown error"}`);
       } finally {
