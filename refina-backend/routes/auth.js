@@ -175,11 +175,10 @@ router.get("/callback", async (req, res) => {
     const store = storeFromShop(shop);
 
     // ────────────────────────────────────────────────────────────────
-    // ✅ Fire-and-forget: call the existing admin backfill worker directly
-    // Path: POST /api/admin/backfill-products?shop=<shop>
+    // ✅ Fire-and-forget unified queue: import → index
+    // Path: POST /api/backfill/queue?shop=<shop>
     // Auth: x-admin-secret = ADMIN_SHARED_SECRET
-    // Also kick the indexer bootstrap for the same shop (non-blocking).
-    // Path: POST /api/admin/indexer/bootstrap?shop=<shop>
+    // (Non-blocking; does not affect the redirect)
     // ────────────────────────────────────────────────────────────────
     try {
       const origin =
@@ -189,25 +188,17 @@ router.get("/callback", async (req, res) => {
 
       const adminSecret = process.env.ADMIN_SHARED_SECRET || "";
       if (adminSecret && shop) {
-        // Backfill products
         fetch(
-          `${origin}/api/admin/backfill-products?shop=${encodeURIComponent(shop)}`,
+          `${origin}/api/backfill/queue?shop=${encodeURIComponent(shop)}`,
           {
             method: "POST",
             headers: { "x-admin-secret": adminSecret },
             keepalive: true,
           }
-        ).catch(() => {});
-
-        // Indexer bootstrap (fire-and-forget; idempotent on server)
-        fetch(
-          `${origin}/api/admin/indexer/bootstrap?shop=${encodeURIComponent(shop)}`,
-          {
-            method: "POST",
-            headers: { "x-admin-secret": adminSecret },
-            keepalive: true,
-          }
-        ).catch(() => {});
+        )
+          .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(`queue ${r.status}: ${t}`)))
+          .then(j => console.log("[install] queued import+index", { shop, queued: j?.queued, pid: j?.indexer?.pid }))
+          .catch(e => console.error("[install] queue failed", shop, e));
       }
     } catch {
       // Intentionally swallow to avoid impacting redirect
