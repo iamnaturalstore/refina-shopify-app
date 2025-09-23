@@ -13,7 +13,7 @@ import { fileURLToPath } from "url";
 import analyticsRouter from "../routes/analytics.js";
 import adminSettingsRouter from "../routes/adminSettings.js"; // Home & Settings
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
-import analyticsIngestRouter from "../routes/analyticsIngest.js";
+import analyticsIngestRouter from "../routes/analyticsIngest.js"; // ✅ ensure writer router is imported
 
 import { callGemini } from "./ai/gemini.js";
 import { buildGeminiPrompt } from "./ai/buildGeminiPrompt.js";
@@ -895,6 +895,12 @@ app.use(/^\/admin(?:\/.*)?$/, (_req, res, next) => {
   next();
 });
 
+
+// ✅ Mount analytics ingest for the widget/Admin UI at the /apps base.
+//    This exposes: POST /apps/refina/v1/analytics/ingest
+//    (No App Proxy HMAC middleware on this mount.)
+app.use("/apps/refina/v1", analyticsIngestRouter);
+console.log("[analytics] ingest mounted at /apps/refina/v1/analytics/ingest");
 
 // Serve the Admin SPA at /admin and nested routes (Express v5-safe RegExp)
 app.get(/^\/admin(?:\/.*)?$/, (_req, res) => {
