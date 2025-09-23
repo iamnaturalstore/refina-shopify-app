@@ -66,7 +66,7 @@ function sanitizeEventBody(body = {}) {
 // Core write: analytics/{shop}/events/<autoId>
 // (Keep path aligned with Admin readers.)
 async function writeEvent(shop, data) {
-  const ref = db.collection(`analytics/${shop}/events`).doc();
+  const ref = db.collection('analytics').doc(shop).collection('events').doc();
   const toWrite = {
     ...data,
     ts: nowTs(), // server timestamp
@@ -96,6 +96,7 @@ router.post("/", async (req, res) => {
     const clean = sanitizeEventBody(req.body || {});
     await writeEvent(shop, { ...clean, source: "storefront" });
     // Historical behavior: No Content
+    res.set("X-RF-Shop", shop);
     return res.status(204).end();
   } catch (e) {
     console.error("[analyticsIngest] storefront write failed:", e?.message || e);
