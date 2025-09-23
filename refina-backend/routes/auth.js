@@ -3,6 +3,7 @@
 
 import express from "express";
 import shopify from "../shopify.js";
+import { dbAdmin } from "../lib/firestore.js"; // ✅ added to seed storeSettings
 
 const router = express.Router();
 
@@ -175,33 +176,69 @@ router.get("/callback", async (req, res) => {
     const store = storeFromShop(shop);
 
     // ────────────────────────────────────────────────────────────────
-    // ✅ Fire-and-forget unified queue: import → index
-    // Path: POST /api/backfill/queue?shop=<shop>
-    // Auth: x-admin-secret = ADMIN_SHARED_SECRET
-    // (Non-blocking; does not affect the redirect)
+    // Fire-and-forget tasks (do not block redirect):
+    // - Backfill products
+    // - Bootstrap indexer
+    // - ✅ Seed storeSettings/<shop> defaults if missing (fixes Setup "Pending")
     // ────────────────────────────────────────────────────────────────
     try {
       const origin =
         process.env.BACKFILL_PUBLIC_BACKEND_ORIGIN ||
         process.env.PUBLIC_BACKEND_ORIGIN ||
         baseUrl(req);
-
       const adminSecret = process.env.ADMIN_SHARED_SECRET || "";
+
+      // Backfill products
       if (adminSecret && shop) {
-        fetch(
-          `${origin}/api/backfill/queue?shop=${encodeURIComponent(shop)}`,
-          {
-            method: "POST",
-            headers: { "x-admin-secret": adminSecret },
-            keepalive: true,
-          }
-        )
-          .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(`queue ${r.status}: ${t}`)))
-          .then(j => console.log("[install] queued import+index", { shop, queued: j?.queued, pid: j?.indexer?.pid }))
-          .catch(e => console.error("[install] queue failed", shop, e));
+        fetch(`${origin}/api/admin/backfill-products?shop=${encodeURIComponent(shop)}`, {
+          method: "POST",
+          headers: { "x-admin-secret": adminSecret },
+          keepalive: true,
+        }).catch(() => {});
+
+        // Indexer bootstrap
+        fetch(`${origin}/api/admin/indexer/bootstrap?shop=${encodeURIComponent(shop)}`, {
+          method: "POST",
+          headers: { "x-admin-secret": adminSecret },
+          keepalive: true,
+        }).catch(() => {});
       }
+
+      // ✅ Seed storeSettings if missing (idempotent, non-blocking)
+      (async () => {
+        try {
+          const ref = dbAdmin.doc(`storeSettings/${shop}`);
+          const snap = await ref.get();
+          if (!snap.exists) {
+            const defaults = {
+              storeId: shop,
+              category: "Beauty",
+              aiTone: "professional",
+              theme: {
+                primaryColor: "#111827",
+                accentColor: "#10B981",
+                borderRadius: "lg",
+                gridColumns: 3,
+                buttonStyle: "solid",
+              },
+              ui: { showBadges: true, showPrices: true, enableModal: true },
+              copy: {
+                heading: "Find the perfect routine",
+                subheading: "Tell Refina your concern and we’ll match expert picks.",
+                ctaText: "Ask Refina",
+              },
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            };
+            await ref.set(defaults, { merge: true });
+            console.log("[install] seeded storeSettings for", shop);
+          }
+        } catch (se) {
+          console.warn("[install] storeSettings seed skipped:", se?.message || se);
+        }
+      })();
     } catch {
-      // Intentionally swallow to avoid impacting redirect
+      // swallow; never block redirect
     }
 
     // Send the TOP FRAME to Shopify Admin app handle (avoids /apps/admin-ui 404s).
