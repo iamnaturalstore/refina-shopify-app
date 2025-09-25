@@ -341,7 +341,7 @@ async function fetchShopCurrency(client) {
 }
 
 async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
-  const mutation = `
+  let mutation = `
     mutation AppSubscribe(
       $name: String!,
       $returnUrl: URL!,
