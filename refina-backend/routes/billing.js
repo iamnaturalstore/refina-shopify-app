@@ -28,7 +28,8 @@ function normalizePlan(data) {
   let level = String(data.level || "").toLowerCase();
   const status = data.status || "NONE";
   if (level === "pro" || level === "pro+") level = "premium";
-  return { level, status };
+  const billingInterval = (data.billingInterval || data.interval || "").toLowerCase();
+  return { level, status, billingInterval };
 }
 
 function sendReauth(res, req, opts = {}) {
@@ -318,11 +319,19 @@ function inferPlanFromSubs(subs) {
   return { level, status, activeId };
 }
 
-async function writePlan(shop, level, status) {
+async function writePlan(shop, level, status, billingInterval /* optional */) {
   await dbAdmin
     .collection("plans")
     .doc(shop)
-    .set({ level, status, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    .set(
+     {
+        level,
+        status,
+        ...(billingInterval ? { billingInterval } : {}),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 }
 
 async function fetchShopCurrency(client) {
@@ -331,7 +340,7 @@ async function fetchShopCurrency(client) {
   return (data?.shop?.currencyCode || "USD").toString().toUpperCase();
 }
 
-async function createSubscription(client, { name, amount, currency, returnUrl, test = false }) {
+async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
   const mutation = `
     mutation AppSubscribe(
       $name: String!,
@@ -352,7 +361,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
           plan: {
             appRecurringPricingDetails: {
               price: { amount: $amount, currencyCode: $currency }
-              interval: EVERY_30_DAYS
+              interval: ${/* GraphQL enum needs to be inlined */ ""}EVERY_30_DAYS
             }
           }
         }]
@@ -373,6 +382,13 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     trialDays: Number(process.env.BILLING_TRIAL_DAYS || 7),
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
+
+  // Swap the interval in the mutation body when ANNUAL is requested.
+  if (String(interval).toUpperCase() === "ANNUAL") {
+    // Quick-and-safe replace; avoids another almost-identical mutation block.
+    // (keeps diff minimal; no schema rewrites)
+    mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
+  }
 
   if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
     console.log("[Billing] appSubscriptionCreate vars", {
@@ -467,7 +483,9 @@ router.get("/activated", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
-    await writePlan(shop, level, status);
+    const chosenInterval = (req.query.interval || "").toString().toLowerCase(); // "monthly" | "annual" | ""
+    const billingInterval = chosenInterval === "annual" ? "annual" : (chosenInterval === "monthly" ? "monthly" : "");
+    await writePlan(shop, level, status, billingInterval);
 
     // Build the embedded Admin URL for your app (no reliance on local re-embed).
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
@@ -690,9 +708,15 @@ router.post("/upgrade", async (req, res) => {
     }
 
     // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-    const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+    // Determine interval & amount from request
+    const requestedInterval = String(req.body?.interval || "").toLowerCase();
+    const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
+    const isAnnual = intervalEnum === "ANNUAL";
+    const returnUrl =
+      `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}` +
+      `&interval=${isAnnual ? "annual" : "monthly"}`;
 
-    const PLAN = { name: "Premium", amount: "49.00" };
+    const PLAN = { name: "Premium", amount: isAnnual ? "490.00" : "49.00" };
     const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
@@ -714,6 +738,7 @@ router.post("/upgrade", async (req, res) => {
         currency,
         returnUrl,
         test: testFlag,
+        interval: intervalEnum,
       }));
     } catch (e) {
       console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
@@ -744,6 +769,7 @@ router.post("/upgrade", async (req, res) => {
             currency,
             returnUrl,
             test: testFlag,
+            interval: intervalEnum,
           });
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }

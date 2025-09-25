@@ -269,8 +269,8 @@ export const billingApi = {
     return api.get(url);
   },
 
-  async upgrade({ returnUrl } = {}) {
-    const payload = returnUrl ? { returnUrl } : {};
+  async upgrade({ returnUrl, interval } = {}) {
+    const payload = { ...(returnUrl ? { returnUrl } : {}), ...(interval ? { interval } : {}) };
     return api.post(`/api/billing/upgrade`, payload);
   },
 

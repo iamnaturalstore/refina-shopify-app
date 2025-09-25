@@ -15,7 +15,6 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 // ─────────────────────────────────────────────────────────────
 import "@shopify/shopify-api/adapters/node";
 import { shopifyApi, LATEST_API_VERSION } from "@shopify/shopify-api";
-import { restResources } from "@shopify/shopify-api/rest/admin/2025-07";
 
 // 🔁 Firestore-backed session storage (shared across instances)
 import { createFirestoreSessionStorage } from "./lib/session/firestoreSessionStorage.js";

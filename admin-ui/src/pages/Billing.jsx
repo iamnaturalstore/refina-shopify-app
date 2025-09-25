@@ -28,7 +28,7 @@ const PLAN_DETAILS = {
   premium: {
     label: "Premium",
     priceMonthly: "$49/mo",
-    priceAnnualNote: "or $490/yr (~2 mo free)",
+    priceAnnualNote: "or $490/yr",
     tooltip: "Premium — Advanced AI • styling & analytics • priority support",
     ribbon: "Best value",
     features: [
@@ -54,7 +54,11 @@ function labelFromLevel(level) {
 }
 function parsePlanResponse(jsonResponse) {
   const p = jsonResponse?.plan || jsonResponse || {};
-  return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
+  return {
+    level: normalizeLevel(p.level),
+    status: (p.status || p.state || "unknown").toString(),
+    billingInterval: (p.billingInterval || p.interval || "").toString().toLowerCase(),
+  };
 }
 
 // Extract Shopify reauth headers (Axios lowercases keys) + fallback when headers are missing
@@ -200,12 +204,12 @@ export default function Billing() {
     };
   }, []);
 
-  async function subscribe(which /* "premium" */) {
+  async function subscribe(which /* "premium" */, interval /* "monthly" | "annual" */) {
     try {
       setBusy(true); setError(""); setReauthUrl("");
       const sep = window.location.href.includes("?") ? "&" : "?";
       const returnUrl = `${window.location.href}${sep}billing=success`;
-      const { data: json } = await billingApi.upgrade({ returnUrl });
+      const { data: json } = await billingApi.upgrade({ returnUrl, interval });
       const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
@@ -244,6 +248,7 @@ export default function Billing() {
   }
 
   const currentLevel = plan ? normalizeLevel(plan.level) : null;
+  const currentInterval = (plan?.billingInterval || "").toLowerCase();
   const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
   const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
   const isPremium = currentLevel === "premium";
@@ -293,13 +298,23 @@ export default function Billing() {
 
           <Divider />
 
-          <InlineStack>
+          <InlineStack gap="200" align="start">
             <Button
               variant="primary"
               disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id)}
+              onClick={() => onChoose(id, "monthly")}
             >
-              {isCurrent ? `Current Plan` : busy ? "Opening…" : `Choose ${meta.label}`}
+              {isCurrent && currentInterval === "monthly"
+                ? `Current (Monthly)`
+                : busy ? "Opening…" : `Choose Monthly`}
+            </Button>
+            <Button
+              disabled={busy || isCurrent || loading}
+              onClick={() => onChoose(id, "annual")}
+            >
+              {isCurrent && currentInterval === "annual"
+                ? `Current (Annual)`
+                : busy ? "Opening…" : `Choose Annual`}
             </Button>
           </InlineStack>
         </BlockStack>
@@ -336,7 +351,9 @@ export default function Billing() {
             <Text as="h2" variant="headingMd">Billing</Text>
             <Tooltip content={isPremium ? premiumMeta.tooltip : ""}>
               <Badge tone={isPremium ? "success" : "subdued"}>
-                {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
+                {currentLabel || "—"}
+                {isPremium && currentInterval && <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>}
+                {currentStatus && <>&nbsp;{currentStatus}</>}
               </Badge>
             </Tooltip>
           </InlineStack>
