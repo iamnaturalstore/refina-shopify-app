@@ -2,11 +2,10 @@
 //
 // Baseline importer (kept) + NEW queue endpoint that chains Import → Index.
 // - Keeps existing POST /api/admin/backfill-products
-// - Adds     POST /api/backfill/queue?shop=<shop>.myshopify.com
+// - Adds POST /api/backfill/queue?shop=<shop>.myshopify.com
 //   which calls the importer and then spawns the indexer worker.
 //
 // Auth for both: header x-admin-secret === process.env.ADMIN_SHARED_SECRET
-
 import express from "express";
 import { spawn } from "node:child_process";
 import shopify from "../shopify.js";
@@ -84,14 +83,12 @@ export default function mountBackfillRoutes(app) {
   /**
    * POST /api/admin/backfill-products?shop=<full-domain>
    * Body (optional): { shop: "<full-domain>" }
-   *
    * Uses the OFFLINE session to fetch products via REST and upsert into:
    *   products/<shop>/items/<id>
    */
   adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
     res.set("Cache-Control", "no-store");
     res.set("X-RF-Handler", "admin-backfill-products");
-
     try {
       const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
       const shop = toMyshopifyDomain(rawShop);
@@ -219,7 +216,6 @@ export default function mountBackfillRoutes(app) {
    */
   queueRouter.post("/queue", requireAdmin, express.json(), async (req, res) => {
     res.set("Cache-Control", "no-store");
-
     try {
       const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
       const shop = toMyshopifyDomain(rawShop);
@@ -232,6 +228,27 @@ export default function mountBackfillRoutes(app) {
 
       // 2) Index (fire-and-forget)
       const { pid } = spawnIndexer(shop);
+
+      // 2.5) Enrich (fire-and-forget) — triggers the enrichment router after ingest/index
+      try {
+        const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+        const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
+        const enrichUrl = `${scheme}://${host}/api/admin/enrichment/run`;
+        // Do not await — let it run in the background
+        fetch(enrichUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-secret": req.get("x-admin-secret") || "",
+          },
+          body: JSON.stringify({
+            storeId: shop,
+            rebuildMissingOnly: true,
+            recomputeMappings: true,
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
 
       // 3) 202 Accepted
       return res.status(202).json({

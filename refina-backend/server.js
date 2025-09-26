@@ -23,6 +23,7 @@ import privacyWebhooksRoutes from './routes/privacyWebhooks.js';
 import semanticRoutes from './routes/semantic.js';
 
 // BFF helpers that power Gemini & copy shaping
+import { enrichmentRouter } from "./routes/enrichment.js";
 import recommendRouter from './routes/recommend.js';
 import { callGemini } from './bff/ai/gemini.js';
 import { buildGeminiPrompt } from './bff/ai/buildGeminiPrompt.js';
@@ -30,6 +31,12 @@ import {
   expandConcernToIngredients,
   getIngredientFacts,
 } from './bff/lib/knowledge.js';
+
+// --- ADD (top of server.js): helper + schema imports and one-time constants ---
+import { fetchKbMap, shortlistFromKb, condenseProducts, expandConcernToIngredients, detectProductTypeFromQuery } from "./bff/lib/knowledge.js";
+import { rankProducts } from "./bff/lib/fallbackRanker.js";
+import { extractJson, coerceToContract } from "./bff/lib/normalize.js";
+import { ConciergeResponseSchema } from "./ai/jsonSchemas.js";
 
 // Utilities
 import { toMyshopifyDomain } from './utils/resolveStore.js';
@@ -63,7 +70,7 @@ const SHOPIFY_APP_SECRET = String(
 );
 
 // Gemini pruning/top-K
-const TOPK = Number(process.env.REFINA_GEMINI_TOPK || 60);
+const TOPK = Number(process.env.REFINA_GEMINI_TOPK || 100);
 
 // Public origin of THIS backend (for logs/health only)
 const PUBLIC_BACKEND_ORIGIN = String(
@@ -392,6 +399,10 @@ app.use(
 // Index on Install 
 mountBackfillRoutes(app);
 console.log("[backfill] mounted admin+queue routes");
+
+// …after your auth middleware definitions:
+app.use("/admin/enrichment", requireAdminAuth, enrichmentRouter);
+console.log("[enrichment] mounted /api/admin/enrichment");
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
@@ -731,6 +742,56 @@ function coerceToContract(obj = {}) {
   return { primary: safePrimary, alternatives: safeAlts, explanation: safeExpl, productIds, explanationFlat };
 }
 
+// ---- KB helpers (local to this file) ----------------------------------------
+ function tokens(s = "") {
+   return String(s || "").toLowerCase().normalize("NFKC").split(/[^a-z0-9]+/).filter(Boolean);
+ }
+ async function fetchKbMap(storeId) {
+   const snap = await db.collection(`kb/${storeId}/products`).get();
+   const map = new Map();
+   snap.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+   return map;
+ }
+ function scoreWithKb(kb, queryTokens, requestedType = "", targetIngSet = null) {
+   let score = 0;
+   const type = String(kb.productType_norm || kb.productType || "").toLowerCase();
+   if (requestedType && type.includes(requestedType)) score += 4;
+   const fields = [
+     ...(kb.ingredients || []),
+     ...(kb.benefits || []),
+     ...(kb.keywords || []),
+     String(kb.usageStep || ""),
+   ]
+     .join(" ")
+     .toLowerCase();
+   for (const t of queryTokens) if (fields.includes(t)) score += 1;
+   if (targetIngSet && Array.isArray(kb.ingredients)) {
+     for (const ing of kb.ingredients) {
+       if (targetIngSet.has(String(ing).toLowerCase())) score += 2;
+     }
+   }
+   return score;
+ }
+ function shortlistFromKb({ allProducts, kbById, normalizedConcern, requestedType, targetIngredients, k = 100 }) {
+   const qTok = tokens(normalizedConcern);
+   const ingSet = targetIngredients && targetIngredients.length ? new Set(targetIngredients.map((x)=>String(x).toLowerCase())) : null;
+   const scored = [];
+   for (const p of allProducts) {
+     const kb = kbById.get(p.id);
+     if (!kb) continue;
+     const s = scoreWithKb(kb, qTok, requestedType, ingSet);
+     if (s > 0) scored.push({ p, kb, s });
+   }
+   scored.sort((a, b) => b.s - a.s);
+   return scored.slice(0, k).map(({ p, kb }) => ({ ...p, ...kb }));
+ }
+ 
+ const PROMPT_VERSION = "concierge-v3";
+ const RUNTIME_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+ 
+ // NOTE: assumes PROMPT_VERSION and RUNTIME_MODEL are already defined elsewhere in this file.
+// e.g., const PROMPT_VERSION = "concierge-v3"; const RUNTIME_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+
 app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async (req, res) => {
   const t0 = Date.now();
   let meta = { source: 'mapping', cache: 'miss', llmMs: 0 };
@@ -749,53 +810,62 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     let requestedType = String(req.body?.productType || '').toLowerCase().trim();
     const routineMode = !requestedType && /beauty|skin|hair|cosmetic/i.test(String(category || ''));
 
-    const cacheKey = ['rec-v2', storeId, normalizedConcern, plan, tone, rankMode, routineMode].join('|');
+    // 🔁 Bump cache key version to avoid mixing with older payloads
+    const cacheKey = ['rec-v3', storeId, normalizedConcern, plan, tone, rankMode, routineMode, RUNTIME_MODEL, PROMPT_VERSION].join('|');
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: 'hit' } });
 
     const allProducts = await fetchProducts(storeId);
     const catalogById = new Map(allProducts.map((p) => [p.id, p]));
 
+    // Compute targetIngredients ONCE; reuse below
+    let targetIngredients = [];
+    try { targetIngredients = await expandConcernToIngredients(normalizedConcern, storeId); } catch { targetIngredients = []; }
+
     // Fallback (mapping or ranker)
     const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
     const mapping = await getDocSafe(mappingRef);
     let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
+
     if (!productIds.length) {
-      const ranked = rankProducts(allProducts, normalizedConcern, { rankMode });
+      // --- KB-FIRST SHORTLIST ---
+      const kbById = await fetchKbMap(storeId);
+      if (!requestedType) requestedType = detectProductTypeFromQuery(allProducts, concernInput);
+
+      const shortlist = shortlistFromKb({
+        allProducts,
+        kbById,
+        normalizedConcern,
+        requestedType,
+        targetIngredients,
+        k: TOPK
+      });
+
+      // If KB came back empty (first run), fall back to legacy ranker over raw.
+      const ranked = shortlist.length ? shortlist : rankProducts(allProducts, normalizedConcern, { rankMode });
       productIds = ranked.slice(0, 8).map((p) => p.id);
-      meta.source = 'fallback';
+      meta.source = shortlist.length ? 'kb-shortlist' : 'fallback';
     }
 
-    const limit = plan === 'free' ? 3 : 8;
+    const limit = 3; // keep UX crisp; premium still returns 3 curated picks
     let used = productIds.slice(0, limit);
     let enriched = null;
 
     if (plan !== 'free') {
-      // 1) Expand concern → ingredients + facts
-      let targetIngredients = [];
-      try {
-        targetIngredients = await expandConcernToIngredients(normalizedConcern, storeId);
-      } catch {
-        targetIngredients = [];
-      }
+      // Ingredient facts (pre-researched, concise). Reuse targetIngredients computed above.
       const ingredientFacts = targetIngredients.length ? await getIngredientFacts(targetIngredients, storeId) : {};
 
-      if (!requestedType) requestedType = detectProductTypeFromQuery(allProducts, concernInput);
-
-      // 2) Pre-prune
-      let pool = allProducts;
-      if (targetIngredients.length || requestedType) {
-        const ingSet = new Set(targetIngredients);
-        pool = allProducts.filter((p) => {
-          const ings = Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : [];
-          const typeOK = !requestedType || String(p.productTypeNormalized || p.productType || '').toLowerCase().includes(requestedType);
-          return ((ings.some((x) => ingSet.has(String(x).toLowerCase())) || !targetIngredients.length) && typeOK);
-        });
-        if (!pool.length) pool = allProducts;
-      }
-
-      const rankedForLLM = rankProducts(pool, normalizedConcern, { rankMode, targetIngredients, productType: requestedType });
-      const topK = rankedForLLM.slice(0, TOPK);
+      // Build LLM candidate set: KB-first (≤TOPK), joined with raw for title/urls
+      const kbById = await fetchKbMap(storeId);
+      const shortlist = shortlistFromKb({
+        allProducts,
+        kbById,
+        normalizedConcern,
+        requestedType,
+        targetIngredients,
+        k: TOPK
+      });
+      const topK = shortlist.length ? shortlist : allProducts.slice(0, TOPK);
 
       // 3) RAG copy
       const prompt = buildGeminiPrompt({
@@ -807,12 +877,25 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
         rankMode,
         routineMode,
         ingredientFacts,
-        products: condenseProducts(topK),
+        products: condenseProducts(topK), // carries KB fields via shortlistFromKb merge
       });
-      const genConfig = { temperature: plan === 'premium' ? 0.7 : 0.5, topP: 0.9, maxOutputTokens: 1024 };
+
+      const genConfig = {
+        model: RUNTIME_MODEL,
+        temperature: plan === 'premium' ? 0.6 : 0.4,
+        topP: 0.9,
+        maxOutputTokens: 1024,
+        timeoutMs: 15000,
+        responseMimeType: "application/json",
+        // ✅ Pass strict schema to reduce invalid JSON
+        responseSchema: ConciergeResponseSchema,
+      };
+
       const tLLM = Date.now();
       const modelText = await callGemini(prompt, genConfig).catch(() => null);
       meta.llmMs = Date.now() - tLLM;
+      meta.model = RUNTIME_MODEL;
+      meta.promptVersion = PROMPT_VERSION;
 
       if (modelText) {
         try {
@@ -827,9 +910,26 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
 
       const requestedIds = Array.isArray(enriched?.productIds) ? enriched.productIds : [];
       const validIds = [...new Set(requestedIds.filter((id) => typeof id === 'string' && catalogById.has(id)))];
+
       if (validIds.length > 0) {
-        used = validIds.slice(0, limit);
+        used = validIds.slice(0, 3); // always cap to 3 for Premium UX
         meta.source = 'gemini';
+        // Write-through cache for next time (mapping)
+        try {
+          const rationale = (enriched?.explanation?.oneLiner || enriched?.explanation?.friendlyParagraph || "").slice(0, 400);
+          await mappingRef.set(
+            {
+              concern: normalizedConcern,
+              productIds: used,
+              shortlistIds: (topK || []).map((p) => p.id).slice(0, TOPK),
+              rationale,
+              updatedAt: Date.now(),
+              modelVersion: RUNTIME_MODEL,
+              promptVersion: PROMPT_VERSION,
+            },
+            { merge: true }
+          );
+        } catch (_) {}
       } else if (enriched) {
         meta.reason = meta.reason || 'gemini_no_fit';
       }
@@ -878,7 +978,7 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     // --- Fallback: if no products yet, serve a few via Admin API ---
     if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
       try {
-        const shop = String(storeId || '').toLowerCase(); // <- use your storeId
+        const shop = String(storeId || '').toLowerCase();
         let accessToken = req.accessToken;
 
         // Load offline session token if middleware didn't attach one
@@ -890,7 +990,6 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
         }
 
         if (shop && accessToken) {
-          // Use the user’s concern text as the search hint
           const q = concernInput || '';
           const fb = await fetchFallbackProducts(shop, accessToken, { limit: 10, query: q });
 
