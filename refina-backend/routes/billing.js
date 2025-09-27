@@ -643,8 +643,9 @@ if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
 router.post("/sync", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
+
+    // Use the unified client factory (offline-first; online w/ accessToken fallback)
+    const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
@@ -652,7 +653,8 @@ router.post("/sync", async (req, res) => {
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
+    // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
+    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
     // No userErrors here (not a createSubscription path)
     return res.status(500).json({ error: "Sync failed" });
@@ -680,10 +682,7 @@ router.post("/upgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
 
-    // ⬇️ Tolerant client selection:
-    //    - Prefer OFFLINE session
-    //    - Fall back to ONLINE (from guard) if offline not created yet
-    //    - Reauth only if neither exists
+    // ⬇️ Tolerant client selection (offline-first; online w/ accessToken fallback)
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
@@ -702,13 +701,12 @@ router.post("/upgrade", async (req, res) => {
 
     let origin = originCandidate;
     try {
-      origin = new URL(originCandidate).origin;            // strips any path/query
+      origin = new URL(originCandidate).origin; // strips any path/query
     } catch {
       origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
     }
 
-    // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-    // Determine interval & amount from request
+    // Determine interval & amount from request; keep returnUrl SHORT
     const requestedInterval = String(req.body?.interval || "").toLowerCase();
     const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
     const isAnnual = intervalEnum === "ANNUAL";
@@ -741,6 +739,10 @@ router.post("/upgrade", async (req, res) => {
         interval: intervalEnum,
       }));
     } catch (e) {
+      // If Shopify returns 401 here, trigger reauth instead of 500
+      if (e?.response?.code === 401 || e?.status === 401) {
+        return sendReauth(res, req);
+      }
       console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
       if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
         return res.status(500).json({
@@ -780,13 +782,13 @@ router.post("/upgrade", async (req, res) => {
 
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
+    // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
+    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
     // Do NOT reference userErrors here
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
-
 
 /** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {
