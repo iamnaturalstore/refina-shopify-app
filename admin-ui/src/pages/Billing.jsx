@@ -187,39 +187,6 @@ export default function Billing() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
 
-  // Poll while waiting for Shopify confirmation if user is coming back
-  React.useEffect(() => {
-    const wantRaw = localStorage.getItem(PENDING_KEY);
-    if (!wantRaw) return;
-    const want = normalizeLevel(wantRaw);
-    const have = plan ? normalizeLevel(plan.level) : null;
-
-    if (have && have === want) {
-      try { localStorage.removeItem(PENDING_KEY); } catch {}
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      setSyncing(false);
-      showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
-      syncFromShopify();
-      return;
-    }
-    if (!syncing) {
-      setSyncing(true);
-      pollRef.current = setInterval(loadPlan, 3000);
-      timeoutRef.current = setTimeout(() => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setSyncing(false);
-      }, 60000);
-    }
-  }, [plan, syncing, loadPlan]);
-
-  React.useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
   async function subscribe(which /* "premium" */, interval /* "monthly" | "annual" */) {
     try {
       setBusy(true); setError(""); setReauthUrl("");
