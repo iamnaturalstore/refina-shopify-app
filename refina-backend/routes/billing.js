@@ -438,14 +438,19 @@ async function cancelSubscription(client, id, prorate = true) {
 
 /* ----------------------------- Routes ---------------------------- */
 
-/** GET /api/billing/plan → { plan: {level, status} }
+/** GET /api/billing/plan → { plan: {level, status}, stale?, needsAuth? }
  *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
  *  NOTE: This route is NOT behind the global JWT guard; we only require auth when fresh=1.
+ *  IMPORTANT: For background freshness checks, do NOT emit App Bridge reauth headers.
  */
 router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
     const wantsFresh = String(req.query.fresh || "0") === "1";
+
+    // Soft flags for background callers (avoid reauth loops)
+    let stale = false;
+    let needsAuth = false;
 
     if (wantsFresh) {
       try {
@@ -455,18 +460,26 @@ router.get("/plan", async (req, res) => {
         const { level, status } = inferPlanFromSubs(subs);
         await writePlan(shop, level, status);
       } catch (err) {
-        if (err?.status === 401) {
-          return sendReauth(res, req, { shop });
+        // De-weaponize: if Shopify/Session says 401, DO NOT send reauth headers from /plan.
+        // Return cached plan with soft hints so UI can show a reconnect CTA without reloading.
+        if (err?.status === 401 || err?.response?.code === 401) {
+          stale = true;
+          needsAuth = true;
+        } else {
+          throw err;
         }
-        throw err;
       }
     }
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
     const raw = snap.exists ? snap.data() : null;
     const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
-    return res.json({ plan });
+
+    // Include soft flags only when relevant to keep prior consumers unaffected
+    const payload = needsAuth || stale ? { plan, stale, needsAuth } : { plan };
+    return res.json(payload);
   } catch (err) {
+    // Keep existing behavior for non-fresh path or hard failures
     if (err?.status === 401 || err?.response?.code === 401) {
       return sendReauth(res, req);
     }
