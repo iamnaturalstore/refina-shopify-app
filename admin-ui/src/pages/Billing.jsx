@@ -19,6 +19,8 @@ import { api, billingApi } from "../api/client.js";
 import app from "../appBridge";
 import { Redirect } from "@shopify/app-bridge/actions";
 import { buildEmbeddedUrl } from "../api/client"; // adjust relative path if needed
+import { getSessionToken } from "@shopify/app-bridge-utils";
+
 
 
 const PENDING_KEY = "refina:billing:pending";
@@ -108,13 +110,26 @@ export default function Billing() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
+  // ── APPROVED DIFF: local App Bridge fetch wrapper for billing endpoints ──
+  async function abFetch(url, init = {}) {
+    const token = await getSessionToken(app);
+    const headers = new Headers(init.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+    if (init.body && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    return fetch(url, { ...init, headers });
+  }
+
   const loadPlan = React.useCallback(async () => {
     setError("");
     setReauthUrl("");
     setLoading(true);
     try {
       // ✅ Read Firestore-backed plan (no fresh) — avoids 401 loops on cold sessions
-      const { data } = await billingApi.getPlan();
+      // APPROVED DIFF: use abFetch instead of axios client
+      const resp = await abFetch(`/api/billing/plan`);
+      const data = await resp.json();
       setPlan(parsePlanResponse(data));
     } catch (e) {
       console.error("[Billing] GET /api/billing/plan failed:", e);
@@ -136,7 +151,8 @@ export default function Billing() {
     setReauthUrl("");
     setBusy(true);
     try {
-      await api.post("/api/billing/sync", {}); // backend writes plans/{shop}
+      // APPROVED DIFF: use abFetch
+      await abFetch(`/api/billing/sync`, { method: "POST" }); // backend writes plans/{shop}
       await loadPlan();
       showToast("Plan synced from Shopify");
     } catch (e) {
@@ -209,7 +225,12 @@ export default function Billing() {
       setBusy(true); setError(""); setReauthUrl("");
       const sep = window.location.href.includes("?") ? "&" : "?";
       const returnUrl = `${window.location.href}${sep}billing=success`;
-      const { data: json } = await billingApi.upgrade({ returnUrl, interval });
+      // APPROVED DIFF: use abFetch and only send { interval }.
+      const resp = await abFetch(`/api/billing/upgrade`, {
+        method: "POST",
+        body: JSON.stringify({ interval }), // server computes returnUrl
+      });
+      const json = await resp.json();
       const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
@@ -230,7 +251,9 @@ export default function Billing() {
   async function downgrade() {
     try {
       setBusy(true); setError(""); setReauthUrl("");
-      const { data } = await api.post("/api/billing/downgrade", {});
+      // APPROVED DIFF: use abFetch
+      const resp = await abFetch(`/api/billing/downgrade`, { method: "POST" });
+      const data = await resp.json();
       if (!data?.ok && !data?.canceled) throw new Error(data?.error || "Downgrade failed");
       await syncFromShopify();
       showToast("Downgrade complete. You are now on the Free plan.");
@@ -263,6 +286,7 @@ export default function Billing() {
       </Box>
     );
   }
+
 
   function PlanTile({ id, meta, current, onChoose }) {
     const isCurrent = current === id;
