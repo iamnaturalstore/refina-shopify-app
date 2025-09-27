@@ -120,15 +120,16 @@ function getGraphqlClient(session) {
 }
 
 async function gql(client, query, variables) {
+  // Prefer modern .request(); fall back to legacy .query()
+  if (typeof client.request === "function") {
+    const resp = await client.request(query, variables ? { variables } : undefined);
+    return resp?.data ?? resp?.body?.data ?? resp;
+  }
   if (typeof client.query === "function") {
     const resp = await client.query({
       data: variables ? { query, variables } : { query },
     });
     return resp?.body?.data;
-  }
-  if (typeof client.request === "function") {
-    const resp = await client.request(query, variables ? { variables } : undefined);
-    return resp?.data ?? resp?.body?.data ?? resp;
   }
   throw new Error("Shopify GraphQL client missing .query/.request");
 }
@@ -661,6 +662,7 @@ router.post("/sync", async (req, res) => {
   }
 });
 
+
 /** GET /api/billing/status → { activeSubscriptions: [...] } */
 router.get("/status", async (req, res) => {
   try {
@@ -706,7 +708,8 @@ router.post("/upgrade", async (req, res) => {
       origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
     }
 
-    // Determine interval & amount from request; keep returnUrl SHORT
+    // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
+    // Determine interval & amount from request
     const requestedInterval = String(req.body?.interval || "").toLowerCase();
     const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
     const isAnnual = intervalEnum === "ANNUAL";
@@ -739,10 +742,6 @@ router.post("/upgrade", async (req, res) => {
         interval: intervalEnum,
       }));
     } catch (e) {
-      // If Shopify returns 401 here, trigger reauth instead of 500
-      if (e?.response?.code === 401 || e?.status === 401) {
-        return sendReauth(res, req);
-      }
       console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
       if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
         return res.status(500).json({
@@ -782,13 +781,13 @@ router.post("/upgrade", async (req, res) => {
 
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
-    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
     // Do NOT reference userErrors here
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
+
 
 /** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {
