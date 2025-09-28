@@ -134,6 +134,34 @@ async function gql(client, query, variables) {
   throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
+// Only allow plan to move toward FREE/NONE during background reconciliation.
+// Never upgrade here — upgrades happen only via /api/billing/activated.
+async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
+  const ref = dbAdmin.collection("plans").doc(shop);
+  const snap = await ref.get();
+  const cur = snap.exists ? snap.data() : null;
+
+  const curLevel = String(cur?.level || "free").toLowerCase();
+  const curStatus = String(cur?.status || "NONE").toUpperCase();
+
+  // If Shopify shows no active sub, ensure local is free/NONE.
+  if (String(inferredLevel).toLowerCase() === "free" && String(inferredStatus).toUpperCase() === "NONE") {
+    await ref.set(
+      {
+        level: "free",
+        status: "NONE",
+        updatedAt: Date.now(),
+        _source: "sync:downgrade", // marks this as coming from reconciliation
+      },
+      { merge: true }
+    );
+    return { changed: curLevel !== "free" || curStatus !== "NONE" };
+  }
+
+  // Otherwise do nothing — never upgrade here.
+  return { changed: false };
+}
+
 /* ------------------------ Shared helpers ------------------------ */
 
 async function ensureOfflineSession(shop) {
@@ -509,23 +537,21 @@ router.get("/plan", async (req, res) => {
     const wantsFresh = String(req.query.fresh || "0") === "1";
 
     if (wantsFresh) {
-      try {
-        const offlineSession = await ensureOfflineSession(shop);
-        const client = getGraphqlClient(offlineSession);
+  try {
+    const offlineSession = await ensureOfflineSession(shop);
+    const client = getGraphqlClient(offlineSession);
+    const subs = await readActiveSubscriptions(client);
+    const { level, status } = inferPlanFromSubs(subs);
 
-        /* ✅ Ensure uninstall webhook is registered even if OAuth callback was skipped */
-        await ensureAppUninstalledWebhook(client);
-
-        const subs = await readActiveSubscriptions(client);
-        const { level, status } = inferPlanFromSubs(subs);
-        await writePlan(shop, level, status);
-      } catch (err) {
-        if (err?.status === 401) {
-          return sendReauth(res, req, { shop });
-        }
-        throw err;
-      }
+    // IMPORTANT: Only allow downgrade here; never upgrade from this endpoint.
+    await writePlanDowngradeOnly(shop, level, status);
+  } catch (err) {
+    if (err?.status === 401) {
+      return sendReauth(res, req, { shop });
     }
+    throw err;
+  }
+}
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
     const raw = snap.exists ? snap.data() : null;
@@ -549,9 +575,28 @@ router.get("/activated", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
-    const chosenInterval = (req.query.interval || "").toString().toLowerCase(); // "monthly" | "annual" | ""
-    const billingInterval = chosenInterval === "annual" ? "annual" : (chosenInterval === "monthly" ? "monthly" : "");
-    await writePlan(shop, level, status, billingInterval);
+    // Derive interval from the active subscription (not from req.query)
+const firstActive =
+  Array.isArray(subs)
+    ? subs.find(s => (s?.status || s?.node?.status) === "ACTIVE")
+    : null;
+
+const rawInterval =
+  firstActive?.billingPolicy?.interval ??
+  firstActive?.node?.billingPolicy?.interval ??
+  ""; // e.g. "ANNUAL", "EVERY_30_DAYS", "MONTHLY"
+
+let billingInterval = "";
+if (typeof rawInterval === "string") {
+  const i = rawInterval.toLowerCase();
+  billingInterval =
+    i.includes("annual") || i.includes("year") ? "annual" :
+    i.includes("month")  || i.includes("30")   ? "monthly" :
+    "";
+}
+
+await writePlan(shop, level, status, billingInterval);
+
 
     // Build the embedded Admin URL for your app (no reliance on local re-embed).
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
