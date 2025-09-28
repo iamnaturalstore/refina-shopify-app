@@ -307,7 +307,7 @@ router.get("/callback", async (req, res) => {
 });
 
 /* Embedded entrypoint (application_url in shopify.app.toml) */
-router.get("/embedded", (req, res) => {
+router.get("/embedded", async (req, res) => {
   const shop = String(req.query.shop || "").toLowerCase();
   if (!shop.endsWith(".myshopify.com")) {
     return res.status(400).send("Missing or invalid ?shop=<shop>.myshopify.com");
@@ -317,6 +317,35 @@ router.get("/embedded", (req, res) => {
   const returnTo = sanitizeReturnTo(getCookie(req, "refina_return_to"));
   if (returnTo) res.cookie("refina_return_to", "", { path: "/", maxAge: 0 });
 
+  // ✅ Ensure an offline session exists; if not, run OAuth once.
+  try {
+    const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
+
+    const offlineId =
+      (shopify.session && shopify.session.getOfflineId?.(shop)) ||
+      (shopify.api?.session && shopify.api.session.getOfflineId?.(shop)) ||
+      null;
+
+    const offline = storage?.loadSession && offlineId
+      ? await storage.loadSession(offlineId)
+      : null;
+
+    if (!offline?.accessToken) {
+      const authUrl = new URL("/api/auth", baseUrl(req));
+      authUrl.searchParams.set("shop", shop);
+      authUrl.searchParams.set("host", host);
+      authUrl.searchParams.set("return_to", "/admin-ui/billing");
+      return res.redirect(302, authUrl.toString());
+    }
+  } catch {
+    const authUrl = new URL("/api/auth", baseUrl(req));
+    authUrl.searchParams.set("shop", shop);
+    authUrl.searchParams.set("host", host);
+    authUrl.searchParams.set("return_to", "/admin-ui/billing");
+    return res.redirect(302, authUrl.toString());
+  }
+
+  // Session is present → proceed to the UI
   const target = new URL("/admin-ui/", baseUrl(req));
   target.searchParams.set("shop", shop);
   target.searchParams.set("host", host);
