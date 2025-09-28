@@ -455,7 +455,7 @@ router.get("/plan", async (req, res) => {
         const { level, status } = inferPlanFromSubs(subs);
         await writePlan(shop, level, status);
       } catch (err) {
-        if (err?.status === 401) {
+        if (isUnauthorized(err)) {
           return sendReauth(res, req, { shop });
         }
         throw err;
@@ -467,7 +467,7 @@ router.get("/plan", async (req, res) => {
     const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
     return res.json({ plan });
   } catch (err) {
-    if (err?.status === 401 || err?.response?.code === 401) {
+    if (isUnauthorized(err)) {
       return sendReauth(res, req);
     }
     console.error("GET /api/billing/plan error", err);
@@ -650,12 +650,21 @@ router.post("/sync", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
+
+    // 🔎 visibility into who flips the plan
+    console.log("[/billing/sync] infer from Shopify", {
+      shop,
+      level,
+      status,
+      subsCount: Array.isArray(subs) ? subs.length : -1,
+    });
+
     await writePlan(shop, level, status);
 
     return res.json({ ok: true, level, status });
   } catch (err) {
     // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
-    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
+    if (isUnauthorized(err)) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
     // No userErrors here (not a createSubscription path)
     return res.status(500).json({ error: "Sync failed" });
@@ -672,7 +681,7 @@ router.get("/status", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
+    if (isUnauthorized(err)) return sendReauth(res, req);
     console.error("GET /api/billing/status error", err);
     // No userErrors here
     return res.status(500).json({ error: "Status failed" });
@@ -844,6 +853,7 @@ router.post("/downgrade", async (req, res) => {
     return res.status(500).json({ error: "Downgrade failed" });
   }
 });
+
 
 export default router;
 
