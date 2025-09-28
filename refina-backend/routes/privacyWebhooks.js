@@ -13,14 +13,34 @@ function verifyShopifyHmacFromRaw(req) {
     process.env.SHOPIFY_API_SECRET ||
     process.env.SHOPIFY_API_SECRET_KEY ||
     "";
-  const received = req.get("X-Shopify-Hmac-Sha256") || "";
-  const digest = crypto
-    .createHmac("sha256", secret)
-    .update(req.body)
-    .digest("base64");
-  if (received.length !== digest.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(received));
+  if (!secret) return false;
+
+  const received = String(req.get("X-Shopify-Hmac-Sha256") || "");
+
+  // Normalize body to a Buffer (Express raw should already give Buffer,
+  // but be tolerant in case middleware order ever changes)
+  let bodyBuf;
+  const b = req.body;
+  if (Buffer.isBuffer(b)) {
+    bodyBuf = b;
+  } else if (typeof b === "string") {
+    bodyBuf = Buffer.from(b, "utf8");
+  } else if (b && typeof b === "object") {
+    // Ensure stable JSON (Shopify sends minified JSON)
+    bodyBuf = Buffer.from(JSON.stringify(b));
+  } else {
+    bodyBuf = Buffer.alloc(0);
+  }
+
+  const digest = crypto.createHmac("sha256", secret).update(bodyBuf).digest("base64");
+
+  // Constant-time compare
+  const recvBuf = Buffer.from(received);
+  const digBuf = Buffer.from(digest);
+  if (recvBuf.length !== digBuf.length) return false;
+  return crypto.timingSafeEqual(recvBuf, digBuf);
 }
+
 
 // --- NEW: APP_UNINSTALLED webhook -------------------------------
 router.post("/app_uninstalled", rawJson, async (req, res) => {

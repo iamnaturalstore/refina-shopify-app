@@ -490,6 +490,9 @@ app.get('/apps/refina/v1/concerns', (_req, res) => {
   });
 });
 
+// ✅ Mount privacy/webhooks FIRST (needs raw body, no json/urlencoded before this)
+app.use('/api/privacy', privacyWebhooksRoutes);
+
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
   const raw = String((req.query.shop || req.query.storeId || '')).toLowerCase().trim();
@@ -508,9 +511,12 @@ app.use('/api/billing', billingRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/admin', analyticsRouter);
 app.use('/api/admin', adminSettingsRouter);
+
+// ⚠️ Keep this AFTER /api/privacy so any json parsers inside this router
+// don’t pre-parse the webhook body.
 app.use('/api/admin', analyticsIngestRouter);
 app.use('/api', analyticsIngestRouter);
-app.use('/api/privacy', privacyWebhooksRoutes);
+
 app.use('/api/semantic', semanticRoutes);
 
 // Convenience Admin settings alias (UI posts here)
@@ -546,6 +552,7 @@ app.post('/api/admin/store-settings', async (req, res) => {
     return res.status(500).json({ error: 'persist_failed' });
   }
 });
+
 
 // ───────────────────────── App Proxy (storefront) ─────────────────────────
 
