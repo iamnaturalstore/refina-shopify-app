@@ -47,6 +47,40 @@ function storeFromShop(shop) {
   return String(shop || "").toLowerCase().replace(/\.myshopify\.com$/, "");
 }
 
+/* ── NEW: register APP_UNINSTALLED webhook helper ───────────────────────── */
+async function registerAppUninstalledWebhook(client, webhookUrl) {
+  const MUT = `
+    mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
+      webhookSubscriptionCreate(
+        topic: $topic,
+        webhookSubscription: { callbackUrl: $callbackUrl, format: JSON }
+      ) {
+        userErrors { field message }
+        webhookSubscription {
+          id
+          topic
+          endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } }
+        }
+      }
+    }
+  `;
+  const variables = { topic: "APP_UNINSTALLED", callbackUrl: webhookUrl };
+
+  const resp = typeof client.request === "function"
+    ? await client.request(MUT, { variables })
+    : await client.query({ data: { query: MUT, variables } });
+
+  const data = resp?.data || resp?.body?.data || resp;
+  const errs = data?.webhookSubscriptionCreate?.userErrors || [];
+  if (errs.length) {
+    console.warn("[Webhook] register APP_UNINSTALLED userErrors:", errs);
+  } else {
+    const ws = data?.webhookSubscriptionCreate?.webhookSubscription;
+    console.log("[Webhook] registered APP_UNINSTALLED:", ws);
+  }
+}
+/* ──────────────────────────────────────────────────────────────────────── */
+
 /* ───────── OAuth (offline) ───────── */
 
 router.get("/", async (req, res) => {
@@ -108,44 +142,6 @@ router.get("/", async (req, res) => {
     return res.status(500).send(`OAuth begin failed: ${err?.message || String(err)}`);
   }
 });
-
-// refina-backend/routes/auth.js  (ADD these near the top with your other imports)
-import express from "express";
-import shopify from "../shopify.js"; // <- whatever you already import here
-
-// --- helper: register APP_UNINSTALLED webhook (works with request/query) ---
-async function registerAppUninstalledWebhook(client, webhookUrl) {
-  const MUT = `
-    mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
-      webhookSubscriptionCreate(
-        topic: $topic,
-        webhookSubscription: { callbackUrl: $callbackUrl, format: JSON }
-      ) {
-        userErrors { field message }
-        webhookSubscription {
-          id
-          topic
-          endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } }
-        }
-      }
-    }
-  `;
-  const variables = { topic: "APP_UNINSTALLED", callbackUrl: webhookUrl };
-
-  const resp = typeof client.request === "function"
-    ? await client.request(MUT, { variables })
-    : await client.query({ data: { query: MUT, variables } });
-
-  const data = resp?.data || resp?.body?.data || resp;
-  const errs = data?.webhookSubscriptionCreate?.userErrors || [];
-  if (errs.length) {
-    console.warn("[Webhook] register APP_UNINSTALLED userErrors:", errs);
-  } else {
-    const ws = data?.webhookSubscriptionCreate?.webhookSubscription;
-    console.log("[Webhook] registered APP_UNINSTALLED:", ws);
-  }
-}
-
 
 /* Top-level handoff required by Shopify OAuth */
 router.get("/toplevel", (req, res) => {
@@ -279,6 +275,28 @@ router.get("/callback", async (req, res) => {
       // swallow; never block redirect
     }
 
+    /* ⬇️ NEW: register APP_UNINSTALLED webhook using the offline session */
+    try {
+      const Graphql =
+        shopify?.api?.clients?.Graphql ||
+        shopify?.clients?.Graphql;
+      if (Graphql) {
+        const client = new Graphql({ session });
+        const publicBase = (process.env.APP_URL || process.env.HOST || "").replace(/\/$/, "");
+        if (publicBase) {
+          const webhookUrl = `${publicBase}/api/privacy/app_uninstalled`;
+          await registerAppUninstalledWebhook(client, webhookUrl);
+        } else {
+          console.warn("[Webhook] APP_URL/HOST not set; skipped APP_UNINSTALLED registration");
+        }
+      } else {
+        console.warn("[Webhook] Graphql client class not found; skipped registration");
+      }
+    } catch (e) {
+      console.warn("[Webhook] APP_UNINSTALLED registration failed:", e?.message || e);
+    }
+    /* ⬆️ END NEW */
+
     // Send the TOP FRAME to Shopify Admin app handle (avoids /apps/admin-ui 404s).
     const adminUrl = new URL(`/store/${store}/apps/refina`, "https://admin.shopify.com");
     return res.redirect(302, adminUrl.toString());
@@ -336,81 +354,5 @@ if (String(process.env.ENABLE_DEBUG_ROUTES || "") === "1") {
     }
   });
 }
-
-// --- helper: register APP_UNINSTALLED webhook (works with request/query) ---
-async function registerAppUninstalledWebhook(client, webhookUrl) {
-  const MUT = `
-    mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
-      webhookSubscriptionCreate(
-        topic: $topic,
-        webhookSubscription: { callbackUrl: $callbackUrl, format: JSON }
-      ) {
-        userErrors { field message }
-        webhookSubscription {
-          id
-          topic
-          endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } }
-        }
-      }
-    }
-  `;
-  const vars = { topic: "APP_UNINSTALLED", callbackUrl: webhookUrl };
-
-  const resp = typeof client.request === "function"
-    ? await client.request(MUT, { variables: vars })
-    : await client.query({ data: { query: MUT, variables: vars } });
-
-  const data = resp?.data || resp?.body?.data || resp;
-  const errs = data?.webhookSubscriptionCreate?.userErrors || [];
-  if (errs.length) {
-    console.warn("[Webhook] register APP_UNINSTALLED userErrors:", errs);
-  } else {
-    const ws = data?.webhookSubscriptionCreate?.webhookSubscription;
-    console.log("[Webhook] registered APP_UNINSTALLED:", ws);
-  }
-}
-
-// DEBUG: list webhooks (GET /api/debug/webhooks?shop=<shop>&token=<DEBUG_TOKEN>)
-import express from "express";
-export const debugRouter = express.Router();
-
-debugRouter.get("/webhooks", async (req, res) => {
-  try {
-    if ((process.env.DEBUG_TOKEN || "") !== (req.query.token || "")) {
-      return res.status(403).json({ error: "forbidden" });
-    }
-    const shop = String(req.query.shop || "");
-    if (!shop) return res.status(400).json({ error: "missing shop" });
-
-    // however you already obtain an admin client; reuse your helper
-    const client = await getAdminClientForShop(req, res, shop);
-
-    const Q = `
-      query {
-        webhookSubscriptions(first: 50) {
-          edges {
-            node {
-              id
-              topic
-              endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } }
-            }
-          }
-        }
-      }
-    `;
-    const resp = typeof client.request === "function"
-      ? await client.request(Q)
-      : await client.query({ data: { query: Q } });
-
-    const data = resp?.data || resp?.body?.data || resp;
-    const list = (data?.webhookSubscriptions?.edges || []).map(e => e.node);
-    console.log("[Webhook] current subs:", list);
-    return res.json({ webhooks: list });
-  } catch (e) {
-    console.error("[Webhook] list error", e);
-    return res.status(500).json({ error: "list failed" });
-  }
-});
-
 
 export default router;
