@@ -679,6 +679,10 @@ router.get("/status", async (req, res) => {
   }
 });
 
+// add this tiny helper once (above the route or near other helpers)
+const isUnauthorized = (e) =>
+  e?.status === 401 || e?.response?.code === 401 || e?.response?.status === 401;
+
 /** POST /api/billing/upgrade → { confirmationUrl } */
 router.post("/upgrade", async (req, res) => {
   try {
@@ -742,6 +746,7 @@ router.post("/upgrade", async (req, res) => {
         interval: intervalEnum,
       }));
     } catch (e) {
+      if (isUnauthorized(e)) return sendReauth(res, req);   // ⬅️ reauth on 401 from GraphQL
       console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
       if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
         return res.status(500).json({
@@ -775,19 +780,19 @@ router.post("/upgrade", async (req, res) => {
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }
       } catch (e) {
+        if (isUnauthorized(e)) return sendReauth(res, req); // ⬅️ also reauth on retry 401
         console.error("POST /api/billing/upgrade retry error", e?.response?.errors || e?.errors || e);
       }
     }
 
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
+    if (isUnauthorized(err)) return sendReauth(res, req);    // ⬅️ outer catch covers readActiveSubscriptions/currency
     console.error("POST /api/billing/upgrade error", err);
     // Do NOT reference userErrors here
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
-
 
 /** POST /api/billing/downgrade → cancels active subscription(s); sets plan Free */
 router.post("/downgrade", async (req, res) => {
