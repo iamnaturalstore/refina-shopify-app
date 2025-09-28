@@ -438,6 +438,67 @@ async function cancelSubscription(client, id, prorate = true) {
 
 /* ----------------------------- Routes ---------------------------- */
 
+/* ⬇️ Add this small helper (idempotent) */
+async function ensureAppUninstalledWebhook(client) {
+  // 1) Check existing webhooks
+  const LIST_Q = `
+    query {
+      webhookSubscriptions(first: 50, topics: [APP_UNINSTALLED]) {
+        edges { node { id topic endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
+    }
+  `;
+  let existing = [];
+  try {
+    const resp = typeof client.request === "function"
+      ? await client.request(LIST_Q)
+      : await client.query({ data: { query: LIST_Q } });
+    const data = resp?.data || resp?.body?.data || resp;
+    existing = (data?.webhookSubscriptions?.edges || []).map(e => e.node);
+  } catch (e) {
+    // Non-fatal; we'll just try to create below
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.warn("[Webhook] list APP_UNINSTALLED failed (non-fatal):", e?.message || e);
+    }
+  }
+
+  // 2) If one exists pointing to our URL, do nothing
+  const base = (process.env.APP_URL || process.env.HOST || "").replace(/\/$/, "");
+  if (!base) return; // can't register without public base
+  const wantUrl = `${base}/api/privacy/app_uninstalled`;
+  if (existing.some(w => w?.endpoint?.callbackUrl === wantUrl)) return;
+
+  // 3) Otherwise create it
+  const CREATE_MUT = `
+    mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
+      webhookSubscriptionCreate(
+        topic: $topic,
+        webhookSubscription: { callbackUrl: $callbackUrl, format: JSON }
+      ) {
+        userErrors { field message }
+        webhookSubscription {
+          id topic endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } }
+        }
+      }
+    }
+  `;
+  const variables = { topic: "APP_UNINSTALLED", callbackUrl: wantUrl };
+  try {
+    const resp = typeof client.request === "function"
+      ? await client.request(CREATE_MUT, { variables })
+      : await client.query({ data: { query: CREATE_MUT, variables } });
+    const data = resp?.data || resp?.body?.data || resp;
+    const errs = data?.webhookSubscriptionCreate?.userErrors || [];
+    if (errs.length && String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.warn("[Webhook] register APP_UNINSTALLED userErrors:", errs);
+    }
+  } catch (e) {
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.warn("[Webhook] register APP_UNINSTALLED failed (non-fatal):", e?.message || e);
+    }
+  }
+}
+
 /** GET /api/billing/plan → { plan: {level, status} }
  *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
  *  NOTE: This route is NOT behind the global JWT guard; we only require auth when fresh=1.
@@ -451,11 +512,15 @@ router.get("/plan", async (req, res) => {
       try {
         const offlineSession = await ensureOfflineSession(shop);
         const client = getGraphqlClient(offlineSession);
+
+        /* ✅ Ensure uninstall webhook is registered even if OAuth callback was skipped */
+        await ensureAppUninstalledWebhook(client);
+
         const subs = await readActiveSubscriptions(client);
         const { level, status } = inferPlanFromSubs(subs);
         await writePlan(shop, level, status);
       } catch (err) {
-        if (isUnauthorized(err)) {
+        if (err?.status === 401) {
           return sendReauth(res, req, { shop });
         }
         throw err;
@@ -467,7 +532,7 @@ router.get("/plan", async (req, res) => {
     const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
     return res.json({ plan });
   } catch (err) {
-    if (isUnauthorized(err)) {
+    if (err?.status === 401 || err?.response?.code === 401) {
       return sendReauth(res, req);
     }
     console.error("GET /api/billing/plan error", err);
@@ -650,21 +715,12 @@ router.post("/sync", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
-
-    // 🔎 visibility into who flips the plan
-    console.log("[/billing/sync] infer from Shopify", {
-      shop,
-      level,
-      status,
-      subsCount: Array.isArray(subs) ? subs.length : -1,
-    });
-
     await writePlan(shop, level, status);
 
     return res.json({ ok: true, level, status });
   } catch (err) {
     // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
-    if (isUnauthorized(err)) return sendReauth(res, req);
+    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
     // No userErrors here (not a createSubscription path)
     return res.status(500).json({ error: "Sync failed" });
@@ -681,7 +737,7 @@ router.get("/status", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
-    if (isUnauthorized(err)) return sendReauth(res, req);
+    if (err?.status === 401) return sendReauth(res, req);
     console.error("GET /api/billing/status error", err);
     // No userErrors here
     return res.status(500).json({ error: "Status failed" });
@@ -853,6 +909,7 @@ router.post("/downgrade", async (req, res) => {
     return res.status(500).json({ error: "Downgrade failed" });
   }
 });
+
 
 
 export default router;
