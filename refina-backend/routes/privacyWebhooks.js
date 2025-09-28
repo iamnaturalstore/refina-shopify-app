@@ -5,7 +5,7 @@ import { dbAdmin } from "../lib/firestore.js";
 
 const router = express.Router();
 
-// Use raw body for HMAC verification
+// Use raw body for HMAC verification (must be mounted before any JSON parser)
 const rawJson = express.raw({ type: "application/json" });
 
 function verifyShopifyHmacFromRaw(req) {
@@ -15,10 +15,9 @@ function verifyShopifyHmacFromRaw(req) {
     "";
   if (!secret) return false;
 
-  const received = String(req.get("X-Shopify-Hmac-Sha256") || "");
+  const receivedB64 = String(req.get("X-Shopify-Hmac-Sha256") || "");
 
-  // Normalize body to a Buffer (Express raw should already give Buffer,
-  // but be tolerant in case middleware order ever changes)
+  // Normalize body to a Buffer
   let bodyBuf;
   const b = req.body;
   if (Buffer.isBuffer(b)) {
@@ -26,29 +25,26 @@ function verifyShopifyHmacFromRaw(req) {
   } else if (typeof b === "string") {
     bodyBuf = Buffer.from(b, "utf8");
   } else if (b && typeof b === "object") {
-    // Ensure stable JSON (Shopify sends minified JSON)
     bodyBuf = Buffer.from(JSON.stringify(b));
   } else {
     bodyBuf = Buffer.alloc(0);
   }
 
-  const digest = crypto.createHmac("sha256", secret).update(bodyBuf).digest("base64");
+  // Compute raw HMAC bytes and compare to decoded header
+  const digestRaw = crypto.createHmac("sha256", secret).update(bodyBuf).digest(); // <Buffer>
+  const receivedRaw = Buffer.from(receivedB64, "base64");
 
-  // Constant-time compare
-  const recvBuf = Buffer.from(received);
-  const digBuf = Buffer.from(digest);
-  if (recvBuf.length !== digBuf.length) return false;
-  return crypto.timingSafeEqual(recvBuf, digBuf);
+  if (receivedRaw.length !== digestRaw.length) return false;
+  return crypto.timingSafeEqual(receivedRaw, digestRaw);
 }
 
-
-// --- NEW: APP_UNINSTALLED webhook -------------------------------
+// --- APP_UNINSTALLED webhook -----------------------------------
 router.post("/app_uninstalled", rawJson, async (req, res) => {
   try {
     if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
 
-    // Shopify passes shop domain via header; payload also contains it, but header is fine.
-    const shop = req.get("X-Shopify-Shop-Domain") || "";
+    // Shopify passes shop domain via header; payload also contains it
+    const shop = (req.get("X-Shopify-Shop-Domain") || "").toLowerCase();
     if (!shop) {
       console.warn("[Webhook] APP_UNINSTALLED missing shop header");
       return res.sendStatus(400);
@@ -63,7 +59,6 @@ router.post("/app_uninstalled", rawJson, async (req, res) => {
           level: "free",
           status: "NONE",
           updatedAt: Date.now(),
-          // (optional) marker so you know why it flipped:
           _source: "webhook:APP_UNINSTALLED",
         },
         { merge: true }
@@ -78,17 +73,21 @@ router.post("/app_uninstalled", rawJson, async (req, res) => {
 });
 // ---------------------------------------------------------------
 
+// Helpers for safe logging if body isn’t a Buffer
+const asBodyString = (req) =>
+  Buffer.isBuffer(req.body) ? req.body.toString("utf8") : JSON.stringify(req.body);
+
 // POST /api/privacy/customers/data_request
 router.post("/customers/data_request", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
-  console.log("📨 GDPR customers/data_request:", req.body.toString());
+  console.log("📨 GDPR customers/data_request:", asBodyString(req));
   return res.sendStatus(200);
 });
 
 // POST /api/privacy/customers/redact
 router.post("/customers/redact", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
-  console.log("🗑️  GDPR customers/redact:", req.body.toString());
+  console.log("🗑️  GDPR customers/redact:", asBodyString(req));
   // TODO: remove customer PII in your DB if stored
   return res.sendStatus(200);
 });
@@ -96,7 +95,7 @@ router.post("/customers/redact", rawJson, (req, res) => {
 // POST /api/privacy/shop/redact
 router.post("/shop/redact", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
-  console.log("🏪 GDPR shop/redact:", req.body.toString());
+  console.log("🏪 GDPR shop/redact:", asBodyString(req));
   // TODO: remove shop PII in your DB if stored
   return res.sendStatus(200);
 });
