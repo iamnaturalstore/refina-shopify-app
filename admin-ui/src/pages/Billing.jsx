@@ -171,31 +171,24 @@ export default function Billing() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
 
-  // Poll while waiting for Shopify confirmation if user is coming back
-  React.useEffect(() => {
-    const wantRaw = localStorage.getItem(PENDING_KEY);
-    if (!wantRaw) return;
-    const want = normalizeLevel(wantRaw);
-    const have = plan ? normalizeLevel(plan.level) : null;
+  // Poll while waiting for Shopify confirmation if user is coming back (POLL REMOVED)
+// We only do a one-time check: if the plan already matches the pending target, finish up.
+// No setInterval / setTimeout — avoids refresh loops.
+React.useEffect(() => {
+  const wantRaw = localStorage.getItem(PENDING_KEY);
+  if (!wantRaw) return;
 
-    if (have && have === want) {
-      try { localStorage.removeItem(PENDING_KEY); } catch {}
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      setSyncing(false);
-      showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
-      syncFromShopify();
-      return;
-    }
-    if (!syncing) {
-      setSyncing(true);
-      pollRef.current = setInterval(loadPlan, 3000);
-      timeoutRef.current = setTimeout(() => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setSyncing(false);
-      }, 60000);
-    }
-  }, [plan, syncing, loadPlan]);
+  const want = normalizeLevel(wantRaw);
+  const have = plan ? normalizeLevel(plan.level) : null;
+
+  if (have && have === want) {
+    try { localStorage.removeItem(PENDING_KEY); } catch {}
+    setSyncing(false);
+    showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
+    syncFromShopify(); // one-time explicit sync to persist to Firestore
+  }
+}, [plan]); 
+
 
   React.useEffect(() => {
     return () => {
