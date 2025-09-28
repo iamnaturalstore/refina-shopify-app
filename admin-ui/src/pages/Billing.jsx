@@ -18,10 +18,6 @@ import { CheckIcon } from "@shopify/polaris-icons";
 import { api, billingApi } from "../api/client.js";
 import app from "../appBridge";
 import { Redirect } from "@shopify/app-bridge/actions";
-import { buildEmbeddedUrl } from "../api/client"; // adjust relative path if needed
-import { getSessionToken } from "@shopify/app-bridge-utils";
-
-
 
 const PENDING_KEY = "refina:billing:pending";
 
@@ -30,7 +26,7 @@ const PLAN_DETAILS = {
   premium: {
     label: "Premium",
     priceMonthly: "$49/mo",
-    priceAnnualNote: "or $490/yr",
+    priceAnnualNote: "or $490/yr (~2 mo free)",
     tooltip: "Premium — Advanced AI • styling & analytics • priority support",
     ribbon: "Best value",
     features: [
@@ -56,43 +52,7 @@ function labelFromLevel(level) {
 }
 function parsePlanResponse(jsonResponse) {
   const p = jsonResponse?.plan || jsonResponse || {};
-  return {
-    level: normalizeLevel(p.level),
-    status: (p.status || p.state || "unknown").toString(),
-    billingInterval: (p.billingInterval || p.interval || "").toString().toLowerCase(),
-  };
-}
-
-// Extract Shopify reauth headers (Axios lowercases keys) + fallback when headers are missing
-function getReauthInfo(err) {
-  const h = err?.response?.headers || {};
-  const needHdr = String(h["x-shopify-api-request-failure-reauthorize"] || "").trim() === "1";
-  const urlHdr = h["x-shopify-api-request-failure-reauthorize-url"] || "";
-
-  if (needHdr) return { need: true, url: urlHdr };
-
-  // Fallback: plain Error from our api() wrapper (no headers).
-  // If the message suggests 401/403 or an auth/session issue, synthesize a safe /api/auth URL.
-  const msg = String(err?.message || "").toLowerCase();
-  const looksUnauthorized = /\b(401|403)\b/.test(msg) || /reauthoriz|unauth|forbid|token|session/.test(msg);
-
-  if (looksUnauthorized) {
-    // buildEmbeddedUrl adds host/shop automatically from persisted context
-    const to = buildEmbeddedUrl("/api/auth");
-    return { need: true, url: to };
-    }
-
-  return { need: false, url: "" };
-}
-
-function redirectTop(urlOrPath = "/", extra = {}) {
-  const url = buildEmbeddedUrl(urlOrPath, extra);
-  try {
-    const redirect = Redirect.create(app);
-    redirect.dispatch(Redirect.Action.REMOTE, url);
-  } catch {
-    try { window.top.location.href = url; } catch { window.location.href = url; }
-  }
+  return { level: normalizeLevel(p.level), status: (p.status || p.state || "unknown").toString() };
 }
 
 export default function Billing() {
@@ -102,7 +62,6 @@ export default function Billing() {
   const [error, setError] = React.useState("");
   const [toast, setToast] = React.useState("");
   const [syncing, setSyncing] = React.useState(false);
-  const [reauthUrl, setReauthUrl] = React.useState(""); // show reauth banner when present
   const pollRef = React.useRef(null);
   const timeoutRef = React.useRef(null);
 
@@ -110,33 +69,21 @@ export default function Billing() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
-  // ── APPROVED DIFF: local App Bridge fetch wrapper for billing endpoints ──
-  async function abFetch(url, init = {}) {
-    const token = await getSessionToken(app);
-    const headers = new Headers(init.headers || {});
-    headers.set("Authorization", `Bearer ${token}`);
-    if (init.body && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    return fetch(url, { ...init, headers });
-  }
-
   const loadPlan = React.useCallback(async () => {
     setError("");
-    setReauthUrl("");
     setLoading(true);
     try {
-      // ✅ Read Firestore-backed plan (no fresh) — avoids 401 loops on cold sessions
-      // APPROVED DIFF: use abFetch instead of axios client
-      const resp = await abFetch(`/api/billing/plan`);
-      const data = await resp.json();
+      // Canonical: read Firestore-backed plan, forcing a fresh sync with Shopify
+      const { data } = await billingApi.getPlan({ fresh: true });
       setPlan(parsePlanResponse(data));
     } catch (e) {
-      console.error("[Billing] GET /api/billing/plan failed:", e);
-      const { need, url } = getReauthInfo(e);
-      if (need && url) {
-        setReauthUrl(url);
-      } else {
+      console.error("[Billing] /api/billing/plan?fresh=1 failed:", e);
+      // Soft fallback (non-fresh)
+      try {
+        const { data: json } = await billingApi.getPlan({ fresh: false });
+        setPlan(parsePlanResponse(json));
+      } catch (e2) {
+        console.error("[Billing] /api/billing/plan fallback failed:", e2);
         setError("Failed to load current plan.");
         setPlan(null);
       }
@@ -145,32 +92,8 @@ export default function Billing() {
     }
   }, []);
 
-  // Manual sync from Shopify (triggers offline session read; may reauth)
-  async function syncFromShopify() {
-    setError("");
-    setReauthUrl("");
-    setBusy(true);
-    try {
-      // APPROVED DIFF: use abFetch
-      await abFetch(`/api/billing/sync`, { method: "POST" }); // backend writes plans/{shop}
-      await loadPlan();
-      showToast("Plan synced from Shopify");
-    } catch (e) {
-      console.error("[Billing] POST /api/billing/sync failed:", e);
-      const { need, url } = getReauthInfo(e);
-      if (need && url) {
-        setReauthUrl(url);
-      } else {
-        setError("Could not sync plan from Shopify.");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
   React.useEffect(() => {
     loadPlan();
-
     // If we just returned from the Shopify confirmation page
     const u = new URL(window.location.href);
     if (u.searchParams.get("billing") === "success") {
@@ -178,38 +101,67 @@ export default function Billing() {
       showToast("Plan updated 🎉");
       u.searchParams.delete("billing");
       window.history.replaceState({}, "", u.toString());
-      // Ask Shopify for latest (explicit sync)
-      syncFromShopify();
+      // Ensure a fresh reflect immediately after return
+      loadPlan();
     }
-
     const onVis = () => { if (document.visibilityState === "visible") loadPlan(); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [loadPlan]);
 
-  async function subscribe(which /* "premium" */, interval /* "monthly" | "annual" */) {
+  React.useEffect(() => {
+    const wantRaw = localStorage.getItem(PENDING_KEY);
+    if (!wantRaw) return;
+    const want = normalizeLevel(wantRaw);
+    const have = plan ? normalizeLevel(plan.level) : null;
+
+    if (have && have === want) {
+      try { localStorage.removeItem(PENDING_KEY); } catch {}
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      setSyncing(false);
+      showToast(`Plan updated to ${labelFromLevel(have)} 🎉`);
+      // Final fresh read to capture any delayed Shopify proration updates
+      loadPlan();
+      return;
+    }
+    if (!syncing) {
+      setSyncing(true);
+      pollRef.current = setInterval(loadPlan, 3000);
+      timeoutRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setSyncing(false);
+      }, 60000);
+    }
+  }, [plan, syncing, loadPlan]);
+
+  React.useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  async function subscribe(which /* "premium" */) {
     try {
-      setBusy(true); setError(""); setReauthUrl("");
+      setBusy(true); setError("");
       const sep = window.location.href.includes("?") ? "&" : "?";
       const returnUrl = `${window.location.href}${sep}billing=success`;
-      // APPROVED DIFF: use abFetch and only send { interval }.
-      const resp = await abFetch(`/api/billing/upgrade`, {
-        method: "POST",
-        body: JSON.stringify({ interval }), // server computes returnUrl
-      });
-      const json = await resp.json();
+      // Use the upgrade endpoint; backend reads returnUrl explicitly here
+      const { data: json } = await billingApi.upgrade({ returnUrl });
       const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
-      redirectTop(url); // App Bridge top-frame redirect
+      // App Bridge top-frame redirect (canonical for embedded apps)
+      try {
+        const redirect = Redirect.create(app);
+        redirect.dispatch(Redirect.Action.REMOTE, url);
+      } catch {
+        try { window.top.location.href = url; } catch { window.location.href = url; }
+      }
     } catch (e) {
       console.error("[Billing] Upgrade failed:", e);
-      const { need, url } = getReauthInfo(e);
-      if (need && url) {
-        setReauthUrl(url);
-      } else {
-        setError(e?.message || "Upgrade failed");
-      }
+      setError(e?.message || "Upgrade failed");
     } finally {
       setBusy(false);
     }
@@ -217,43 +169,31 @@ export default function Billing() {
 
   async function downgrade() {
     try {
-      setBusy(true); setError(""); setReauthUrl("");
-      // APPROVED DIFF: use abFetch
-      const resp = await abFetch(`/api/billing/downgrade`, { method: "POST" });
-      const data = await resp.json();
+      setBusy(true); setError("");
+      const { data } = await api.post("/api/billing/downgrade", {});
       if (!data?.ok && !data?.canceled) throw new Error(data?.error || "Downgrade failed");
-      await syncFromShopify();
+      // Force a fresh reflect of current plan
+      try { await api.post("/api/billing/sync", {}); } catch {}
+      await loadPlan();
       showToast("Downgrade complete. You are now on the Free plan.");
     } catch (e) {
       console.error("[Billing] Downgrade failed:", e);
-      const { need, url } = getReauthInfo(e);
-      if (need && url) {
-        setReauthUrl(url);
-      } else {
-        setError(e?.message || "Downgrade failed");
-      }
+      setError(e?.message || "Downgrade failed");
     } finally {
       setBusy(false);
     }
   }
 
   const currentLevel = plan ? normalizeLevel(plan.level) : null;
-  const currentInterval = (plan?.billingInterval || "").toLowerCase();
   const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
   const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
   const isPremium = currentLevel === "premium";
 
   if (loading) {
     return (
-      <Box padding="400">
-        <InlineStack gap="200" blockAlign="center">
-          <Spinner size="small" />
-          <Text as="p">Loading billing details...</Text>
-        </InlineStack>
-      </Box>
+      <Box padding="400"><InlineStack gap="200" blockAlign="center"><Spinner size="small" /><Text as="p">Loading billing details...</Text></InlineStack></Box>
     );
   }
-
 
   function PlanTile({ id, meta, current, onChoose }) {
     const isCurrent = current === id;
@@ -289,23 +229,13 @@ export default function Billing() {
 
           <Divider />
 
-          <InlineStack gap="200" align="start">
+          <InlineStack>
             <Button
               variant="primary"
               disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id, "monthly")}
+              onClick={() => onChoose(id)}
             >
-              {isCurrent && currentInterval === "monthly"
-                ? `Current (Monthly)`
-                : busy ? "Opening…" : `Choose Monthly`}
-            </Button>
-            <Button
-              disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id, "annual")}
-            >
-              {isCurrent && currentInterval === "annual"
-                ? `Current (Annual)`
-                : busy ? "Opening…" : `Choose Annual`}
+              {isCurrent ? `Current Plan` : busy ? "Opening…" : `Choose ${meta.label}`}
             </Button>
           </InlineStack>
         </BlockStack>
@@ -315,36 +245,13 @@ export default function Billing() {
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
-      {reauthUrl && (
-        <Box paddingBlockEnd="400">
-          <Banner
-            tone="info"
-            title="Please re-authorize to manage billing"
-            action={{ content: "Re-authorize", onAction: () => redirectTop(reauthUrl) }}
-            onDismiss={() => setReauthUrl("")}
-          >
-            <p>Shopify asked us to refresh your app session before continuing.</p>
-          </Banner>
-        </Box>
-      )}
-
-      {error && (
-        <Box paddingBlockEnd="400">
-          <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}>
-            <p>{error}</p>
-          </Banner>
-        </Box>
-      )}
-
       <Card>
         <BlockStack gap="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Billing</Text>
             <Tooltip content={isPremium ? premiumMeta.tooltip : ""}>
               <Badge tone={isPremium ? "success" : "subdued"}>
-                {currentLabel || "—"}
-                {isPremium && currentInterval && <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>}
-                {currentStatus && <>&nbsp;{currentStatus}</>}
+                {currentLabel || "—"} {currentStatus && <>&nbsp;{currentStatus}</>}
               </Badge>
             </Tooltip>
           </InlineStack>
@@ -355,16 +262,15 @@ export default function Billing() {
                 {`You’re on the ${currentLabel || "Free"} plan`}
               </Text>
               <Text as="p" tone="subdued">
-                After approving a charge, click “Sync from Shopify” or wait a moment for confirmation.
+                After approving a charge, click “Refresh” or wait a moment for Shopify to confirm the change.
               </Text>
             </BlockStack>
-            <InlineStack gap="200">
-              <Button onClick={loadPlan} disabled={busy}>Refresh</Button>
-              <Button variant="primary" onClick={syncFromShopify} loading={busy}>
-                Sync from Shopify
-              </Button>
-            </InlineStack>
+            <Button onClick={loadPlan} loading={loading || busy}>
+              Refresh
+            </Button>
           </InlineStack>
+
+          {error && <Banner tone="critical" title="Billing error" onDismiss={() => setError("")}><p>{error}</p></Banner>}
 
           <InlineStack gap="400" wrap>
             <Box minWidth="320px" maxWidth="520px" width="100%">
