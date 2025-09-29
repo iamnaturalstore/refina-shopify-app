@@ -177,6 +177,29 @@ async function ensureOfflineSession(shop) {
     throw err;
   }
 
+  async function purgeOfflineSession(shop) {
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
+
+  if (!storage?.deleteSession) return;
+
+  // Try all known offline ids we might have used
+  const ids = [];
+  try { if (shopify?.session?.getOfflineId) ids.push(shopify.session.getOfflineId(shop)); } catch {}
+  try { if (shopify?.api?.session?.getOfflineId) ids.push(shopify.api.session.getOfflineId(shop)); } catch {}
+  ids.push(`offline_${shop}`);
+
+  const seen = new Set();
+  for (const id of ids) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    try { await storage.deleteSession(id); } catch {}
+  }
+}
+
+
   // Try multiple candidate IDs for the offline session across SDK versions
   const candidates = [];
   try {
@@ -782,11 +805,12 @@ router.get("/status", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req);
-    console.error("GET /api/billing/status error", err);
-    // No userErrors here
-    return res.status(500).json({ error: "Status failed" });
+  if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
+    return sendReauth(res, req);
   }
+  console.error("GET /api/billing/status error", err);
+  return res.status(500).json({ error: "Status failed" });
+}
 });
 
 // add this tiny helper once (above the route or near other helpers)
@@ -929,7 +953,6 @@ router.post("/downgrade", async (req, res) => {
     for (const id of activeIds) {
       const { canceled: c, userErrors } = await cancelSubscription(client, id, true);
       if (userErrors?.length) {
-        // Surface first error (usually enough context for UI)
         return res.status(400).json({
           error: "CANCEL_FAILED",
           message: userErrors.map((u) => u?.message || "Cancel failed").join("; "),
@@ -943,10 +966,15 @@ router.post("/downgrade", async (req, res) => {
     await writePlan(shop, "free", "NONE");
     return res.json({ ok: true, canceled });
   } catch (err) {
-    if (err?.status === 401) {
-      // Ask the client to reauth and come back to Billing
+    // 🔑 NEW: handle GraphQL 401s the same way as local reauth,
+    // and purge the stale offline token so the next OAuth is clean.
+    if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
+      const shopParam = String(req.query?.shop || "");
+      if (shopParam) {
+        try { await purgeOfflineSession(shopParam); } catch {}
+      }
       return sendReauth(res, req, {
-        shop: String(req.query?.shop || ""),
+        shop: shopParam,
         return_to: encodeURIComponent("/admin-ui/billing"),
       });
     }
@@ -954,6 +982,7 @@ router.post("/downgrade", async (req, res) => {
     return res.status(500).json({ error: "Downgrade failed" });
   }
 });
+
 
 
 

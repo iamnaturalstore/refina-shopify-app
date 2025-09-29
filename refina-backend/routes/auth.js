@@ -47,9 +47,47 @@ function storeFromShop(shop) {
   return String(shop || "").toLowerCase().replace(/\.myshopify\.com$/, "");
 }
 
-/* ── NEW: register APP_UNINSTALLED webhook helper ───────────────────────── */
+/* ── NEW: register APP_UNINSTALLED webhook helper (idempotent) ──────────── */
 async function registerAppUninstalledWebhook(client, webhookUrl) {
-  const MUT = `
+  if (!webhookUrl) {
+    console.warn("[Webhook] register APP_UNINSTALLED skipped: missing webhookUrl");
+    return;
+  }
+
+  // 1) List existing APP_UNINSTALLED webhooks and no-op if our URL already exists
+  const LIST_Q = `
+    query {
+      webhookSubscriptions(first: 50, topics: [APP_UNINSTALLED]) {
+        edges { node { id topic endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } } } }
+      }
+    }
+  `;
+  try {
+    const listResp = typeof client.request === "function"
+      ? await client.request(LIST_Q)
+      : await client.query({ data: { query: LIST_Q } });
+
+    const listData = listResp?.data || listResp?.body?.data || listResp;
+    const existing = (listData?.webhookSubscriptions?.edges || [])
+      .map(e => e?.node)
+      .filter(Boolean);
+
+    const already = existing.find(w => w?.endpoint?.callbackUrl === webhookUrl);
+    if (already) {
+      if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+        console.log("[Webhook] APP_UNINSTALLED already registered:", already);
+      }
+      return; // idempotent
+    }
+  } catch (e) {
+    // Non-fatal: we'll try to create below
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.warn("[Webhook] list APP_UNINSTALLED failed (non-fatal):", e?.message || e);
+    }
+  }
+
+  // 2) Create webhook if not present
+  const CREATE_MUT = `
     mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
       webhookSubscriptionCreate(
         topic: $topic,
@@ -66,16 +104,16 @@ async function registerAppUninstalledWebhook(client, webhookUrl) {
   `;
   const variables = { topic: "APP_UNINSTALLED", callbackUrl: webhookUrl };
 
-  const resp = typeof client.request === "function"
-    ? await client.request(MUT, { variables })
-    : await client.query({ data: { query: MUT, variables } });
+  const createResp = typeof client.request === "function"
+    ? await client.request(CREATE_MUT, { variables })
+    : await client.query({ data: { query: CREATE_MUT, variables } });
 
-  const data = resp?.data || resp?.body?.data || resp;
-  const errs = data?.webhookSubscriptionCreate?.userErrors || [];
+  const createData = createResp?.data || createResp?.body?.data || createResp;
+  const errs = createData?.webhookSubscriptionCreate?.userErrors || [];
   if (errs.length) {
     console.warn("[Webhook] register APP_UNINSTALLED userErrors:", errs);
   } else {
-    const ws = data?.webhookSubscriptionCreate?.webhookSubscription;
+    const ws = createData?.webhookSubscriptionCreate?.webhookSubscription;
     console.log("[Webhook] registered APP_UNINSTALLED:", ws);
   }
 }
@@ -208,6 +246,17 @@ router.get("/callback", async (req, res) => {
 
     const shop = session.shop;
     const store = storeFromShop(shop);
+
+    // ⬇️ Register APP_UNINSTALLED after obtaining the OFFLINE session
+    try {
+      const client = getGraphqlClient(session); // session is offline because begin() used isOnline:false
+      const base = (process.env.APP_URL || process.env.HOST || "").replace(/\/$/, "");
+      if (base) {
+        await registerAppUninstalledWebhook(client, `${base}/api/privacy/app_uninstalled`);
+      }
+    } catch (e) {
+      console.warn("[OAuth] register APP_UNINSTALLED failed (non-fatal):", e?.message || e);
+    }
 
     // ────────────────────────────────────────────────────────────────
     // Fire-and-forget tasks (do not block redirect):

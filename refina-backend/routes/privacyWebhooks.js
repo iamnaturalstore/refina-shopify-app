@@ -43,39 +43,75 @@ function verifyShopifyHmacFromRaw(req) {
 
 
 // --- NEW: APP_UNINSTALLED webhook -------------------------------
+
+/** Purge offline session(s) for a shop across SDK shapes/id variants */
+async function purgeOfflineSession(shop) {
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
+
+  if (!storage?.deleteSession) return;
+
+  const candidateIds = [];
+  try { if (shopify?.session?.getOfflineId) candidateIds.push(shopify.session.getOfflineId(shop)); } catch {}
+  try { if (shopify?.api?.session?.getOfflineId) candidateIds.push(shopify.api.session.getOfflineId(shop)); } catch {}
+  candidateIds.push(`offline_${shop}`);
+
+  const seen = new Set();
+  for (const id of candidateIds) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    try { await storage.deleteSession(id); } catch {}
+  }
+}
+
 router.post("/app_uninstalled", rawJson, async (req, res) => {
   try {
     if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
 
-    // Shopify passes shop domain via header; payload also contains it, but header is fine.
-    const shop = req.get("X-Shopify-Shop-Domain") || "";
+    // Prefer the header; normalize to full myshopify domain
+    const hdr = String(req.get("X-Shopify-Shop-Domain") || "").trim().toLowerCase();
+    const shop = hdr.endsWith(".myshopify.com") ? hdr : (hdr ? `${hdr}.myshopify.com` : "");
     if (!shop) {
-      console.warn("[Webhook] APP_UNINSTALLED missing shop header");
+      console.warn("[Webhook] APP_UNINSTALLED missing/invalid shop header");
       return res.sendStatus(400);
     }
 
-    // Reset cached plan so a fresh install starts clean
-    await dbAdmin
-      .collection("plans")
-      .doc(shop)
-      .set(
-        {
-          level: "free",
-          status: "NONE",
-          updatedAt: Date.now(),
-          // (optional) marker so you know why it flipped:
-          _source: "webhook:APP_UNINSTALLED",
-        },
-        { merge: true }
-      );
+    // 1) Flip plan → Free/NONE (server timestamp for audit)
+    await dbAdmin.collection("plans").doc(shop).set(
+      {
+        level: "free",
+        status: "NONE",
+        updatedAt: FieldValue.serverTimestamp(),
+        _source: "webhook:APP_UNINSTALLED",
+      },
+      { merge: true }
+    );
 
-    console.log(`✅ APP_UNINSTALLED handled for ${shop} → plans/${shop} set to free/NONE`);
+    // 2) Purge offline session(s) so next install is a clean OAuth
+    try { await purgeOfflineSession(shop); } catch (e) {
+      console.warn(`[Webhook] purgeOfflineSession failed for ${shop}:`, e?.message || e);
+    }
+
+    // 3) (Optional) Clear install-scoped data you want reset on uninstall.
+    //    KEEP this fast—webhooks time out quickly. If heavy, queue a job instead.
+    // try {
+    //   await dbAdmin.collection("storeSettings").doc(shop).delete();   // if desired
+    //   await dbAdmin.collection("conversations").doc(shop).delete();   // if desired
+    //   // ...any other per-install caches
+    // } catch (e) {
+    //   console.warn(`[Webhook] optional cleanup failed for ${shop}:`, e?.message || e);
+    // }
+
+    console.log(`✅ APP_UNINSTALLED handled for ${shop}: plan→free/NONE, sessions purged`);
     return res.sendStatus(200);
   } catch (err) {
     console.error("[Webhook] APP_UNINSTALLED handler error", err);
     return res.sendStatus(500);
   }
 });
+
 // ---------------------------------------------------------------
 
 // POST /api/privacy/customers/data_request
