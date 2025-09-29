@@ -1,5 +1,5 @@
 // refina-backend/routes/recommend.js
-// Thin adapter with embeddings via SDK **also forced to v1** (same endpoint trick).
+// Thin adapter with embeddings via SDK (lazy-init; no module-scope client).
 
 import express from "express";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -9,24 +9,6 @@ import { ConciergeResponseSchema } from "../ai/jsonSchemas.js";
 import { validateConciergeResponse } from "../ai/validateConcierge.js";
 import { normConcern, expandConcernToIngredients, getIngredientFacts } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
-
-const API_KEY =
-  process.env.GEMINI_API_KEY ||
-  process.env.GOOGLE_API_KEY ||
-  "";
-const API_ENDPOINT =
-  process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
-
-// Embeddings SDK client (force v1 endpoint). Backward-compatible ctor fallback.
-let genAIEmb = null;
-try {
-  genAIEmb = API_KEY ? new GoogleGenerativeAI({ apiKey: API_KEY, apiEndpoint: API_ENDPOINT }) : null;
-} catch {
-  genAIEmb = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
-  if (API_KEY) {
-    console.warn("[Gemini:embed] SDK initialized without apiEndpoint (old SDK). Please upgrade @google/generative-ai.");
-  }
-}
 
 // ─── Utils ───────────────────────────────────────────────────────────────────
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; }
@@ -51,9 +33,26 @@ function pickPrimaryImage(p, storeId) {
   return ensureAbsolute(candidate, storeId);
 }
 
+// Lazy-init embeddings client at call time to avoid env timing issues
 async function embedText(text) {
-  if (!genAIEmb) return [];
-  const model = genAIEmb.getGenerativeModel({ model: "text-embedding-004" });
+  const apiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    "";
+  if (!apiKey) return []; // maintain graceful fallback semantics
+
+  const apiEndpoint =
+    process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
+
+  let client;
+  try {
+    client = new GoogleGenerativeAI({ apiKey, apiEndpoint });
+  } catch {
+    // Fallback for older SDK signatures
+    client = new GoogleGenerativeAI(apiKey);
+  }
+
+  const model = client.getGenerativeModel({ model: "text-embedding-004" });
   const res = await model.embedContent(String(text || ""));
   return res?.embedding?.values || [];
 }
