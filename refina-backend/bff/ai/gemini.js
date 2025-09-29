@@ -1,6 +1,5 @@
 // refina-backend/bff/ai/gemini.js
-// SDK-only implementation (no REST). Returns the **raw model text** (STRICT JSON per your prompt).
-// Exported API surface stays the same: callGemini(prompt, genConfig)
+// SDK-only, forced to v1 endpoint. No REST. Returns STRICT-JSON text or null.
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
@@ -9,12 +8,25 @@ const API_KEY =
   process.env.GOOGLE_API_KEY ||
   "";
 
+const API_ENDPOINT =
+  process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
+
 if (!API_KEY) {
   console.warn("[Gemini] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
 }
 
-// Singleton SDK client
-const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+// Build a singleton SDK client, preferring the { apiKey, apiEndpoint } signature if supported.
+let genAI = null;
+try {
+  // Newer SDKs accept an options object with apiEndpoint; this forces v1 (not v1beta).
+  genAI = new GoogleGenerativeAI({ apiKey: API_KEY, apiEndpoint: API_ENDPOINT });
+  console.log("[Gemini] SDK initialized with explicit apiEndpoint:", API_ENDPOINT);
+} catch {
+  // Older SDKs only accept the API key string; constructor will pick its internal default.
+  // We still proceed, but you should upgrade the SDK to ensure v1 endpoint usage.
+  genAI = new GoogleGenerativeAI(API_KEY);
+  console.warn("[Gemini] SDK initialized without apiEndpoint (old SDK). Please upgrade @google/generative-ai.");
+}
 
 /**
  * Low-level structured caller. Returns model **text** (string) or null on failure.
@@ -59,13 +71,13 @@ export async function callGeminiStructured({
       ? { role: "system", parts: [{ text: String(system) }] }
       : undefined;
 
+  // Note: Some SDK versions accept generationConfig in the model ctor, others merge at call time.
   const modelClient = genAI.getGenerativeModel({
     model: mdl,
     ...(systemInstruction ? { systemInstruction } : {}),
     generationConfig,
   });
 
-  // Abort controller for timeout
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
 
@@ -76,7 +88,6 @@ export async function callGeminiStructured({
     );
     clearTimeout(timer);
 
-    // SDK returns text in parts even with JSON mode enabled
     const text = result?.response?.text?.();
     const out = typeof text === "string" ? text.trim() : "";
     return out || null;
@@ -88,10 +99,6 @@ export async function callGeminiStructured({
   }
 }
 
-/**
- * Thin wrapper used by routes and workers.
- * genConfig may include: { model, temperature, topP, maxOutputTokens, timeoutMs, responseMimeType, responseSchema, system }
- */
 export function callGemini(prompt, genConfig = {}) {
   return callGeminiStructured({
     prompt,

@@ -1,6 +1,5 @@
 // refina-backend/routes/recommend.js
-// Thin adapter that unifies: embeddings → shortlist → concierge prompt → Gemini JSON → { productIds, products, explanation }
-// Uses SDK for generation (via bff/ai/gemini.js). No REST. No legacy scoredMatches.
+// Thin adapter with embeddings via SDK **also forced to v1** (same endpoint trick).
 
 import express from "express";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -11,13 +10,23 @@ import { validateConciergeResponse } from "../ai/validateConcierge.js";
 import { normConcern, expandConcernToIngredients, getIngredientFacts } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
-// Embeddings (SDK)
-const EMB_API_KEY =
+const API_KEY =
   process.env.GEMINI_API_KEY ||
   process.env.GOOGLE_API_KEY ||
   "";
+const API_ENDPOINT =
+  process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
 
-const genAIEmb = EMB_API_KEY ? new GoogleGenerativeAI(EMB_API_KEY) : null;
+// Embeddings SDK client (force v1 endpoint). Backward-compatible ctor fallback.
+let genAIEmb = null;
+try {
+  genAIEmb = API_KEY ? new GoogleGenerativeAI({ apiKey: API_KEY, apiEndpoint: API_ENDPOINT }) : null;
+} catch {
+  genAIEmb = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
+  if (API_KEY) {
+    console.warn("[Gemini:embed] SDK initialized without apiEndpoint (old SDK). Please upgrade @google/generative-ai.");
+  }
+}
 
 // ─── Utils ───────────────────────────────────────────────────────────────────
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; }
@@ -65,8 +74,7 @@ async function loadProductsByIds(storeId, ids) {
   return out;
 }
 
-// Pre-filter: cap candidate set by strictness (+ light productType bias could be added later)
-function shortlistCandidates(embeds, qVec, strictness, concernText) {
+function shortlistCandidates(embeds, qVec, strictness) {
   const scored = embeds
     .map((e) => ({ ...e, sim: cosine(qVec, e.vector || []) }))
     .sort((a, b) => b.sim - a.sim);
@@ -78,10 +86,6 @@ function shortlistCandidates(embeds, qVec, strictness, concernText) {
 // ─── Router ──────────────────────────────────────────────────────────────────
 const router = express.Router();
 
-/**
- * POST /api/recommend
- * body: { storeId, concern, userContext? }
- */
 router.post("/recommend", async (req, res) => {
   const started = Date.now();
   try {
@@ -108,11 +112,10 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    const candidates = shortlistCandidates(allEmb, qVec, strictness, lc(concern));
+    const candidates = shortlistCandidates(allEmb, qVec, strictness);
     const candidateIds = candidates.map((c) => c.id);
     const candidateDocs = await loadProductsByIds(storeId, candidateIds);
 
-    // Shape down products for the prompt (enriched fields expected by PromptBuilder)
     const promptProducts = candidateDocs.map((p) =>
       pick(
         {
@@ -160,12 +163,10 @@ router.post("/recommend", async (req, res) => {
       )
     );
 
-    // Ingredient knowledge pack for the concern
     const concernNorm = normConcern(concern);
     const ingSlugs = await expandConcernToIngredients(concernNorm);
     const ingredientFacts = await getIngredientFacts(ingSlugs);
 
-    // Build prompt with concierge builder
     const prompt = buildGeminiPrompt({
       concern,
       normalizedConcern: concernNorm,
@@ -173,10 +174,8 @@ router.post("/recommend", async (req, res) => {
       tone,
       products: promptProducts,
       ingredientFacts,
-      // rankMode / routineMode / constraints can be plumbed from settings later if needed
     });
 
-    // Call Gemini (SDK via wrapper) in JSON mode with the Concierge schema
     const raw = await callGemini(prompt, {
       responseMimeType: "application/json",
       responseSchema: ConciergeResponseSchema,
@@ -184,10 +183,8 @@ router.post("/recommend", async (req, res) => {
       model: process.env.GEMINI_MODEL || "gemini-1.5-flash-latest",
     });
 
-    // Validate & normalize
     const vr = validateConciergeResponse(raw);
     if (!vr.ok) {
-      // Fallback: neutral copy, no picks
       return res.json({
         productIds: [],
         products: [],
@@ -196,11 +193,9 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Intersect with available candidate docs and cap top-3
     const allow = new Set(candidateDocs.map((p) => String(p.id)));
     const productIds = vr.value.productIds.filter((id) => allow.has(String(id))).slice(0, 3);
 
-    // Enrich response product cards
     const enrichedDocs = await loadProductsByIds(storeId, productIds);
     const products = enrichedDocs.map((p) => {
       const title = p.title || p.name || "";
