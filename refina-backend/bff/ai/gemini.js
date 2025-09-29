@@ -5,7 +5,8 @@
 
 import { setTimeout as sleep } from "timers/promises";
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1";
+const API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
+const API_BASE = `https://generativelanguage.googleapis.com/${API_VERSION}`;
 
 /**
  * Low-level caller. Returns model **text** (string) or null on failure.
