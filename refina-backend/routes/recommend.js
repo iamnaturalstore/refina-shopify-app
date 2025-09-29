@@ -1,6 +1,7 @@
 // refina-backend/routes/recommend.js
 import express from "express";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { callGemini } from "../bff/ai/gemini.js"; // centralized v1 client + model selection
+import { GoogleGenerativeAI } from "@google/generative-ai"; // ← needed for embeddings only
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import admin from "firebase-admin";
 import path from "node:path";
@@ -249,9 +250,9 @@ router.post("/recommend", async (req, res) => {
     // 2) Gemini ranking
     const promptBody = buildGeminiPrompt({ concern, category, tone, products: promptProducts });
     const finalPrompt = `${promptBody}\n\n${CONTRACT}`.trim();
-    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-1.5-flash-lite", generationConfig: { responseMimeType: "application/json" } });
-    const result = await model.generateContent(finalPrompt);
-    const raw = result.response.text().trim();
+    const raw = String(
+      await callGemini(finalPrompt, { responseMimeType: "application/json" })
+    ).trim();
 
     // Parse JSON (sometimes models return fences, sometimes not)
     const json = (() => {
