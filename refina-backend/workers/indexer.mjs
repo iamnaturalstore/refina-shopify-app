@@ -227,6 +227,55 @@ function dedupeEntities(list) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// KB derivation + write
+// ─────────────────────────────────────────────────────────────
+function deriveKbFromExtraction(product, extraction) {
+  const ents = Array.isArray(extraction?.entities) ? extraction.entities : [];
+  const getByType = (t) =>
+    ents
+      .filter((e) => String(e.type || "").toLowerCase().includes(t))
+      .map((e) => e.name)
+      .filter(Boolean);
+  const ingredients = uniq(getByType("ingredient")).slice(0, 24);
+  const effects = uniq(
+    getByType("benefit").concat(getByType("purpose")).concat(getByType("effect"))
+  ).slice(0, 24);
+  const tags = Array.isArray(product.tags)
+    ? product.tags
+    : typeof product.tags === "string"
+    ? product.tags.split(",").map((s) => s.trim())
+    : [];
+  const keywords = uniq([...tags.slice(0, 16), ...ents.map((e) => e.name)]).slice(0, 24);
+  const productType = product.productType || "";
+  const productType_norm =
+    product.productType_norm || product.productTypeNormalized || productType.toLowerCase();
+  const usageStep = product.usageStep || product.step || "";
+
+  return {
+    productType,
+    productType_norm,
+    ingredients,
+    benefits: effects,
+    keywords,
+    usageStep,
+  };
+}
+
+async function upsertKbProduct({ storeId, product, extraction }) {
+  const kb = deriveKbFromExtraction(product, extraction);
+  const ref = db.doc(`kb/${storeId}/products/${product.id}`);
+  await ref.set(
+    {
+      ...kb,
+      modelVersion: String(GENCFG.model || "").trim() || "unknown",
+      schemaVersion: 1,
+      lastEnrichedAt: nowTs(),
+    },
+    { merge: true }
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Firestore writes (idempotent + batched)
 // ─────────────────────────────────────────────────────────────
 async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
@@ -401,6 +450,8 @@ function pLimit(n) {
                 productId: p.id,
                 extraction: { product: { id: String(p.id) }, ...base },
               });
+              // KB from baseline (thin but better than nothing)
+              await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
               processed++; wrote++;
             }
           }
@@ -409,6 +460,7 @@ function pLimit(n) {
         processed++;
         if (COMMIT) {
           await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value });
+          await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
           wrote++;
         }
       }));
@@ -442,10 +494,14 @@ function pLimit(n) {
             process.exit(0);
           }
         }
+        await upsertKbProduct({ storeId: STORE, product, extraction: base });
         console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
         process.exit(2);
       }
-      if (COMMIT) await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value });
+      if (COMMIT) {
+        await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value });
+        await upsertKbProduct({ storeId: STORE, product, extraction: r.value });
+      }
       console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));
     } else {
       throw new Error(`unknown mode: ${MODE}`);

@@ -24,7 +24,7 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export async function callGeminiStructured({
   prompt,
   model,
-  timeoutMs = 8000,
+  timeoutMs = 15000,
   temperature,
   topP,
   maxOutputTokens,
@@ -120,7 +120,7 @@ export function callGemini(prompt, genConfig = {}) {
     temperature: genConfig?.temperature,
     topP: genConfig?.topP,
     maxOutputTokens: genConfig?.maxOutputTokens,
-    timeoutMs: genConfig?.timeoutMs ?? 8000,
+    timeoutMs: genConfig?.timeoutMs ?? 15000,
     responseMimeType: genConfig?.responseMimeType ?? "application/json",
     responseSchema: genConfig?.responseSchema,
     system: genConfig?.system
