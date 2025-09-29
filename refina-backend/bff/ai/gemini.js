@@ -11,9 +11,6 @@ const API_BASE = `https://generativelanguage.googleapis.com/${API_VERSION}`;
 console.log('[Gemini] resolved API_VERSION:', process.env.GEMINI_API_VERSION || 'v1');
 console.log('[Gemini] model:', process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME);
 
-const pkg = await import('@google/generative-ai/package.json', { assert: { type: 'json' } });
-console.log('[Gemini] SDK version:', pkg.default?.version || pkg.version);
-
 /**
  * Low-level caller. Returns model **text** (string) or null on failure.
  *
