@@ -1,15 +1,21 @@
 // refina-backend/routes/privacyWebhooks.js
 import express from "express";
 import crypto from "crypto";
-import shopify from "../shopify.js";
-import { dbAdmin, FieldValue } from "../lib/firestore.js";
+import shopify from "../shopify.js"; // ✅ needed for purgeOfflineSession
+import { dbAdmin, FieldValue } from "../lib/firestore.js"; // ✅ FieldValue required
 
 const router = express.Router();
+
+// Use raw body for HMAC verification
 const rawJson = express.raw({ type: "application/json" });
 
 function verifyShopifyHmacFromRaw(req) {
-  const secret = process.env.SHOPIFY_API_SECRET || process.env.SHOPIFY_API_SECRET_KEY || "";
+  const secret =
+    process.env.SHOPIFY_API_SECRET ||
+    process.env.SHOPIFY_API_SECRET_KEY ||
+    "";
   if (!secret) return false;
+
   const received = String(req.get("X-Shopify-Hmac-Sha256") || "");
 
   let bodyBuf;
@@ -20,31 +26,35 @@ function verifyShopifyHmacFromRaw(req) {
   else bodyBuf = Buffer.alloc(0);
 
   const digest = crypto.createHmac("sha256", secret).update(bodyBuf).digest("base64");
+
   const recvBuf = Buffer.from(received);
   const digBuf = Buffer.from(digest);
   if (recvBuf.length !== digBuf.length) return false;
   return crypto.timingSafeEqual(recvBuf, digBuf);
 }
 
-/** Purge offline session(s) for a shop */
+/** Purge offline session(s) for a shop across SDK shapes/id variants */
 async function purgeOfflineSession(shop) {
-  const storage = (shopify?.config && shopify.config.sessionStorage) || shopify?.sessionStorage || null;
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
   if (!storage?.deleteSession) return;
 
-  const candidateIds = [];
-  try { if (shopify?.session?.getOfflineId) candidateIds.push(shopify.session.getOfflineId(shop)); } catch {}
-  try { if (shopify?.api?.session?.getOfflineId) candidateIds.push(shopify.api.session.getOfflineId(shop)); } catch {}
-  candidateIds.push(`offline_${shop}`);
+  const ids = [];
+  try { if (shopify?.session?.getOfflineId) ids.push(shopify.session.getOfflineId(shop)); } catch {}
+  try { if (shopify?.api?.session?.getOfflineId) ids.push(shopify.api.session.getOfflineId(shop)); } catch {}
+  ids.push(`offline_${shop}`);
 
   const seen = new Set();
-  for (const id of candidateIds) {
+  for (const id of ids) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     try { await storage.deleteSession(id); } catch {}
   }
 }
 
-// --- APP_UNINSTALLED webhook ---
+// --- APP_UNINSTALLED webhook (authoritative) -----------------------------
 router.post("/app_uninstalled", rawJson, async (req, res) => {
   try {
     if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
@@ -56,28 +66,25 @@ router.post("/app_uninstalled", rawJson, async (req, res) => {
       return res.sendStatus(400);
     }
 
-    // 1) Authoritative: force Free/NONE, clear interval, stamp uninstall
+    // 1) Hard-set plan to Free/NONE with server timestamp (authoritative)
     await dbAdmin.collection("plans").doc(shop).set(
       {
         level: "free",
         status: "NONE",
-        billingInterval: FieldValue.delete(),
         updatedAt: FieldValue.serverTimestamp(),
         _source: "webhook:APP_UNINSTALLED",
-        uninstalledAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
 
-    // 2) Purge offline sessions
+    // 2) Purge offline session(s) so next install is a clean OAuth
     try { await purgeOfflineSession(shop); } catch (e) {
       console.warn(`[Webhook] purgeOfflineSession failed for ${shop}:`, e?.message || e);
     }
 
-    // 3) Optional cleanups (keep fast or queue)
-    // try { await dbAdmin.collection("storeSettings").doc(shop).delete(); } catch {}
+    // 3) (Optional) any fast cleanup you want (leave commented if not needed)
 
-    console.log(`✅ APP_UNINSTALLED handled for ${shop}: plan→free/NONE, sessions purged`);
+    console.log(`✅ APP_UNINSTALLED handled for ${shop} → plans/${shop}=free/NONE, sessions purged`);
     return res.sendStatus(200);
   } catch (err) {
     console.error("[Webhook] APP_UNINSTALLED handler error", err);
@@ -85,17 +92,19 @@ router.post("/app_uninstalled", rawJson, async (req, res) => {
   }
 });
 
-// GDPR stubs (unchanged)
+// ---------------- GDPR (unchanged/minimal) -------------------------------
 router.post("/customers/data_request", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
   console.log("📨 GDPR customers/data_request:", req.body.toString());
   return res.sendStatus(200);
 });
+
 router.post("/customers/redact", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
   console.log("🗑️  GDPR customers/redact:", req.body.toString());
   return res.sendStatus(200);
 });
+
 router.post("/shop/redact", rawJson, (req, res) => {
   if (!verifyShopifyHmacFromRaw(req)) return res.status(401).send("Invalid HMAC");
   console.log("🏪 GDPR shop/redact:", req.body.toString());

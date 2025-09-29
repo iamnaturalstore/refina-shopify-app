@@ -7,17 +7,21 @@ import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
 
-/* --------------------------- Helpers --------------------------- */
+/* --------------------------- Helpers: reauth --------------------------- */
 
 function computeHostFromShop(shop) {
   const s = String(shop || "").trim().toLowerCase();
-  return s && s.endsWith(".myshopify.com") ? Buffer.from(`${s}/admin`).toString("base64") : "";
+  return s && s.endsWith(".myshopify.com")
+    ? Buffer.from(`${s}/admin`).toString("base64")
+    : "";
 }
+
 function absoluteAppUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "https";
   const host = req.get("x-forwarded-host") || req.get("host");
   return `${proto}://${host}`;
 }
+
 function normalizePlan(data) {
   if (!data) return null;
   let level = String(data.level || "").toLowerCase();
@@ -26,6 +30,7 @@ function normalizePlan(data) {
   const billingInterval = (data.billingInterval || data.interval || "").toLowerCase();
   return { level, status, billingInterval };
 }
+
 function sendReauth(res, req, opts = {}) {
   const shopParam = (opts.shop || String(req.query?.shop || "")).toLowerCase();
   let hostParam = String(opts.host || req.query?.host || "");
@@ -44,7 +49,10 @@ function sendReauth(res, req, opts = {}) {
     .status(401)
     .set("Access-Control-Allow-Origin", "*")
     .set("Access-Control-Allow-Headers", "*")
-    .set("Access-Control-Expose-Headers", "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url")
+    .set(
+      "Access-Control-Expose-Headers",
+      "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url"
+    )
     .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
     .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
     .send("reauthorize");
@@ -55,7 +63,9 @@ function sendReauth(res, req, opts = {}) {
 async function resolveShopContext(req, res) {
   const sessShop = res?.locals?.shopify?.session?.shop;
   const q = req.query || {};
-  const hdrShop = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "").toLowerCase().trim();
+  const hdrShop = (req.get("X-Shopify-Shop-Domain") || req.get("x-shopify-shop-domain") || "")
+    .toLowerCase()
+    .trim();
 
   const toMyshop = (raw) => {
     const s = String(raw || "").toLowerCase().trim();
@@ -65,7 +75,11 @@ async function resolveShopContext(req, res) {
     return "";
   };
 
-  let shop = toMyshop(sessShop) || toMyshop(req.shop) || toMyshop(q.shop) || toMyshop(q.storeId);
+  let shop =
+    toMyshop(sessShop) ||
+    toMyshop(req.shop) ||
+    toMyshop(q.shop) ||
+    toMyshop(q.storeId);
 
   if (!shop && typeof q.host === "string") {
     try {
@@ -76,6 +90,7 @@ async function resolveShopContext(req, res) {
       if (!shop && m2?.[1]) shop = toMyshop(m2[1]);
     } catch {}
   }
+
   if (!shop && hdrShop) shop = toMyshop(hdrShop);
 
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop || "")) {
@@ -86,13 +101,16 @@ async function resolveShopContext(req, res) {
   return { shop };
 }
 
-/* ---------- Shopify GraphQL ---------- */
+/* ---------- Shopify GraphQL compat ---------- */
 
 function getGraphqlClient(session) {
-  const Graphql = shopify?.api?.clients?.Graphql || shopify?.clients?.Graphql;
-  if (!Graphql) throw new Error("Shopify GraphQL client class not found.");
+  const Graphql =
+    shopify?.api?.clients?.Graphql ||
+    shopify?.clients?.Graphql;
+  if (!Graphql) throw new Error("Shopify GraphQL client class not found");
   return new Graphql({ session });
 }
+
 async function gql(client, query, variables) {
   if (typeof client.request === "function") {
     const resp = await client.request(query, variables ? { variables } : undefined);
@@ -105,9 +123,20 @@ async function gql(client, query, variables) {
   throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
-/* ---------- Writers ---------- */
+// Server-authoritative writes
+async function writePlan(shop, level, status, billingInterval /* optional */) {
+  await dbAdmin.collection("plans").doc(shop).set(
+    {
+      level,
+      status,
+      ...(billingInterval ? { billingInterval } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
 
-// Downgrade-only writer used by sync/plan?fresh=1
+// Background reconciliation may only downgrade
 async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
   const ref = dbAdmin.collection("plans").doc(shop);
   const snap = await ref.get();
@@ -115,13 +144,11 @@ async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
   const curLevel = String(cur?.level || "free").toLowerCase();
   const curStatus = String(cur?.status || "NONE").toUpperCase();
 
-  const isFreeNone = String(inferredLevel).toLowerCase() === "free" && String(inferredStatus).toUpperCase() === "NONE";
-  if (isFreeNone) {
+  if (String(inferredLevel).toLowerCase() === "free" && String(inferredStatus).toUpperCase() === "NONE") {
     await ref.set(
       {
         level: "free",
         status: "NONE",
-        billingInterval: FieldValue.delete(),
         updatedAt: FieldValue.serverTimestamp(),
         _source: "sync:downgrade",
       },
@@ -129,27 +156,16 @@ async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
     );
     return { changed: curLevel !== "free" || curStatus !== "NONE" };
   }
-  return { changed: false }; // never upgrade here
+  return { changed: false };
 }
 
-// Normal writer (used by /activated and explicit downgrade route)
-async function writePlan(shop, level, status, billingInterval /* optional */, source /* optional */) {
-  await dbAdmin.collection("plans").doc(shop).set(
-    {
-      level,
-      status,
-      ...(billingInterval ? { billingInterval } : {}),
-      updatedAt: FieldValue.serverTimestamp(),
-      ...(source ? { _source: `billing:${source}` } : {}),
-    },
-    { merge: true }
-  );
-}
-
-/* ------------------------ Sessions ------------------------ */
+/* ------------------------ Session helpers ------------------------ */
 
 async function ensureOfflineSession(shop) {
-  const storage = (shopify?.config && shopify.config.sessionStorage) || shopify?.sessionStorage || null;
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
   if (!storage?.loadSession) {
     const err = new Error("reauthorize");
     err.status = 401;
@@ -170,34 +186,18 @@ async function ensureOfflineSession(shop) {
       if (sess?.accessToken) return sess;
     } catch {}
   }
-
   const err = new Error("reauthorize");
   err.status = 401;
   throw err;
 }
 
-// Purge offline sessions (also used by downgrade 401 handler if needed)
-async function purgeOfflineSession(shop) {
-  const storage = (shopify?.config && shopify.config.sessionStorage) || shopify?.sessionStorage || null;
-  if (!storage?.deleteSession) return;
-  const ids = [];
-  try { if (shopify?.session?.getOfflineId) ids.push(shopify.session.getOfflineId(shop)); } catch {}
-  try { if (shopify?.api?.session?.getOfflineId) ids.push(shopify.api.session.getOfflineId(shop)); } catch {}
-  ids.push(`offline_${shop}`);
-  const seen = new Set();
-  for (const id of ids) {
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    try { await storage.deleteSession(id); } catch {}
-  }
-}
-
-// ✅ Top-level (not nested): used by upgrade/downgrade/sync
-async function getAdminClientForShop(req, res, shop) {
+async function getAdminClientForShop(_req, res, shop) {
+  // prefer offline
   try {
     const offline = await ensureOfflineSession(shop);
     return getGraphqlClient(offline);
   } catch {}
+  // online fallback if present
   const online = res?.locals?.shopify?.session;
   if (online?.shop?.toLowerCase?.() === shop && online?.accessToken) {
     return getGraphqlClient(online);
@@ -210,10 +210,17 @@ async function getAdminClientForShop(req, res, shop) {
 /* ----------------------------- Shopify ops ----------------------------- */
 
 async function readActiveSubscriptions(client) {
-  const q = `query { currentAppInstallation { activeSubscriptions { id name status test billingPolicy { interval } } } }`;
+  const q = `
+    query AppInstall {
+      currentAppInstallation {
+        activeSubscriptions { id name status test }
+      }
+    }
+  `;
   const data = await gql(client, q);
   return data?.currentAppInstallation?.activeSubscriptions || [];
 }
+
 function inferPlanFromSubs(subs) {
   let level = "free";
   let status = "NONE";
@@ -231,50 +238,13 @@ function inferPlanFromSubs(subs) {
   }
   return { level, status, activeId };
 }
-async function fetchShopCurrency(client) {
-  const q = `query { shop { currencyCode } }`;
-  const data = await gql(client, q);
-  return (data?.shop?.currencyCode || "USD").toString().toUpperCase();
-}
-async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
-  let mutation = `
-    mutation AppSubscribe(
-      $name: String!, $returnUrl: URL!, $test: Boolean, $amount: Decimal!, $currency: CurrencyCode!, $replacementBehavior: AppSubscriptionReplacementBehavior, $trialDays: Int!
-    ) {
-      appSubscriptionCreate(
-        name: $name, returnUrl: $returnUrl, test: $test, trialDays: $trialDays, replacementBehavior: $replacementBehavior,
-        lineItems: [{ plan: { appRecurringPricingDetails: { price: { amount: $amount, currencyCode: $currency }, interval: EVERY_30_DAYS } } }]
-      ) { userErrors { field message } confirmationUrl appSubscription { id } }
-    }
-  `;
-  if (String(interval).toUpperCase() === "ANNUAL") {
-    mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
-  }
-  const variables = {
-    name,
-    returnUrl,
-    test: !!test,
-    amount: typeof amount === "number" ? amount : Number(amount),
-    currency,
-    trialDays: Number(process.env.BILLING_TRIAL_DAYS || 7),
-    replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
-  };
-  const data = await gql(client, mutation, variables);
-  const payload = data?.appSubscriptionCreate || {};
-  return { confirmationUrl: payload?.confirmationUrl || null, userErrors: payload?.userErrors || [] };
-}
-async function cancelSubscription(client, id, prorate = true) {
-  const mutation = `mutation CancelSub($id: ID!, $prorate: Boolean!) {
-    appSubscriptionCancel(id: $id, prorate: $prorate) { appSubscription { id status } userErrors { field message } }
-  }`;
-  const data = await gql(client, mutation, { id, prorate });
-  const payload = data?.appSubscriptionCancel || {};
-  return { canceled: payload?.appSubscription || null, userErrors: payload?.userErrors || [] };
-}
 
 /* ----------------------------- Routes ---------------------------- */
 
-// GET /api/billing/plan
+/** GET /api/billing/plan
+ * Supports fresh=1 to sync **downgrade only** from Shopify → Firestore.
+ * This endpoint never upgrades the plan.
+ */
 router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -304,7 +274,7 @@ router.get("/plan", async (req, res) => {
   }
 });
 
-// GET /api/billing/activated
+/** GET /api/billing/activated → set plan, then 303 back to embedded Admin UI */
 router.get("/activated", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -314,174 +284,218 @@ router.get("/activated", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
 
-    const firstActive = (subs || []).find(s => String(s?.status || "").toUpperCase() === "ACTIVE");
-    const rawInterval = firstActive?.billingPolicy?.interval || "";
-    let billingInterval = "";
-    if (typeof rawInterval === "string") {
-      const i = rawInterval.toLowerCase();
-      billingInterval = i.includes("annual") || i.includes("year") ? "annual" :
-                        i.includes("month")  || i.includes("30")   ? "monthly" : "";
-    }
+    // Interval comes from your returnUrl param (&interval=monthly|annual)
+    const rawInterval = String(req.query.interval || "").toLowerCase();
+    const billingInterval = rawInterval === "annual" ? "annual" : rawInterval === "monthly" ? "monthly" : undefined;
 
-    await writePlan(shop, level, status, billingInterval, "activated");
+    await writePlan(shop, level, status, billingInterval);
 
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
     const storeSlug = String(shop).replace(/\.myshopify\.com$/i, "");
     const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";
+
     const adminEmbedUrl =
       `https://admin.shopify.com/store/${encodeURIComponent(storeSlug)}` +
-      `/apps/${encodeURIComponent(appHandle)}?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shop)}&billing=success`;
+      `/apps/${encodeURIComponent(appHandle)}` +
+      `?host=${encodeURIComponent(hostParam)}` +
+      `&shop=${encodeURIComponent(shop)}` +
+      `&billing=success`;
 
     return res.redirect(303, adminEmbedUrl);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
+
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
     const storeSlug = String(shopParam).replace(/\.myshopify\.com$/i, "");
     const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";
+
     const adminEmbedUrlFallback =
       `https://admin.shopify.com/store/${encodeURIComponent(storeSlug)}` +
-      `/apps/${encodeURIComponent(appHandle)}?host=${encodeURIComponent(hostParam)}&shop=${encodeURIComponent(shopParam)}&billing=error`;
+      `/apps/${encodeURIComponent(appHandle)}` +
+      `?host=${encodeURIComponent(hostParam)}` +
+      `&shop=${encodeURIComponent(shopParam)}` +
+      `&billing=error`;
+
     return res.redirect(303, adminEmbedUrlFallback);
   }
 });
 
-// POST /api/billing/subscribe (legacy)
-router.post("/subscribe", async (req, res) => {
-  try {
-    const { shop } = await resolveShopContext(req, res);
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
+/** POST /api/billing/upgrade → { confirmationUrl } */
+const isUnauthorized = (e) =>
+  e?.status === 401 || e?.response?.code === 401 || e?.response?.status === 401;
 
-    const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
-    const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    const target = (/\bpremium\b/.test(normalized) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)) ? "premium" : "";
-    if (target !== "premium") return res.status(410).json({ error: "This plan is no longer available." });
+async function fetchShopCurrency(client) {
+  const q = `query { shop { currencyCode } }`;
+  const data = await gql(client, q);
+  return (data?.shop?.currencyCode || "USD").toString().toUpperCase();
+}
 
-    const existing = await readActiveSubscriptions(client);
-    const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
-    if (currentLevel === "premium") return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
-
-    const currency = await fetchShopCurrency(client);
-
-    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
-    let origin = originCandidate;
-    try { origin = new URL(originCandidate).origin; } catch { origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1"); }
-    const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
-
-    const PLAN = { name: "Premium", amount: "49.00" };
-    const testFlag =
-      ["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"].some(k => String(process.env[k] || "").toLowerCase() === "true")
-      || process.env.NODE_ENV !== "production";
-
-    const { confirmationUrl, userErrors } = await createSubscription(client, {
-      name: PLAN.name, amount: PLAN.amount, currency, returnUrl, test: testFlag,
-    });
-    if (confirmationUrl) return res.json({ confirmationUrl });
-
-    const looksLikeActiveBlock = (userErrors || []).map(e => e?.message || "").join("; ").match(/already.*active|existing.*active|active recurring/i);
-    if (looksLikeActiveBlock && currentSubId) {
-      try {
-        const cancelled = await cancelSubscription(client, currentSubId, true);
-        if (!cancelled.userErrors?.length) {
-          const retry = await createSubscription(client, { name: PLAN.name, amount: PLAN.amount, currency, returnUrl, test: testFlag });
-          if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
-        }
-      } catch {}
+async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
+  let mutation = `
+    mutation AppSubscribe(
+      $name: String!,
+      $returnUrl: URL!,
+      $test: Boolean,
+      $amount: Decimal!,
+      $currency: CurrencyCode!,
+      $replacementBehavior: AppSubscriptionReplacementBehavior,
+      $trialDays: Int!
+    ) {
+      appSubscriptionCreate(
+        name: $name
+        returnUrl: $returnUrl
+        test: $test
+        trialDays: $trialDays
+        replacementBehavior: $replacementBehavior
+        lineItems: [{
+          plan: {
+            appRecurringPricingDetails: {
+              price: { amount: $amount, currencyCode: $currency }
+              interval: EVERY_30_DAYS
+            }
+          }
+        }]
+      ) {
+        userErrors { field message }
+        confirmationUrl
+        appSubscription { id }
+      }
     }
-    return res.status(400).json({ error: "Subscription creation failed", userErrors });
-  } catch (err) {
-    if (err?.status === 401) return sendReauth(res, req, { return_to: encodeURIComponent("/admin-ui/billing") });
-    console.error("POST /api/billing/subscribe error", { shop: req.query?.shop, error: err });
-    return res.status(500).json({ error: "Subscribe failed" });
+  `;
+  if (String(interval).toUpperCase() === "ANNUAL") {
+    mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
   }
-});
 
-// POST /api/billing/sync → upserts from activeSubscriptions (downgrade-only)
-router.post("/sync", async (req, res) => {
-  try {
-    const { shop } = await resolveShopContext(req, res);
-    const client = await getAdminClientForShop(req, res, shop);
-    const subs = await readActiveSubscriptions(client);
-    const { level, status } = inferPlanFromSubs(subs);
-    await writePlanDowngradeOnly(shop, level, status);
-    return res.json({ ok: true, level, status });
-  } catch (err) {
-    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
-    console.error("POST /api/billing/sync error", err);
-    return res.status(500).json({ error: "Sync failed" });
+  const variables = {
+    name,
+    returnUrl,
+    test: !!test,
+    amount: typeof amount === "number" ? amount : Number(amount),
+    currency,
+    trialDays: Number(process.env.BILLING_TRIAL_DAYS || 7),
+    replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
+  };
+
+  if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+    console.log("[Billing] appSubscriptionCreate vars", {
+      name: variables.name,
+      amount: variables.amount,
+      currency: variables.currency,
+      returnUrl: variables.returnUrl,
+      test: variables.test,
+      trialDays: variables.trialDays,
+      replacementBehavior: variables.replacementBehavior,
+    });
   }
-});
 
-// GET /api/billing/status
-router.get("/status", async (req, res) => {
-  try {
-    const { shop } = await resolveShopContext(req, res);
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
-    const subs = await readActiveSubscriptions(client);
-    return res.json({ shop, activeSubscriptions: subs });
-  } catch (err) {
-    if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) return sendReauth(res, req);
-    console.error("GET /api/billing/status error", err);
-    return res.status(500).json({ error: "Status failed" });
-  }
-});
+  const data = await gql(client, mutation, variables);
+  const payload = data?.appSubscriptionCreate || {};
+  return {
+    confirmationUrl: payload?.confirmationUrl || null,
+    userErrors: payload?.userErrors || [],
+  };
+}
 
-// POST /api/billing/upgrade
+async function cancelSubscription(client, id, prorate = true) {
+  const mutation = `
+    mutation CancelSub($id: ID!, $prorate: Boolean!) {
+      appSubscriptionCancel(id: $id, prorate: $prorate) {
+        appSubscription { id status }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await gql(client, mutation, { id, prorate });
+  const payload = data?.appSubscriptionCancel || {};
+  return { canceled: payload?.appSubscription || null, userErrors: payload?.userErrors || [] };
+}
+
 router.post("/upgrade", async (req, res) => {
-  const isUnauthorized = (e) => e?.status === 401 || e?.response?.code === 401 || e?.response?.status === 401;
   try {
     const { shop } = await resolveShopContext(req, res);
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(subs);
-    if (currentLevel === "premium") return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
+    if (currentLevel === "premium") {
+      return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
+    }
 
     const currency = await fetchShopCurrency(client);
 
-    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "").trim().replace(/\/$/, "");
+    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+      .trim()
+      .replace(/\/$/, "");
     let origin = originCandidate;
     try { origin = new URL(originCandidate).origin; } catch { origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1"); }
 
     const requestedInterval = String(req.body?.interval || "").toLowerCase();
     const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
     const isAnnual = intervalEnum === "ANNUAL";
-    const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}&interval=${isAnnual ? "annual" : "monthly"}`;
+    const returnUrl =
+      `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}` +
+      `&interval=${isAnnual ? "annual" : "monthly"}`;
 
     const PLAN = { name: "Premium", amount: isAnnual ? "490.00" : "49.00" };
     const testFlag =
-      ["BILLING_TEST","BILLING_TEST_MODE","SHOPIFY_BILLING_TEST","SHOPIFY_BILLING_TEST_MODE"].some(k => String(process.env[k] || "").toLowerCase() === "true")
-      || process.env.NODE_ENV !== "production";
+      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+      process.env.NODE_ENV !== "production";
 
-    let { confirmationUrl, userErrors = [] } = await createSubscription(client, {
-      name: PLAN.name, amount: PLAN.amount, currency, returnUrl, test: testFlag, interval: intervalEnum,
-    });
+    let confirmationUrl = null;
+    let userErrors = [];
+    try {
+      ({ confirmationUrl, userErrors = [] } = await createSubscription(client, {
+        name: PLAN.name,
+        amount: PLAN.amount,
+        currency,
+        returnUrl,
+        test: testFlag,
+        interval: intervalEnum,
+      }));
+    } catch (e) {
+      if (isUnauthorized(e)) return sendReauth(res, req);
+      console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
+      return res.status(500).json({ error: "Upgrade failed" });
+    }
+
     if (confirmationUrl) return res.json({ confirmationUrl });
 
-    const looksLikeActiveBlock = (userErrors || []).map(e => e?.message || "").join("; ").match(/already.*active|existing.*active|active recurring/i);
+    const looksLikeActiveBlock = (userErrors || [])
+      .map((e) => e?.message || "")
+      .join("; ")
+      .match(/already.*active|existing.*active|active recurring/i);
+
     if (looksLikeActiveBlock && currentSubId) {
       try {
         const cancelled = await cancelSubscription(client, currentSubId, true);
         if (!cancelled.userErrors?.length) {
-          const retry = await createSubscription(client, { name: PLAN.name, amount: PLAN.amount, currency, returnUrl, test: testFlag, interval: intervalEnum });
+          const retry = await createSubscription(client, {
+            name: PLAN.name,
+            amount: PLAN.amount,
+            currency,
+            returnUrl,
+            test: testFlag,
+            interval: intervalEnum,
+          });
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }
       } catch (e) {
         if (isUnauthorized(e)) return sendReauth(res, req);
+        console.error("POST /api/billing/upgrade retry error", e?.response?.errors || e?.errors || e);
       }
     }
+
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    const isUnauthorized = (e) => e?.status === 401 || e?.response?.code === 401 || e?.response?.status === 401;
     if (isUnauthorized(err)) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
 
-// POST /api/billing/downgrade
+/** POST /api/billing/downgrade → cancels active subscription(s); sets Free */
 router.post("/downgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -504,7 +518,7 @@ router.post("/downgrade", async (req, res) => {
       if (userErrors?.length) {
         return res.status(400).json({
           error: "CANCEL_FAILED",
-          message: userErrors.map(u => u?.message || "Cancel failed").join("; "),
+          message: userErrors.map((u) => u?.message || "Cancel failed").join("; "),
           id,
         });
       }
@@ -514,11 +528,7 @@ router.post("/downgrade", async (req, res) => {
     await writePlan(shop, "free", "NONE");
     return res.json({ ok: true, canceled });
   } catch (err) {
-    if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
-      const shopParam = String(req.query?.shop || "");
-      if (shopParam) { try { await purgeOfflineSession(shopParam); } catch {} }
-      return sendReauth(res, req, { shop: shopParam, return_to: encodeURIComponent("/admin-ui/billing") });
-    }
+    if (isUnauthorized(err)) return sendReauth(res, req, { return_to: encodeURIComponent("/admin-ui/billing") });
     console.error("POST /api/billing/downgrade error", err);
     return res.status(500).json({ error: "Downgrade failed" });
   }
