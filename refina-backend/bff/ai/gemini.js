@@ -1,29 +1,34 @@
 // refina-backend/bff/ai/gemini.js
-// Pure ESM. Server-side call to Google Generative Language API (Gemini)
-// Returns the **raw model text** (expected to be STRICT JSON per your prompt).
-// BFF parses/normalizes downstream via extractJson() + coerceToContract().
+// SDK-only implementation (no REST). Returns the **raw model text** (STRICT JSON per your prompt).
+// Exported API surface stays the same: callGemini(prompt, genConfig)
 
-import { setTimeout as sleep } from "timers/promises";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
-const API_BASE = `https://generativelanguage.googleapis.com/${API_VERSION}`;
+const API_KEY =
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_API_KEY ||
+  "";
 
-console.log('[Gemini] resolved API_VERSION:', process.env.GEMINI_API_VERSION || 'v1');
-console.log('[Gemini] model:', process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME);
+if (!API_KEY) {
+  console.warn("[Gemini] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
+}
+
+// Singleton SDK client
+const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
 /**
- * Low-level caller. Returns model **text** (string) or null on failure.
+ * Low-level structured caller. Returns model **text** (string) or null on failure.
  *
  * @param {Object} args
  * @param {string} args.prompt
- * @param {string} [args.model] - e.g. "gemini-1.5-flash"
- * @param {number} [args.timeoutMs=8000]
+ * @param {string} [args.model] - e.g. "gemini-1.5-flash-latest"
+ * @param {number} [args.timeoutMs=15000]
  * @param {number} [args.temperature]
  * @param {number} [args.topP]
  * @param {number} [args.maxOutputTokens]
- * @param {string} [args.responseMimeType="application/json"]  // ← JSON mode by default
- * @param {object} [args.responseSchema]                       // optional JSON schema
- * @param {string} [args.system]                               // optional system instruction text
+ * @param {string} [args.responseMimeType="application/json"]
+ * @param {object} [args.responseSchema]
+ * @param {string} [args.system]
  */
 export async function callGeminiStructured({
   prompt,
@@ -34,88 +39,58 @@ export async function callGeminiStructured({
   maxOutputTokens,
   responseMimeType = "application/json",
   responseSchema,
-  system
+  system,
 }) {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  if (!apiKey) {
-    console.warn("[Gemini] GEMINI_API_KEY missing — skipping AI path");
-    return null;
-  }
+  if (!genAI) return null;
 
-  const mdl = String(model || process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
-  const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const mdl = String(model || process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").trim();
 
-  // Build request body with JSON mode + optional schema.
   const generationConfig = {
     ...(Number.isFinite(temperature) ? { temperature } : {}),
     ...(Number.isFinite(topP) ? { topP } : {}),
     ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
     ...(responseMimeType ? { responseMimeType } : {}),
-    ...(responseSchema ? { responseSchema } : {})
+    ...(responseSchema ? { responseSchema } : {}),
   };
 
-  const body = {
-    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    generationConfig
-  };
+  // Optional system instruction
+  const systemInstruction =
+    system && String(system).trim()
+      ? { role: "system", parts: [{ text: String(system) }] }
+      : undefined;
 
-  // Optional system instruction (kept minimal/compact)
-  if (system && String(system).trim()) {
-    body.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
+  const modelClient = genAI.getGenerativeModel({
+    model: mdl,
+    ...(systemInstruction ? { systemInstruction } : {}),
+    generationConfig,
+  });
+
+  // Abort controller for timeout
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+
+  try {
+    const result = await modelClient.generateContent(
+      { contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }] },
+      { signal: ac.signal }
+    );
+    clearTimeout(timer);
+
+    // SDK returns text in parts even with JSON mode enabled
+    const text = result?.response?.text?.();
+    const out = typeof text === "string" ? text.trim() : "";
+    return out || null;
+  } catch (err) {
+    clearTimeout(timer);
+    const msg = err?.name ? `${err.name}: ${err.message || ""}` : String(err || "");
+    console.warn("[Gemini] generateContent error:", msg);
+    return null;
   }
-
-  const attempt = async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-      clearTimeout(timer);
-
-      if (!resp.ok) {
-        const txt = await resp.text().catch(() => "");
-        console.warn("[Gemini] HTTP", resp.status, txt.slice(0, 300));
-        return null;
-      }
-
-      const data = await resp.json();
-
-      // Extract concatenated text from parts
-      // (When responseMimeType=application/json, the JSON is still returned in parts[].text)
-      const parts = data?.candidates?.[0]?.content?.parts;
-      if (Array.isArray(parts)) {
-        const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
-        return out || null;
-      }
-      const fallback = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      return typeof fallback === "string" && fallback.trim() ? fallback.trim() : null;
-    } catch (e) {
-      clearTimeout(timer);
-      const msg = e?.name ? `${e.name}: ${e.message || ""}` : String(e || "");
-      console.warn("[Gemini] request error:", msg);
-      return null;
-    }
-  };
-
-  // One retry with small jitter for transient issues
-  let text = await attempt();
-  if (!text) {
-    await sleep(200 + Math.random() * 250);
-    text = await attempt();
-  }
-  return text;
 }
 
 /**
- * Thin wrapper used by bff/server.js and workers:
- *   const modelText = await callGemini(prompt, genConfig)
- * where genConfig may contain:
- *   { model, temperature, topP, maxOutputTokens, timeoutMs, responseMimeType, responseSchema, system }
+ * Thin wrapper used by routes and workers.
+ * genConfig may include: { model, temperature, topP, maxOutputTokens, timeoutMs, responseMimeType, responseSchema, system }
  */
 export function callGemini(prompt, genConfig = {}) {
   return callGeminiStructured({
@@ -127,7 +102,7 @@ export function callGemini(prompt, genConfig = {}) {
     timeoutMs: genConfig?.timeoutMs ?? 15000,
     responseMimeType: genConfig?.responseMimeType ?? "application/json",
     responseSchema: genConfig?.responseSchema,
-    system: genConfig?.system
+    system: genConfig?.system,
   });
 }
 
