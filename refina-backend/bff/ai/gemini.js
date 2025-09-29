@@ -5,7 +5,7 @@
 
 import { setTimeout as sleep } from "timers/promises";
 
-const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const API_BASE = "https://generativelanguage.googleapis.com/v1";
 
 /**
  * Low-level caller. Returns model **text** (string) or null on failure.
