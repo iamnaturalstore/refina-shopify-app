@@ -33,28 +33,49 @@ function pickPrimaryImage(p, storeId) {
   return ensureAbsolute(candidate, storeId);
 }
 
+// REPLACE your old embedText function with this new one.
+
 // Lazy-init embeddings client at call time to avoid env timing issues
 async function embedText(text) {
   const apiKey =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     "";
-  if (!apiKey) return []; // maintain graceful fallback semantics
-
-  const apiEndpoint =
-    process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
-
-  let client;
-  try {
-    client = new GoogleGenerativeAI({ apiKey, apiEndpoint });
-  } catch {
-    // Fallback for older SDK signatures
-    client = new GoogleGenerativeAI(apiKey);
+  if (!apiKey) {
+    console.warn("[Embeddings] API Key is missing. Skipping embedding.");
+    return []; 
   }
 
-  const model = client.getGenerativeModel({ model: "text-embedding-004" });
-  const res = await model.embedContent(String(text || ""));
-  return res?.embedding?.values || [];
+  // Manually construct the correct, stable v1 URL. This bypasses any SDK defaults.
+  const url = `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${apiKey}`;
+
+  const body = {
+    model: "models/text-embedding-004",
+    content: {
+      parts: [{ text: String(text || "") }],
+    },
+  };
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      console.error("[Embeddings] HTTP Error:", resp.status, errorText);
+      return [];
+    }
+
+    const data = await resp.json();
+    return data?.embedding?.values || [];
+
+  } catch (e) {
+    console.error("[Embeddings] Fetch Error:", e.message);
+    return [];
+  }
 }
 
 async function loadEmbeddings(storeId) {
