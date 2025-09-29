@@ -1,5 +1,4 @@
 // refina-backend/routes/billing.js — GOLDEN PATH++ (legacy + new endpoints)
-// Full-domain shop keys only; preserves Firestore plan docs; adds fresh-sync plan and upgrade/downgrade
 "use strict";
 
 import express from "express";
@@ -48,14 +47,12 @@ function sendReauth(res, req, opts = {}) {
 
   return res
     .status(401)
-    // CORS + header exposure so the client can read reauth headers
     .set("Access-Control-Allow-Origin", "*")
     .set("Access-Control-Allow-Headers", "*")
     .set(
       "Access-Control-Expose-Headers",
       "X-Shopify-API-Request-Failure-Reauthorize, X-Shopify-API-Request-Failure-Reauthorize-Url"
     )
-    // Shopify App Bridge reauth handshake
     .set("X-Shopify-API-Request-Failure-Reauthorize", "1")
     .set("X-Shopify-API-Request-Failure-Reauthorize-Url", authUrl.toString())
     .send("reauthorize");
@@ -63,7 +60,6 @@ function sendReauth(res, req, opts = {}) {
 
 /* --------------------------- Shop resolution --------------------------- */
 
-/** Resolve canonical shop from guard/query; throws 401 on failure. */
 async function resolveShopContext(req, res) {
   const sessShop = res?.locals?.shopify?.session?.shop;
   const q = req.query || {};
@@ -92,7 +88,7 @@ async function resolveShopContext(req, res) {
       const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
       if (m1?.[1]) shop = toMyshop(m1[1]);
       if (!shop && m2?.[1]) shop = toMyshop(m2[1]);
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   if (!shop && hdrShop) shop = toMyshop(hdrShop);
@@ -105,37 +101,29 @@ async function resolveShopContext(req, res) {
   return { shop };
 }
 
-/* ---------- Shopify GraphQL compatibility (works across SDK shapes) ---------- */
+/* ---------- Shopify GraphQL compatibility ---------- */
 
 function getGraphqlClient(session) {
-  const Graphql =
-    shopify?.api?.clients?.Graphql ||
-    shopify?.clients?.Graphql;
-  if (!Graphql) {
-    throw new Error(
-      "Shopify GraphQL client class not found (api.clients.Graphql / clients.Graphql)."
-    );
-  }
+  const Graphql = shopify?.api?.clients?.Graphql || shopify?.clients?.Graphql;
+  if (!Graphql) throw new Error("Graphql client class not found");
   return new Graphql({ session });
 }
 
 async function gql(client, query, variables) {
-  // Prefer modern .request(); fall back to legacy .query()
   if (typeof client.request === "function") {
     const resp = await client.request(query, variables ? { variables } : undefined);
     return resp?.data ?? resp?.body?.data ?? resp;
   }
   if (typeof client.query === "function") {
-    const resp = await client.query({
-      data: variables ? { query, variables } : { query },
-    });
+    const resp = await client.query({ data: variables ? { query, variables } : { query } });
     return resp?.body?.data;
   }
   throw new Error("Shopify GraphQL client missing .query/.request");
 }
 
-// Only allow plan to move toward FREE/NONE during background reconciliation.
-// Never upgrade here — upgrades happen only via /api/billing/activated.
+/* ---------- Plan writers ---------- */
+
+// Downgrade-only reconciliation writer
 async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
   const ref = dbAdmin.collection("plans").doc(shop);
   const snap = await ref.get();
@@ -144,40 +132,39 @@ async function writePlanDowngradeOnly(shop, inferredLevel, inferredStatus) {
   const curLevel = String(cur?.level || "free").toLowerCase();
   const curStatus = String(cur?.status || "NONE").toUpperCase();
 
-  // If Shopify shows no active sub, ensure local is free/NONE.
   if (String(inferredLevel).toLowerCase() === "free" && String(inferredStatus).toUpperCase() === "NONE") {
     await ref.set(
       {
         level: "free",
         status: "NONE",
-        updatedAt: Date.now(),
-        _source: "sync:downgrade", // marks this as coming from reconciliation
+        billingInterval: "",
+        updatedAt: FieldValue.serverTimestamp(),
+        _source: "sync:downgrade",
       },
       { merge: true }
     );
     return { changed: curLevel !== "free" || curStatus !== "NONE" };
   }
-
-  // Otherwise do nothing — never upgrade here.
   return { changed: false };
 }
 
-/* ------------------------ Shared helpers ------------------------ */
+async function writePlan(shop, level, status, billingInterval /* optional */) {
+  await dbAdmin.collection("plans").doc(shop).set(
+    {
+      level,
+      status,
+      ...(billingInterval !== undefined ? { billingInterval } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+      _source: "billing:activated",
+    },
+    { merge: true }
+  );
+}
 
-async function ensureOfflineSession(shop) {
-  // Support both modern and legacy SDK shapes
-  const storage =
-    (shopify?.config && shopify.config.sessionStorage) ||
-    shopify?.sessionStorage ||
-    null;
+/* ---------- Sessions ---------- */
 
-  if (!storage?.loadSession) {
-    const err = new Error("reauthorize");
-    err.status = 401;
-    throw err;
-  }
-
-  async function purgeOfflineSession(shop) {
+// Purge offline session(s) (hoisted to top-level so all routes can use it)
+async function purgeOfflineSession(shop) {
   const storage =
     (shopify?.config && shopify.config.sessionStorage) ||
     shopify?.sessionStorage ||
@@ -185,7 +172,6 @@ async function ensureOfflineSession(shop) {
 
   if (!storage?.deleteSession) return;
 
-  // Try all known offline ids we might have used
   const ids = [];
   try { if (shopify?.session?.getOfflineId) ids.push(shopify.session.getOfflineId(shop)); } catch {}
   try { if (shopify?.api?.session?.getOfflineId) ids.push(shopify.api.session.getOfflineId(shop)); } catch {}
@@ -199,20 +185,21 @@ async function ensureOfflineSession(shop) {
   }
 }
 
+async function ensureOfflineSession(shop) {
+  const storage =
+    (shopify?.config && shopify.config.sessionStorage) ||
+    shopify?.sessionStorage ||
+    null;
 
-  // Try multiple candidate IDs for the offline session across SDK versions
+  if (!storage?.loadSession) {
+    const err = new Error("reauthorize");
+    err.status = 401;
+    throw err;
+  }
+
   const candidates = [];
-  try {
-    if (shopify?.session?.getOfflineId) {
-      candidates.push(shopify.session.getOfflineId(shop));
-    }
-  } catch {}
-  try {
-    if (shopify?.api?.session?.getOfflineId) {
-      candidates.push(shopify.api.session.getOfflineId(shop));
-    }
-  } catch {}
-  // Canonical fallback
+  try { if (shopify?.session?.getOfflineId) candidates.push(shopify.session.getOfflineId(shop)); } catch {}
+  try { if (shopify?.api?.session?.getOfflineId) candidates.push(shopify.api.session.getOfflineId(shop)); } catch {}
   candidates.push(`offline_${shop}`);
 
   const seen = new Set();
@@ -239,26 +226,20 @@ router.use((req, _res, next) => {
 });
 
 /**
- * Prefer OFFLINE session for gatekeeping (prevents spurious 401s), then try the
- * official middleware, then manual JWT decode. Only reauth if all fail.
+ * Prefer OFFLINE session for gatekeeping (prevents spurious 401s), then try middleware/JWT.
  */
 async function validateAdminSessionCompat(req, res, next) {
   try {
-    // 0) If we can resolve the shop and have an OFFLINE session, let it through.
-    // The actual Shopify calls will still use that offline token.
     let shopForGate = "";
     try {
       const { shop } = await resolveShopContext(req, res);
       shopForGate = shop;
-      await ensureOfflineSession(shop); // throws if missing
+      await ensureOfflineSession(shop);
       res.locals.shopify = res.locals.shopify || {};
       res.locals.shopify.session = res.locals.shopify.session || { shop };
       return next();
-    } catch {
-      // fall through to online/JWT validation
-    }
+    } catch {}
 
-    // 1) Best: official middleware (validates App Bridge JWT, handles skew)
     if (shopify?.authenticate?.admin) {
       try {
         const out = await shopify.authenticate.admin(req, res);
@@ -267,12 +248,9 @@ async function validateAdminSessionCompat(req, res, next) {
           res.locals.shopify.session = out.session;
           return next();
         }
-      } catch {
-        // continue
-      }
+      } catch {}
     }
 
-    // 2) Fallback: decode Authorization: Bearer <AB session token>
     const authz = req.get("Authorization") || req.headers.authorization || "";
     const m = authz.match(/^Bearer\s+(.+)$/i);
     if (m) {
@@ -286,66 +264,41 @@ async function validateAdminSessionCompat(req, res, next) {
           res.locals.shopify.session = { shop: shopFromDest };
           return next();
         }
-      } catch {
-        // continue
-      }
+      } catch {}
     }
 
-    // 3) Legacy cookie-based validator
     if (typeof shopify?.validateAuthenticatedSession === "function") {
       return shopify.validateAuthenticatedSession()(req, res, next);
     }
 
-    // 4) No joy → reauth
     return sendReauth(res, req, {
       return_to: encodeURIComponent("/admin-ui/billing"),
       shop: shopForGate || String(req.query?.shop || ""),
     });
   } catch {
-    return sendReauth(res, req, {
-      return_to: encodeURIComponent("/admin-ui/billing"),
-    });
+    return sendReauth(res, req, { return_to: encodeURIComponent("/admin-ui/billing") });
   }
 }
 
-// Protect Admin-UI endpoints; **leave /plan open** (Shopify redirects to /activated without JWT)
 router.use(
   ["/status", "/subscribe", "/upgrade", "/downgrade", "/sync"],
   validateAdminSessionCompat
 );
 
-/* ----------------------------- Admin client ---------------------------- */
-
-/**
- * Try offline first; if missing, fall back to the ONLINE Admin session
- * attached by the guard. Only force reauth if neither exists.
- */
-async function getAdminClientForShop(req, res, shop) {
-  // 1) Preferred: offline
-  try {
-    const offline = await ensureOfflineSession(shop);
-    return getGraphqlClient(offline);
-  } catch {
-    // continue to online fallback
-  }
-  // 2) Fallback: online session from guard (must include accessToken)
-  const online = res?.locals?.shopify?.session;
-  if (online?.shop?.toLowerCase?.() === shop && online?.accessToken) {
-    return getGraphqlClient(online);
-  }
-  // 3) Neither available → reauth
-  const err = new Error("reauthorize");
-  err.status = 401;
-  throw err;
-}
-
 /* ----------------------------- Shopify ops ----------------------------- */
 
 async function readActiveSubscriptions(client) {
+  // Include billingPolicy.interval so /activated can derive monthly vs annual
   const q = `
     query AppInstall {
       currentAppInstallation {
-        activeSubscriptions { id name status test }
+        activeSubscriptions {
+          id
+          name
+          status
+          test
+          billingPolicy { interval }   # <— added
+        }
       }
     }
   `;
@@ -369,21 +322,6 @@ function inferPlanFromSubs(subs) {
     }
   }
   return { level, status, activeId };
-}
-
-async function writePlan(shop, level, status, billingInterval /* optional */) {
-  await dbAdmin
-    .collection("plans")
-    .doc(shop)
-    .set(
-     {
-        level,
-        status,
-        ...(billingInterval ? { billingInterval } : {}),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
 }
 
 async function fetchShopCurrency(client) {
@@ -413,7 +351,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
           plan: {
             appRecurringPricingDetails: {
               price: { amount: $amount, currencyCode: $currency }
-              interval: ${/* GraphQL enum needs to be inlined */ ""}EVERY_30_DAYS
+              interval: EVERY_30_DAYS
             }
           }
         }]
@@ -435,10 +373,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
 
-  // Swap the interval in the mutation body when ANNUAL is requested.
   if (String(interval).toUpperCase() === "ANNUAL") {
-    // Quick-and-safe replace; avoids another almost-identical mutation block.
-    // (keeps diff minimal; no schema rewrites)
     mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
   }
 
@@ -454,14 +389,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     });
   }
 
-  let data;
-  try {
-    data = await gql(client, mutation, variables);
-  } catch (e) {
-    console.error("[Billing] GraphQL threw", e?.response?.errors || e?.errors || e);
-    throw e;
-  }
-
+  const data = await gql(client, mutation, variables);
   const payload = data?.appSubscriptionCreate || {};
   if ((payload?.userErrors || []).length) {
     console.error("[Billing] userErrors", payload.userErrors);
@@ -489,9 +417,7 @@ async function cancelSubscription(client, id, prorate = true) {
 
 /* ----------------------------- Routes ---------------------------- */
 
-/* ⬇️ Add this small helper (idempotent) */
 async function ensureAppUninstalledWebhook(client) {
-  // 1) Check existing webhooks
   const LIST_Q = `
     query {
       webhookSubscriptions(first: 50, topics: [APP_UNINSTALLED]) {
@@ -507,19 +433,16 @@ async function ensureAppUninstalledWebhook(client) {
     const data = resp?.data || resp?.body?.data || resp;
     existing = (data?.webhookSubscriptions?.edges || []).map(e => e.node);
   } catch (e) {
-    // Non-fatal; we'll just try to create below
     if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
       console.warn("[Webhook] list APP_UNINSTALLED failed (non-fatal):", e?.message || e);
     }
   }
 
-  // 2) If one exists pointing to our URL, do nothing
   const base = (process.env.APP_URL || process.env.HOST || "").replace(/\/$/, "");
-  if (!base) return; // can't register without public base
+  if (!base) return;
   const wantUrl = `${base}/api/privacy/app_uninstalled`;
   if (existing.some(w => w?.endpoint?.callbackUrl === wantUrl)) return;
 
-  // 3) Otherwise create it
   const CREATE_MUT = `
     mutation CreateAppUninstallWebhook($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
       webhookSubscriptionCreate(
@@ -550,46 +473,37 @@ async function ensureAppUninstalledWebhook(client) {
   }
 }
 
-/** GET /api/billing/plan → { plan: {level, status} }
- *  Supports `fresh=1` to sync from Shopify → Firestore before returning.
- *  NOTE: This route is NOT behind the global JWT guard; we only require auth when fresh=1.
- */
+/** GET /api/billing/plan → { plan } (fresh=1 → reconcile with downgrade-only) */
 router.get("/plan", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
     const wantsFresh = String(req.query.fresh || "0") === "1";
 
     if (wantsFresh) {
-  try {
-    const offlineSession = await ensureOfflineSession(shop);
-    const client = getGraphqlClient(offlineSession);
-    const subs = await readActiveSubscriptions(client);
-    const { level, status } = inferPlanFromSubs(subs);
-
-    // IMPORTANT: Only allow downgrade here; never upgrade from this endpoint.
-    await writePlanDowngradeOnly(shop, level, status);
-  } catch (err) {
-    if (err?.status === 401) {
-      return sendReauth(res, req, { shop });
+      try {
+        const offlineSession = await ensureOfflineSession(shop);
+        const client = getGraphqlClient(offlineSession);
+        const subs = await readActiveSubscriptions(client);
+        const { level, status } = inferPlanFromSubs(subs);
+        await writePlanDowngradeOnly(shop, level, status); // ← NEVER upgrade here
+      } catch (err) {
+        if (err?.status === 401) return sendReauth(res, req, { shop });
+        throw err;
+      }
     }
-    throw err;
-  }
-}
 
     const snap = await dbAdmin.collection("plans").doc(shop).get();
     const raw = snap.exists ? snap.data() : null;
     const plan = raw ? normalizePlan(raw) : { level: "free", status: "NONE" };
     return res.json({ plan });
   } catch (err) {
-    if (err?.status === 401 || err?.response?.code === 401) {
-      return sendReauth(res, req);
-    }
+    if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
     console.error("GET /api/billing/plan error", err);
     return res.status(500).json({ error: "Plan lookup failed" });
   }
 });
 
-/** GET /api/billing/activated → set plan, then 303 directly to embedded Admin URL */
+/** GET /api/billing/activated → set plan (from Shopify) then 303 to embedded Admin URL */
 router.get("/activated", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -598,34 +512,24 @@ router.get("/activated", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
+
     // Derive interval from the active subscription (not from req.query)
-const firstActive =
-  Array.isArray(subs)
-    ? subs.find(s => (s?.status || s?.node?.status) === "ACTIVE")
-    : null;
+    const firstActive = Array.isArray(subs) ? subs.find(s => (s?.status || s?.node?.status) === "ACTIVE") : null;
+    const rawInterval = firstActive?.billingPolicy?.interval ?? firstActive?.node?.billingPolicy?.interval ?? "";
+    let billingInterval = "";
+    if (typeof rawInterval === "string") {
+      const i = rawInterval.toLowerCase();
+      billingInterval =
+        i.includes("annual") || i.includes("year") ? "annual" :
+        i.includes("month")  || i.includes("30")   ? "monthly" :
+        "";
+    }
 
-const rawInterval =
-  firstActive?.billingPolicy?.interval ??
-  firstActive?.node?.billingPolicy?.interval ??
-  ""; // e.g. "ANNUAL", "EVERY_30_DAYS", "MONTHLY"
+    await writePlan(shop, level, status, billingInterval);
 
-let billingInterval = "";
-if (typeof rawInterval === "string") {
-  const i = rawInterval.toLowerCase();
-  billingInterval =
-    i.includes("annual") || i.includes("year") ? "annual" :
-    i.includes("month")  || i.includes("30")   ? "monthly" :
-    "";
-}
-
-await writePlan(shop, level, status, billingInterval);
-
-
-    // Build the embedded Admin URL for your app (no reliance on local re-embed).
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
-    const storeSlug = String(shop).replace(/\.myshopify\.com$/i, ""); // e.g. "refina-demo"
-    const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";     // your Partner "Handle"
-
+    const storeSlug = String(shop).replace(/\.myshopify\.com$/i, "");
+    const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";
     const adminEmbedUrl =
       `https://admin.shopify.com/store/${encodeURIComponent(storeSlug)}` +
       `/apps/${encodeURIComponent(appHandle)}` +
@@ -637,7 +541,6 @@ await writePlan(shop, level, status, billingInterval);
   } catch (err) {
     console.error("GET /api/billing/activated error", err);
 
-    // Fallback: still go to embedded Admin URL, but with billing=error
     const shopParam = String(req.query?.shop || "");
     const hostParam = String(req.query?.host || "") || computeHostFromShop(shopParam);
     const storeSlug = String(shopParam).replace(/\.myshopify\.com$/i, "");
@@ -653,8 +556,6 @@ await writePlan(shop, level, status, billingInterval);
     return res.redirect(303, adminEmbedUrlFallback);
   }
 });
-
-
 
 /** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
 router.post("/subscribe", async (req, res) => {
@@ -682,34 +583,29 @@ router.post("/subscribe", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-// Prefer a clean origin from env; fall back to absoluteAppUrl(req)
-const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
-  .trim()
-  .replace(/\/$/, "");
+    const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
+      .trim()
+      .replace(/\/$/, "");
 
-let origin = originCandidate;
-try {
-  origin = new URL(originCandidate).origin;            // strips any path/query
-} catch {
-  origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
-}
+    let origin = originCandidate;
+    try { origin = new URL(originCandidate).origin; } catch {
+      origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
+    }
 
-// Keep the returnUrl SHORT: only 'shop'. /activated computes 'host' itself.
-const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
+    const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
-const PLAN = { name: "Premium", amount: "49.00" };
-const testFlag =
-  ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
-    .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
-  process.env.NODE_ENV !== "production";
+    const PLAN = { name: "Premium", amount: "49.00" };
+    const testFlag =
+      ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
+        .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
+      process.env.NODE_ENV !== "production";
 
-if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
-  console.log("[Billing]/subscribe origin", { originCandidate, origin });
-  console.log("[Billing]/subscribe returnUrl", returnUrl.length, returnUrl);
-  console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, test: testFlag });
-}
+    if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+      console.log("[Billing]/subscribe origin", { originCandidate, origin });
+      console.log("[Billing]/subscribe returnUrl", returnUrl.length, returnUrl);
+      console.log("[Billing]/subscribe vars", { shop, amount: PLAN.amount, currency, test: testFlag });
+    }
 
-    // Safe call with scoped userErrors
     let confirmationUrl = null;
     let userErrors = [];
     try {
@@ -760,41 +656,32 @@ if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
     return res.status(400).json({ error: "Subscription creation failed", userErrors });
   } catch (err) {
     if (err?.status === 401) {
-      return sendReauth(res, req, {
-        return_to: encodeURIComponent("/admin-ui/billing"),
-      });
+      return sendReauth(res, req, { return_to: encodeURIComponent("/admin-ui/billing") });
     }
-    console.error("POST /api/billing/subscribe unhandled error", {
-      shop: req.query?.shop,
-      error: err,
-    });
-    // Do NOT reference userErrors here; it's out of scope on thrown GraphQL.
+    console.error("POST /api/billing/subscribe unhandled error", { shop: req.query?.shop, error: err });
     return res.status(500).json({ error: "Subscribe failed" });
   }
 });
 
-/** POST /api/billing/sync → upserts plans/{shop} from activeSubscriptions */
+/** POST /api/billing/sync → reconcile plans/{shop} (DOWNGRADE-ONLY) */
 router.post("/sync", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-
-    // Use the unified client factory (offline-first; online w/ accessToken fallback)
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
     const { level, status } = inferPlanFromSubs(subs);
-    await writePlan(shop, level, status);
+
+    // 🔒 Never upgrade from /sync. Only /activated may upgrade.
+    await writePlanDowngradeOnly(shop, level, status);
 
     return res.json({ ok: true, level, status });
   } catch (err) {
-    // Treat Shopify GraphQL 401s the same as local auth 401s → trigger reauth
     if (err?.status === 401 || err?.response?.code === 401) return sendReauth(res, req);
     console.error("POST /api/billing/sync error", err);
-    // No userErrors here (not a createSubscription path)
     return res.status(500).json({ error: "Sync failed" });
   }
 });
-
 
 /** GET /api/billing/status → { activeSubscriptions: [...] } */
 router.get("/status", async (req, res) => {
@@ -805,15 +692,14 @@ router.get("/status", async (req, res) => {
     const subs = await readActiveSubscriptions(client);
     return res.json({ shop, activeSubscriptions: subs });
   } catch (err) {
-  if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
-    return sendReauth(res, req);
+    if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
+      return sendReauth(res, req);
+    }
+    console.error("GET /api/billing/status error", err);
+    return res.status(500).json({ error: "Status failed" });
   }
-  console.error("GET /api/billing/status error", err);
-  return res.status(500).json({ error: "Status failed" });
-}
 });
 
-// add this tiny helper once (above the route or near other helpers)
 const isUnauthorized = (e) =>
   e?.status === 401 || e?.response?.code === 401 || e?.response?.status === 401;
 
@@ -822,7 +708,6 @@ router.post("/upgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
 
-    // ⬇️ Tolerant client selection (offline-first; online w/ accessToken fallback)
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
@@ -833,21 +718,14 @@ router.post("/upgrade", async (req, res) => {
 
     const currency = await fetchShopCurrency(client);
 
-    // DO NOT trust/accept req.body.returnUrl — it can exceed 255.
-    // Always compute a short, sanitized returnUrl from the app origin.
     const originCandidate = (process.env.APP_URL || process.env.HOST || absoluteAppUrl(req) || "")
       .trim()
       .replace(/\/$/, "");
-
     let origin = originCandidate;
-    try {
-      origin = new URL(originCandidate).origin; // strips any path/query
-    } catch {
+    try { origin = new URL(originCandidate).origin; } catch {
       origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1");
     }
 
-    // Keep the returnUrl SHORT: only 'shop'. /activated will compute 'host' itself.
-    // Determine interval & amount from request
     const requestedInterval = String(req.body?.interval || "").toLowerCase();
     const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
     const isAnnual = intervalEnum === "ANNUAL";
@@ -867,7 +745,6 @@ router.post("/upgrade", async (req, res) => {
       console.log("[Billing]/upgrade vars", { shop, amount: PLAN.amount, currency, test: testFlag });
     }
 
-    // Safe call with scoped userErrors
     let confirmationUrl = null;
     let userErrors = [];
     try {
@@ -880,7 +757,7 @@ router.post("/upgrade", async (req, res) => {
         interval: intervalEnum,
       }));
     } catch (e) {
-      if (isUnauthorized(e)) return sendReauth(res, req);   // ⬅️ reauth on 401 from GraphQL
+      if (isUnauthorized(e)) return sendReauth(res, req);
       console.error("POST /api/billing/upgrade createSubscription error", e?.response?.errors || e?.errors || e);
       if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
         return res.status(500).json({
@@ -914,16 +791,15 @@ router.post("/upgrade", async (req, res) => {
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }
       } catch (e) {
-        if (isUnauthorized(e)) return sendReauth(res, req); // ⬅️ also reauth on retry 401
+        if (isUnauthorized(e)) return sendReauth(res, req);
         console.error("POST /api/billing/upgrade retry error", e?.response?.errors || e?.errors || e);
       }
     }
 
     return res.status(400).json({ error: "Upgrade failed", userErrors });
   } catch (err) {
-    if (isUnauthorized(err)) return sendReauth(res, req);    // ⬅️ outer catch covers readActiveSubscriptions/currency
+    if (isUnauthorized(err)) return sendReauth(res, req);
     console.error("POST /api/billing/upgrade error", err);
-    // Do NOT reference userErrors here
     return res.status(500).json({ error: "Upgrade failed" });
   }
 });
@@ -932,8 +808,6 @@ router.post("/upgrade", async (req, res) => {
 router.post("/downgrade", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
-
-    // Try OFFLINE first, then ONLINE (from guard). Reauth only if neither exists.
     const client = await getAdminClientForShop(req, res, shop);
 
     const subs = await readActiveSubscriptions(client);
@@ -942,13 +816,11 @@ router.post("/downgrade", async (req, res) => {
       .map((s) => s?.id)
       .filter(Boolean);
 
-    // Idempotent: if nothing to cancel, just mark Free + return
     if (activeIds.length === 0) {
-      await writePlan(shop, "free", "NONE");
+      await writePlan(shop, "free", "NONE", "");
       return res.json({ ok: true, message: "No active subscription" });
     }
 
-    // Cancel all active subscriptions (sequential = safer for Shopify)
     const canceled = [];
     for (const id of activeIds) {
       const { canceled: c, userErrors } = await cancelSubscription(client, id, true);
@@ -962,12 +834,9 @@ router.post("/downgrade", async (req, res) => {
       if (c) canceled.push(c);
     }
 
-    // Persist plan state last
-    await writePlan(shop, "free", "NONE");
+    await writePlan(shop, "free", "NONE", "");
     return res.json({ ok: true, canceled });
   } catch (err) {
-    // 🔑 NEW: handle GraphQL 401s the same way as local reauth,
-    // and purge the stale offline token so the next OAuth is clean.
     if (err?.status === 401 || err?.response?.code === 401 || err?.response?.status === 401) {
       const shopParam = String(req.query?.shop || "");
       if (shopParam) {
@@ -983,8 +852,4 @@ router.post("/downgrade", async (req, res) => {
   }
 });
 
-
-
-
 export default router;
-

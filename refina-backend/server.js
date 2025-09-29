@@ -333,6 +333,11 @@ function rateLimitAppProxy(req, res, next) {
 // ─────────────────────────────────────────────────────────────
 const app = express();
 app.set('trust proxy', 1);
+
+// ✅ Mount privacy/webhooks FIRST (needs express.raw inside router; no json/urlencoded before this)
+app.use("/api/privacy", privacyWebhooksRoutes);
+
+// Parsers & common middleware (safe after webhooks)
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
@@ -341,16 +346,11 @@ app.use('/apps/refina/v1', recommendRouter);
 // 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
 // (Moved ABOVE the canonical redirect middleware)
 app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
-  // If you already have a real handler elsewhere, delegate to it:
   if (typeof handleAnalyticsIngest === 'function') return handleAnalyticsIngest(req, res, next);
-
-  // Minimal no-op fallback so the widget doesn't break (keeps status 2xx):
-  // swap this out if you need to persist events.
   res.status(204).end();
 });
 
 // ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
-// (Unchanged, just moved BELOW the early /apps/refina/v1/* mounts)
 const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
 let CANONICAL_HOST = '';
 try {
@@ -358,7 +358,6 @@ try {
 } catch {}
 
 app.use((req, res, next) => {
-  // Only enforce if a canonical host is configured
   if (!CANONICAL_HOST) return next();
 
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
@@ -412,7 +411,6 @@ app.get(/^\/admin(?:\/.*)?$/, setAdminCsp, (_req, res) => {
 // Embedded entry → preflight for OFFLINE session; bounce to top-level OAuth if missing
 app.get('/embedded', async (req, res) => {
   try {
-    // 1) Resolve canonical shop + host
     const toMyshop = (raw) => {
       const s = String(raw || '').trim().toLowerCase();
       if (!s) return '';
@@ -424,7 +422,7 @@ app.get('/embedded', async (req, res) => {
 
     if (!shop && host) {
       try {
-        const decoded = Buffer.from(host, 'base64').toString('utf8'); // "<shop>.myshopify.com/admin" or "admin.shopify.com/store/<slug>"
+        const decoded = Buffer.from(host, 'base64').toString('utf8');
         const m1 = decoded.match(/^admin\.shopify\.com\/store\/([^/]+)/i);
         const m2 = decoded.match(/^([^/]+)\.myshopify\.com\/admin/i);
         if (m1?.[1]) shop = toMyshop(m1[1]);
@@ -435,12 +433,10 @@ app.get('/embedded', async (req, res) => {
       try { host = Buffer.from(`${shop}/admin`).toString('base64'); } catch { host = ''; }
     }
 
-    // 2) If we can’t resolve a shop, still serve the Admin UI (App Bridge can recover via host later)
     if (!shop) {
       return res.sendFile(adminUiIndex);
     }
 
-    // 3) Check for an existing OFFLINE session; if missing → do a TOP-LEVEL hop before OAuth
     try {
       const offlineId = shopify.session.getOfflineId(shop);
       const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
@@ -451,7 +447,6 @@ app.get('/embedded', async (req, res) => {
         const u = new URL('/api/auth/toplevel', base);
         u.searchParams.set('shop', shop);
         if (host) u.searchParams.set('host', host);
-        // After OAuth, return to our Admin UI (embedded)
         u.searchParams.set('return_to', '/admin-ui');
         return res.redirect(302, u.toString());
       }
@@ -464,7 +459,6 @@ app.get('/embedded', async (req, res) => {
       return res.redirect(302, u.toString());
     }
 
-    // 4) Offline session exists → serve Admin UI
     return res.sendFile(adminUiIndex);
   } catch (e) {
     console.error('/embedded preflight error', e?.message || e);
@@ -473,7 +467,6 @@ app.get('/embedded', async (req, res) => {
 });
 
 // ───────────────────── Refina Concierge (widget) ─────────────────────
-// Serve the widget bundle where the launcher expects it
 app.use(
   '/proxy/refina',
   express.static(path.join(process.cwd(), 'public/concierge'), { index: false, maxAge: '1h' })
@@ -490,8 +483,7 @@ app.get('/apps/refina/v1/concerns', (_req, res) => {
   });
 });
 
-// ✅ Mount privacy/webhooks FIRST (needs raw body, no json/urlencoded before this)
-app.use('/api/privacy', privacyWebhooksRoutes);
+// (removed duplicate /api/privacy mount here)
 
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
@@ -618,8 +610,7 @@ app.get('/proxy/refina/v1/settings', requireAppProxy, rateLimitAppProxy, async (
       return t;
     };
 
-        const payload = deepMerge(DEFAULT_SETTINGS, saved);
-    // Canonicalize category and provide a display label
+    const payload = deepMerge(DEFAULT_SETTINGS, saved);
     const lcCategory = String(payload.category || "").trim().toLowerCase();
     payload.category = lcCategory;
     payload.categoryLabel = lcCategory
@@ -794,7 +785,7 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
       if (targetIngredients.length || requestedType) {
         const ingSet = new Set(targetIngredients);
         pool = allProducts.filter((p) => {
-          const ings = Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : [];
+          const ings = Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : Array.isArray(p.ingredients) ? p.ingredients : [];
           const typeOK = !requestedType || String(p.productTypeNormalized || p.productType || '').toLowerCase().includes(requestedType);
           return ((ings.some((x) => ingSet.has(String(x).toLowerCase())) || !targetIngredients.length) && typeOK);
         });
@@ -885,10 +876,9 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     // --- Fallback: if no products yet, serve a few via Admin API ---
     if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
       try {
-        const shop = String(storeId || '').toLowerCase(); // <- use your storeId
+        const shop = String(storeId || '').toLowerCase();
         let accessToken = req.accessToken;
 
-        // Load offline session token if middleware didn't attach one
         if (!accessToken && shop) {
           const offlineId = shopify.session.getOfflineId(shop);
           const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;
@@ -897,7 +887,6 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
         }
 
         if (shop && accessToken) {
-          // Use the user’s concern text as the search hint
           const q = concernInput || '';
           const fb = await fetchFallbackProducts(shop, accessToken, { limit: 10, query: q });
 
@@ -909,7 +898,7 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
               })),
               copy: copy || 'Here are some products from your catalog while Refina finishes indexing.',
               disclaimer,
-              ...(enriched ? { enriched } : {}), // keep existing if any
+              ...(enriched ? { enriched } : {}),
               meta: { ...meta, tone, plan, rankMode, routineMode, source: 'fallback', totalMs: Date.now() - t0 },
             };
             if (typeof cacheSet === 'function') cacheSet(cacheKey, fallbackPayload);
@@ -918,7 +907,6 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
         }
       } catch (err) {
         console.error('[recommend] fallback error', err);
-        // fall through to normal payload
       }
     }
     // --- end fallback ---
