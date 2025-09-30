@@ -47,17 +47,18 @@ export async function callGeminiStructured({
   const generationConfig = {
   ...(Number.isFinite(temperature) ? { temperature } : {}),
   ...(Number.isFinite(topP) ? { topP } : {}),
-  ...(Number.isFinite(maxOutputTokens) ? { maxOutput_tokens: maxOutputTokens } : {}), // optional: REST also accepts camelCase here, but this is safest
-  ...(responseMimeType ? { response_mime_type: responseMimeType } : {}),
-  // IMPORTANT: only pass response_schema if it’s a valid JSON Schema object.
-  // Your ConciergeResponseSchema is NOT JSON Schema; omit it for now.
-  ...(undefined), // leave out response_schema for now
+  ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
+  ...(responseMimeType ? { responseMimeType } : {}),
+  // Do NOT include responseSchema unless it’s a valid JSON Schema object supported by the API.
 };
 
   const body = {
-    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    generationConfig,
-  };
+  contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+  generationConfig,
+  ...(system && String(system).trim()
+    ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
+    : {})
+};
 
   if (system && String(system).trim()) {
     body.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
