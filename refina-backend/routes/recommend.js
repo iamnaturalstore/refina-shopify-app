@@ -192,53 +192,84 @@ router.post("/recommend", async (req, res) => {
       ingredientFacts,
     });
 
-    const raw = await callGemini(prompt, {  timeoutMs: 12000,
-  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+// Call Gemini (REST helper). No responseMimeType/schema. Longer timeout.
+const raw = await callGemini(prompt, {
+  model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+  timeoutMs: 30000,           // ← important to prevent AbortError on heavier prompts
+  temperature: 0.2,           // optional; steady style
+  maxOutputTokens: 1024        // optional; enough room for rich copy
 });
 
-    const vr = validateConciergeResponse(raw);
-    if (!vr.ok) {
-      return res.json({
-        productIds: [],
-        products: [],
-        explanation: "I couldn’t confidently pick products just yet. Please try another phrasing or check back soon.",
-        followUps: [],
-      });
-    }
+// Validate & coerce to Awesome
+const vr = validateConciergeResponse(raw);
+if (!vr.ok) {
+  // Soft failure: return “closest matches” shell while keeping HTTP 200
+  return res.json({
+    productIds: [],
+    products: [],
+    explanation: "I couldn’t confidently pick products just yet. Please try another phrasing or check back soon.",
+    followUps: [],
+    awesome: null,
+    source: "gemini-parse-failed"
+  });
+}
 
-    const allow = new Set(candidateDocs.map((p) => String(p.id)));
-    const productIds = vr.value.productIds.filter((id) => allow.has(String(id))).slice(0, 3);
+// Enforce candidate allowlist (IDs must be within candidateDocs)
+const allow = new Set(candidateDocs.map((p) => String(p.id)));
+const productIds = vr.value.productIds.filter((id) => allow.has(String(id)));
+if (!productIds.length) {
+  return res.json({
+    productIds: [],
+    products: [],
+    explanation: "Still learning this catalogue — try again shortly.",
+    followUps: [],
+    awesome: null,
+    source: "no-allowed-ids"
+  });
+}
 
-    const enrichedDocs = await loadProductsByIds(storeId, productIds);
-    const products = enrichedDocs.map((p) => {
-      const title = p.title || p.name || "";
-      const price = p.price != null ? p.price : undefined;
-      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-      if (!urlCandidate && p.path) urlCandidate = p.path;
-      const url = ensureAbsolute(urlCandidate, storeId);
-      const image = pickPrimaryImage(p, storeId);
-      return {
-        id: p.id,
-        title,
-        price,
-        ...(price_formatted ? { price_formatted } : {}),
-        image,
-        image_url: image,
-        url,
-      };
-    });
+// Enrich product docs for UI
+const enrichedDocs = await loadProductsByIds(storeId, productIds);
+const products = enrichedDocs.map((p) => {
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  return {
+    id: p.id,
+    title,
+    price,
+    ...(price_formatted ? { price_formatted } : {}),
+    image,
+    image_url: image,
+    url,
+  };
+});
 
-    const explanation = vr.value.explanation || "";
+// Return FULL awesome payload + legacy fields the UI already reads
+return res.json({
+  productIds,
+  products,
+  // Legacy single-string explanation for old UI; prefer awesome.explanation in new UI
+  explanation: vr.value.explanation.oneLiner || vr.value.copy.why || "",
+  followUps: [],
 
-    return res.json({
-      productIds,
-      products,
-      explanation,
-      followUps: [],
-      tookMs: Date.now() - started,
-      source: "gemini",
-    });
+  // The Awesome block (use these on the UI for the full experience)
+  awesome: {
+    primary: vr.value.primary,
+    alternatives: vr.value.alternatives,
+    explanation: vr.value.explanation,
+    copy: vr.value.copy,
+    productIds
+  },
+
+  tookMs: Date.now() - started,
+  source: "gemini"
+});
+
   } catch (err) {
     console.error("❌ /api/recommend error:", err);
     return res.json({

@@ -1,63 +1,74 @@
 // refina-backend/ai/validateConcierge.js
-// Tiny helper: parse raw model text and validate against ConciergeResponseSchema.
-// Returns { ok, value, errors? }. `value` is a minimal normalized object.
+// Runtime validator/coercer for the Concierge response (rich Awesome).
 
-import { ConciergeResponseSchema } from "./jsonSchemas.js";
-
-function extractJson(raw) {
-  const s = String(raw || "").trim();
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    const m = s.match(/```json([\s\S]*?)```/i);
-    if (m) {
-      try { return JSON.parse(m[1]); } catch {}
-    }
-    return null;
-  }
-}
-
-function isStringArray(a) {
-  return Array.isArray(a) && a.every((x) => typeof x === "string");
-}
+function s(x) { return typeof x === "string" ? x.trim() : ""; }
+function arr(x) { return Array.isArray(x) ? x : []; }
+function shortStr(x, n = 600) { const v = s(x); return v.length > n ? v.slice(0, n - 1).trimEnd() + "…" : v; }
 
 export function validateConciergeResponse(raw) {
-  const json = extractJson(raw);
-  if (!json || typeof json !== "object") {
-    return { ok: false, errors: ["not_json"] };
+  const errors = [];
+  if (!raw || !s(raw)) return bad("empty model text");
+
+  let obj = null;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    // handle ```json fences if present
+    const m = raw.match(/```json([\s\S]*?)```/i);
+    if (m) {
+      try { obj = JSON.parse(m[1]); } catch {}
+    }
   }
+  if (!obj || typeof obj !== "object") return bad("non-JSON response");
 
-  // Minimal checks aligned to ConciergeResponseSchema requirements
-  // required: primary (with id), productIds (array of strings)
-  const primary = json.primary;
-  const productIds = json.productIds;
+  // Primary
+  const primary = {};
+  primary.id = s(obj?.primary?.id);
+  primary.score = Number.isFinite(Number(obj?.primary?.score)) ? Number(obj.primary.score) : undefined;
+  primary.reasons = arr(obj?.primary?.reasons).map(s).filter(Boolean).slice(0, 8);
+  primary.howToUse = arr(obj?.primary?.howToUse).map(s).filter(Boolean).slice(0, 8);
+  primary.tagsMatched = arr(obj?.primary?.tagsMatched).map(s).filter(Boolean).slice(0, 12);
+  if (!primary.id) errors.push("primary.id missing");
 
-  const errs = [];
-  if (!primary || typeof primary !== "object") errs.push("primary missing/object");
-  if (!primary?.id || typeof primary.id !== "string" || !primary.id.trim()) errs.push("primary.id missing");
+  // Alts
+  const alternatives = arr(obj?.alternatives)
+    .map(a => ({
+      id: s(a?.id),
+      when: shortStr(a?.when || "", 120),
+      reasons: arr(a?.reasons).map(s).filter(Boolean).slice(0, 4),
+    }))
+    .filter(a => a.id)
+    .slice(0, 4);
 
-  if (!isStringArray(productIds) || productIds.length === 0) errs.push("productIds missing/empty");
-
-  // Optional copy/explanation are free-form; we won't hard fail if absent.
-  const explanation =
-    json?.explanation?.friendlyParagraph ||
-    json?.copy?.why ||
-    json?.explanation?.oneLiner ||
-    "";
-
-  if (errs.length) return { ok: false, errors: errs };
-
-  // Normalize to consistent shape for the route
-  const normalized = {
-    primary: { id: String(primary.id).trim() },
-    productIds: productIds.map((s) => String(s).trim()).filter(Boolean),
-    explanation: String(explanation || "").trim(),
-    // pass-through optional fields if present
-    alternatives: Array.isArray(json.alternatives) ? json.alternatives : [],
+  // Explanation (object form)
+  const explanation = {
+    oneLiner: shortStr(obj?.explanation?.oneLiner || "", 220),
+    friendlyParagraph: shortStr(obj?.explanation?.friendlyParagraph || "", 800),
+    expertBullets: arr(obj?.explanation?.expertBullets).map(x => shortStr(x, 200)).slice(0, 8),
+    usageTips: arr(obj?.explanation?.usageTips).map(x => shortStr(x, 160)).slice(0, 8),
   };
 
-  return { ok: true, value: normalized };
+  // Copy (back-compat text mirrors)
+  const copy = {
+    why: shortStr(obj?.copy?.why || explanation.oneLiner || explanation.friendlyParagraph || "", 800),
+    rationale: shortStr(obj?.copy?.rationale || arr(explanation.expertBullets).join(" • "), 800),
+    extras: shortStr(obj?.copy?.extras || arr(explanation.usageTips).join(" • "), 600),
+  };
+
+  // productIds
+  let productIds = arr(obj?.productIds).map(s).filter(Boolean);
+  if (!productIds.length && primary.id) {
+    productIds = [primary.id, ...alternatives.map(a => a.id)];
+  }
+  // de-dupe & cap
+  productIds = Array.from(new Set(productIds)).slice(0, 5);
+
+  if (!primary.id) return bad("no primary.id", { primary, alternatives, explanation, copy, productIds });
+
+  return ok({ primary, alternatives, explanation, copy, productIds });
 }
+
+function ok(value) { return { ok: true, value }; }
+function bad(msg, value) { return { ok: false, errors: [msg], value }; }
 
 export default { validateConciergeResponse };

@@ -1,6 +1,6 @@
 // refina-backend/bff/ai/gemini.js
 // REST-only generateContent helper (no @google/generative-ai SDK).
-// Returns STRICT-JSON text (as string) or null on failure.
+// Returns model text (STRICT JSON per your prompt) or null.
 
 const API_KEY =
   process.env.GEMINI_API_KEY ||
@@ -16,25 +16,15 @@ if (!API_KEY) {
 
 /**
  * Low-level structured caller via REST. Returns model **text** (string) or null on failure.
- *
- * @param {Object} args
- * @param {string} args.prompt
- * @param {string} [args.model] - e.g. "gemini-2.5-flash"
- * @param {number} [args.timeoutMs=15000]
- * @param {number} [args.temperature]
- * @param {number} [args.topP]
- * @param {number} [args.maxOutputTokens]
- * @param {object} [args.responseSchema]
- * @param {string} [args.system]
+ * Supported gen params: temperature, topP, maxOutputTokens. No response schema/mime here.
  */
 export async function callGeminiStructured({
   prompt,
   model,
-  timeoutMs = 15000,
+  timeoutMs = 30000,          // ← give generation enough headroom
   temperature,
   topP,
   maxOutputTokens,
-  responseSchema,
   system,
 }) {
   if (!API_KEY) return null;
@@ -42,23 +32,19 @@ export async function callGeminiStructured({
   const mdl = String(model || DEFAULT_MODEL).trim();
   const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
 
-  const generationConfig = {};
-if (Number.isFinite(temperature)) generationConfig.temperature = temperature;
-if (Number.isFinite(topP))        generationConfig.topP        = topP;
-if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutputTokens;
-
+  const generationConfig = {
+    ...(Number.isFinite(temperature) ? { temperature } : {}),
+    ...(Number.isFinite(topP) ? { topP } : {}),
+    ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
+  };
 
   const body = {
-  contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-  ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
-  ...(system && String(system).trim()
+    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+    ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
+    ...(system && String(system).trim()
       ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
       : {}),
-};
-
-  if (system && String(system).trim()) {
-    body.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
-  }
+  };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -73,13 +59,11 @@ if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutp
 
     if (!resp.ok) {
       const txt = await resp.text().catch(() => "");
-      console.warn(`[Gemini REST] HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 300)}`);
+      console.warn(`[Gemini REST] HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 400)}`);
       return null;
     }
 
     const data = await resp.json();
-
-    // Concatenate all text parts from the first candidate
     const parts = data?.candidates?.[0]?.content?.parts;
     if (Array.isArray(parts)) {
       const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
@@ -96,10 +80,7 @@ if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutp
   }
 }
 
-/**
- * Thin wrapper used by routes/workers:
- *   const text = await callGemini(prompt, genConfig)
- */
+/** Thin wrapper */
 export function callGemini(prompt, genConfig = {}) {
   return callGeminiStructured({
     prompt,
@@ -107,7 +88,7 @@ export function callGemini(prompt, genConfig = {}) {
     temperature: genConfig?.temperature,
     topP: genConfig?.topP,
     maxOutputTokens: genConfig?.maxOutputTokens,
-    timeoutMs: genConfig?.timeoutMs ?? 15000,    responseSchema: genConfig?.responseSchema,
+    timeoutMs: genConfig?.timeoutMs ?? 30000, // keep aligned with above
     system: genConfig?.system,
   });
 }
