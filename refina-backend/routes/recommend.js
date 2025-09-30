@@ -129,17 +129,19 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    const candidates = shortlistCandidates(allEmb, qVec, strictness);
+    const candidates = shortlistCandidates(allEmb, qVec, strictness).slice(0, 16); // keep prompt small
     const candidateIds = candidates.map((c) => c.id);
     const candidateDocs = await loadProductsByIds(storeId, candidateIds);
 
-    // Keep the prompt lightweight: only fields the LLM actually needs
+    // keep fields minimal & strip HTML/long text
+    const stripHtml = (s="") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const cap = (s, n=400) => (s.length > n ? s.slice(0, n-1) + "…" : s);
     const promptProducts = candidateDocs.map((p) =>
       pick(
         {
           id: p.id || p.name,
           name: p.title || p.name,
-          description: p.description || p.body_html || "",
+          description: cap(stripHtml(p.description || p.body_html || "")),
           tags: Array.isArray(p.tags) ? p.tags : typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()) : [],
           productType: p.productType || "",
           productType_norm: p.productType_norm || p.productTypeNormalized || "",
@@ -176,24 +178,24 @@ router.post("/recommend", async (req, res) => {
     });
 
 // Call Gemini via SDK with strict JSON contract + schema, and a tight budget
-     let raw = null;
+    // Hard-cap the LLM call via Promise.race (don’t rely on SDK timeout)
+    let raw = null;
     try {
       const llmPromise = callGemini(prompt, {
         model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
         temperature: 0.7,
         topP: 0.95,
         maxOutputTokens: 512,
-        responseSchema: ConciergeResponseSchema,
-        timeoutMs: LLM_BUDGET_MS, // also enforced inside callGemini
+        responseSchema: ConciergeResponseSchema, // strict shape
+        // NOTE: do NOT pass a timeout here; race will enforce the 12s cap
       });
       raw = await Promise.race([
         llmPromise,
         new Promise((_, rej) => setTimeout(() => rej(new Error("llm_timeout")), LLM_BUDGET_MS)),
       ]);
-    } catch (e) {
+    } catch {
       raw = null; // fall back below
     }
-
 
 // Validate & coerce to Awesome
 const vr = validateConciergeResponse(raw);
