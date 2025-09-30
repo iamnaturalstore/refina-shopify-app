@@ -107,7 +107,7 @@ router.post('/store-settings', express.json(), async (req, res) => {
     if (aiControls !== undefined) {
       // store as-is, but guard against huge payloads
       updates.aiControls = {
-        promptStrictness: aiControls.promptStrictness ?? 'balanced',
+        promptStrictness: aiControls.promptStrictness ?? 'relaxed',
         exclusions: Array.isArray(aiControls.exclusions) ? aiControls.exclusions.slice(0, 50) : [],
         enableFollowUps: Boolean(aiControls.enableFollowUps),
         safetyTone: Boolean(aiControls.safetyTone),

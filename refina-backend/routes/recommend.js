@@ -194,7 +194,7 @@ router.post("/recommend", async (req, res) => {
 
 // Call Gemini (REST helper). No responseMimeType/schema. Longer timeout.
 const raw = await callGemini(prompt, {
-  model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+  model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-pro",
   timeoutMs: 30000,           // ← important to prevent AbortError on heavier prompts
   temperature: 0.2,           // optional; steady style
   maxOutputTokens: 1024        // optional; enough room for rich copy

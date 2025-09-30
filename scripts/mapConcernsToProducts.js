@@ -15,7 +15,7 @@ const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
 
 // 🧠 Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL = "gemini-2.5-flash"; // ✅ Stable, fast, accurate
+const MODEL = "gemini-2.5-pro"; // ✅ Stable, fast, accurate
 
 // 🧯 Init Firebase Admin
 if (!admin.apps.length) {

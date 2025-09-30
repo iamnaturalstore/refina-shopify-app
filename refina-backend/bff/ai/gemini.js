@@ -8,7 +8,7 @@ const API_KEY =
   "";
 
 const API_BASE = (process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1").replace(/\/+$/, "");
-const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
+const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-pro").trim();
 
 if (!API_KEY) {
   console.warn("[Gemini REST] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
@@ -92,5 +92,10 @@ export function callGemini(prompt, genConfig = {}) {
     system: genConfig?.system,
   });
 }
+
+// TEMP: inspect model output shape
+if (!raw) console.warn("[recommend] Gemini returned null");
+else console.log("[recommend] raw(len=%d) head=%s", raw.length, raw.slice(0, 240));
+
 
 export default { callGeminiStructured, callGemini };

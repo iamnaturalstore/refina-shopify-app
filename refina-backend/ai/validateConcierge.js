@@ -55,11 +55,33 @@ export function validateConciergeResponse(raw) {
     extras: shortStr(obj?.copy?.extras || arr(explanation.usageTips).join(" • "), 600),
   };
 
-  // productIds
-  let productIds = arr(obj?.productIds).map(s).filter(Boolean);
-  if (!productIds.length && primary.id) {
-    productIds = [primary.id, ...alternatives.map(a => a.id)];
-  }
+  /// Ensure primary.id exists if model only returned productIds/alternatives
+if (!primary.id) {
+  const firstFromProductIds = Array.isArray(obj?.productIds) && obj.productIds.length ? String(obj.productIds[0] || "").trim() : "";
+  const firstAlt = alternatives.find(a => a && a.id)?.id || "";
+  primary.id = (firstFromProductIds || firstAlt || "").trim();
+}
+
+// Build productIds as a unique, ordered union (primary → alternatives → model.productIds)
+const altIds = alternatives.map(a => String(a.id || "").trim()).filter(Boolean);
+const modelIds = (Array.isArray(obj?.productIds) ? obj.productIds : []).map(x => String(x || "").trim()).filter(Boolean);
+
+const ordered = [primary.id, ...altIds, ...modelIds].filter(Boolean);
+const uniq = Array.from(new Set(ordered));
+
+// Final, capped list (keep it small for UI + downstream fetches)
+const productIds = uniq.slice(0, 3);
+
+// If we still have nothing, fail validation gracefully
+if (!productIds.length) {
+  return { ok: false, errors: ["no productIds derivable from model output"] };
+}
+
+// Expose back
+out.primary = primary;
+out.alternatives = alternatives;
+out.productIds = productIds;
+
   // de-dupe & cap
   productIds = Array.from(new Set(productIds)).slice(0, 5);
 
