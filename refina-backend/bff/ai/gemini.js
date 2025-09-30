@@ -10,6 +10,8 @@ const API_KEY =
 const API_BASE = (process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1").replace(/\/+$/, "");
 const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-pro").trim();
 
+const DEFAULT_MAX_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 1024);
+
 if (!API_KEY) {
   console.warn("[Gemini REST] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
 }
@@ -36,6 +38,8 @@ export async function callGeminiStructured({
     ...(Number.isFinite(temperature) ? { temperature } : {}),
     ...(Number.isFinite(topP) ? { topP } : {}),
     ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
+    // always provide a cap; large enough for concierge JSON + copy
+  maxOutputTokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : DEFAULT_MAX_TOKENS,
   };
 
   const body = {
@@ -78,6 +82,24 @@ export async function callGeminiStructured({
   } finally {
     clearTimeout(timer);
   }
+  const c = data?.candidates?.[0];
+if (!c) {
+  const pf = data?.promptFeedback;
+  const sr = pf?.safetyRatings || [];
+  const reasons = Array.isArray(sr) ? sr.map(r => `${r.category}:${r.probability}`).join(", ") : "none";
+  console.warn("[Gemini REST] empty candidates",
+    pf?.blockReason ? `blockReason=${pf.blockReason}` : "",
+    reasons ? `safety=${reasons}` : ""
+  );
+  return null;
+}
+
+// If we *do* have a candidate but no text parts, surface the finish reason
+if (!Array.isArray(c?.content?.parts) || !c.content.parts.length) {
+  const fr = c?.finishReason || "unspecified";
+  console.warn("[Gemini REST] candidate has no text parts; finishReason=", fr);
+  return null;
+}
 }
 
 /** Thin wrapper */
