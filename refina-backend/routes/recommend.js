@@ -105,6 +105,7 @@ const router = express.Router();
 router.post("/recommend", async (req, res) => {
   const started = Date.now();
   try {
+    const LLM_BUDGET_MS = 12000; // cap concierge latency so UI never stalls
     const { storeId, concern } = req.body || {};
     if (!storeId || !concern) {
       return res.status(400).json({ error: "storeId and concern are required." });
@@ -132,6 +133,7 @@ router.post("/recommend", async (req, res) => {
     const candidateIds = candidates.map((c) => c.id);
     const candidateDocs = await loadProductsByIds(storeId, candidateIds);
 
+    // Keep the prompt lightweight: only fields the LLM actually needs
     const promptProducts = candidateDocs.map((p) =>
       pick(
         {
@@ -144,16 +146,7 @@ router.post("/recommend", async (req, res) => {
           category: p.categoryNormalized || p.category || "",
           keywords: Array.isArray(p.keywords) ? p.keywords : [],
           keywordsNormalized: Array.isArray(p.keywordsNormalized) ? p.keywordsNormalized : [],
-          ingredients: Array.isArray(p.ingredients) ? p.ingredients : [],
-          ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : [],
-          benefits: Array.isArray(p.benefits) ? p.benefits : [],
-          benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized : [],
-          concerns: Array.isArray(p.concerns) ? p.concerns : [],
-          concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized : [],
-          usageStep: p.usageStep || p.step || "",
-          audience: p.audience || {},
-          price: p.price ?? p.minPrice ?? undefined,
-          body_html: p.body_html || "",
+          // Keep the rest minimal to reduce tokens; the concierge schema doesn't need HTML or pricing here
         },
         [
           "id",
@@ -165,16 +158,6 @@ router.post("/recommend", async (req, res) => {
           "category",
           "keywords",
           "keywordsNormalized",
-          "ingredients",
-          "ingredientsNormalized",
-          "benefits",
-          "benefitsNormalized",
-          "concerns",
-          "concernsNormalized",
-          "usageStep",
-          "audience",
-          "price",
-          "body_html",
         ]
       )
     );
@@ -192,50 +175,95 @@ router.post("/recommend", async (req, res) => {
       ingredientFacts,
     });
 
-// Call Gemini (REST helper). No responseMimeType/schema. Longer timeout.
-const raw = await callGemini(prompt, {
-  model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-pro",
-  timeoutMs: 30000,           // ← important to prevent AbortError on heavier prompts
-  temperature: 0.2,           // optional; steady style
-  maxOutputTokens: 1024,        // optional; enough room for rich copy
-  topP: 0.9,
-});
-
-// TEMP DEBUG (safe): inspect model output shape
-if (!raw) {
-  console.warn("[recommend] Gemini returned null");
-} else {
-  const head = raw.slice(0, 240).replace(/\n/g, " ");
-  console.log("[recommend] raw(len=%d) head=%s", raw.length, head);
-}
+// Call Gemini via SDK with strict JSON contract + schema, and a tight budget
+     let raw = null;
+    try {
+      const llmPromise = callGemini(prompt, {
+        model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+        temperature: 0.7,
+        topP: 0.95,
+        maxOutputTokens: 512,
+        responseSchema: ConciergeResponseSchema,
+        timeoutMs: LLM_BUDGET_MS, // also enforced inside callGemini
+      });
+      raw = await Promise.race([
+        llmPromise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error("llm_timeout")), LLM_BUDGET_MS)),
+      ]);
+    } catch (e) {
+      raw = null; // fall back below
+    }
 
 
 // Validate & coerce to Awesome
 const vr = validateConciergeResponse(raw);
 if (!vr.ok) {
-  // Soft failure: return “closest matches” shell while keeping HTTP 200
-  return res.json({
-    productIds: [],
-    products: [],
-    explanation: "I couldn’t confidently pick products just yet. Please try another phrasing or check back soon.",
-    followUps: [],
-    awesome: null,
-    source: "gemini-parse-failed"
-  });
-}
+  // Soft failure: return useful fallback based on retrieval
+    const fallbackIds = candidateDocs.slice(0, 6).map(p => String(p.id));
+    const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
+    const products = enrichedFallback.map((p) => {
+      const title = p.title || p.name || "";
+      const price = p.price != null ? p.price : undefined;
+      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+      if (!urlCandidate && p.path) urlCandidate = p.path;
+      const url = ensureAbsolute(urlCandidate, storeId);
+      const image = pickPrimaryImage(p, storeId);
+      return {
+        id: p.id,
+        title,
+        price,
+        ...(price_formatted ? { price_formatted } : {}),
+        image,
+        image_url: image,
+        url,
+      };
+    });
+    return res.json({
+      productIds: fallbackIds,
+      products,
+      explanation: "Here are the strongest matches from the catalogue while the assistant warms up.",
+      followUps: [],
+      awesome: null,
+      source: "gemini-fallback",
+      tookMs: Date.now() - started,
+    });
+   }
 
 // Enforce candidate allowlist (IDs must be within candidateDocs)
 const allow = new Set(candidateDocs.map((p) => String(p.id)));
 const productIds = vr.value.productIds.filter((id) => allow.has(String(id)));
 if (!productIds.length) {
-  return res.json({
-    productIds: [],
-    products: [],
-    explanation: "Still learning this catalogue — try again shortly.",
-    followUps: [],
-    awesome: null,
-    source: "no-allowed-ids"
-  });
+  // Fallback to top retrieved if the LLM picked out-of-corpus IDs
+    const fallbackIds = candidateDocs.slice(0, 6).map(p => String(p.id));
+    const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
+    const products = enrichedFallback.map((p) => {
+      const title = p.title || p.name || "";
+      const price = p.price != null ? p.price : undefined;
+      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+      if (!urlCandidate && p.path) urlCandidate = p.path;
+      const url = ensureAbsolute(urlCandidate, storeId);
+      const image = pickPrimaryImage(p, storeId);
+      return {
+        id: p.id,
+        title,
+        price,
+        ...(price_formatted ? { price_formatted } : {}),
+        image,
+        image_url: image,
+        url,
+      };
+    });
+    return res.json({
+      productIds: fallbackIds,
+      products,
+      explanation: "Here are the strongest matches from the catalogue.",
+      followUps: [],
+      awesome: null,
+      source: "no-allowed-ids-fallback",
+      tookMs: Date.now() - started,
+    });
 }
 
 // Enrich product docs for UI
@@ -264,7 +292,7 @@ return res.json({
   productIds,
   products,
   // Legacy single-string explanation for old UI; prefer awesome.explanation in new UI
-  explanation: vr.value.explanation.oneLiner || vr.value.copy.why || "",
+  explanation: (vr.value?.explanation?.oneLiner || vr.value?.copy?.why || "Here are the strongest matches for your concern.").trim(),
   followUps: [],
 
   // The Awesome block (use these on the UI for the full experience)
