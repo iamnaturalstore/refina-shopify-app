@@ -268,6 +268,42 @@ function dedupeEntities(list) {
   return out;
 }
 
+// Salvage minimal entities from a broken JSON/text blob (LLM fallback)
+function salvageEntities(raw = "") {
+  const text = String(raw || "").slice(0, 1200);
+  const names = new Set();
+
+  // 1) Grab JSON-ish lists like ["alpha","beta"]
+  const listMatches = text.match(/\[([^\]]+)\]/g) || [];
+  for (const lst of listMatches) {
+    lst
+      .replace(/[\[\]"]/g, "")
+      .split(/[,|•;\/\n]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 3 && s.length <= 40)
+      .forEach((s) => names.add(s));
+  }
+
+  // 2) Look for “ingredients: …” or “components: …”
+  const nearIng = text.match(/(?:ingredients?|components?|actives?)\s*[:\-]\s*([\s\S]{0,300})/i);
+  if (nearIng) {
+    nearIng[1]
+      .split(/[,|•;\/\n]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 3 && s.length <= 40)
+      .forEach((s) => names.add(s));
+  }
+
+  // 3) Fallback: some capitalized tokens
+  const caps = text.match(/\b([A-Z][a-z][A-Za-z\-]{1,30})\b/g) || [];
+  caps.slice(0, 20).forEach((s) => names.add(s));
+
+  // Return up to 24 lightweight entities
+  return Array.from(names)
+    .slice(0, 24)
+    .map((n) => ({ name: n, type: "ingredient" }));
+}
+
 // ─────────────────────────────────────────────────────────────
 // KB derivation + write
 // ─────────────────────────────────────────────────────────────
