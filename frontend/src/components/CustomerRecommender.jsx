@@ -189,7 +189,7 @@ export default function CustomerRecommender() {
       <textarea className={styles.textarea} value={concern} onChange={(e) => setConcern(e.target.value)} onKeyDown={onTextKeyDown} placeholder="Type your concern… (Enter to Ask, Shift+Enter for new line)" />
 
       <button className={styles.askButton} onClick={() => handleRecommend(concern)} disabled={loading} aria-busy={loading}>
-        {loading ? <>Thinking<span className={styles.dots} aria-hidden="true" /></> : ctaText}
+        {loading ? <>Researching<span className={styles.dots} aria-hidden="true" /></> : ctaText}
       </button>
 
       {(copy.why || copy.rationale || copy.extras) && ( <div className={styles.responseBox} aria-live="polite"> <h2>Here’s what I’d pick</h2> {copy.why ? <p className={styles.opener}>{copy.why}</p> : null} {copy.rationale ? <p className={styles.blurb}>{copy.rationale}</p> : null} {copy.extras ? <p className={styles.usageNote}>{copy.extras}</p> : null} </div> )}
