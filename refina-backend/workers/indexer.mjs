@@ -119,63 +119,49 @@ function withTimeout(promise, ms, tag = "timeout") {
   ]);
 }
 
-function repairJson(text = "") {
-  let s = String(text || "");
-  const m = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  s = m ? m[1] : s;
-  s = s
-    .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
-    .replace(/^\uFEFF/, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1")
-    .replace(/,\s*(\}|\])/g, "$1")
-    .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_\-]*)(\s*:)/g, '$1"$2"$3')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_all, inner) => `"${inner.replace(/"/g, '\\"')}"`)
-    .replace(/:\s+/g, ": ");
-  return s.trim();
+// Build the canonical text we’ll embed (title + short desc + tags)
+function productEmbedText(p, descCap = 900) {
+  const title = String(p.title || p.name || "").trim();
+  const raw = stripHtml(p.description || p.body_html || "");
+  const desc = raw.length > descCap ? raw.slice(0, descCap) + "…" : raw;
+  const tags = Array.isArray(p.tags)
+    ? p.tags
+    : typeof p.tags === "string"
+      ? p.tags.split(",").map(s => s.trim()).filter(Boolean)
+      : [];
+  return [title, desc, tags.slice(0, 16).join(", ")].filter(Boolean).join("\n\n");
 }
 
-function extractJson(text = "") {
-  const raw = String(text).trim();
-  try { return JSON.parse(raw); } catch {}
-  const a = raw.indexOf("{"); const b = raw.lastIndexOf("}");
-  if (a >= 0 && b > a) {
-    const body = raw.slice(a, b + 1);
-    try { return JSON.parse(body); } catch {
-      const repaired = repairJson(body);
-      try { return JSON.parse(repaired); } catch {}
-    }
+// Pure REST embedding call (no SDK)
+async function embedText(text) {
+  const key =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY || "";
+  if (!key) return [];
+
+  const url = `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${encodeURIComponent(key)}`;
+  const body = {
+    model: "models/text-embedding-004",
+    content: { parts: [{ text: String(text || "") }] },
+  };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), Number(process.env.REFINA_EMBED_TIMEOUT_MS || 8000));
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data?.embedding?.values) ? data.embedding.values.map(Number) : [];
+  } catch {
+    clearTimeout(timer);
+    return [];
   }
-  const repairedAll = repairJson(raw);
-  try { return JSON.parse(repairedAll); } catch {}
-  throw new Error("invalid_json");
-}
-
-function salvageEntities(raw = "") {
-  const out = [];
-  const seen = new Set();
-  const s = String(raw);
-  const re = /"name"\s*:\s*"([^"]{2,80})"\s*,\s*"type"\s*:\s*"([^"]{3,30})"/gi;
-  let m;
-  while ((m = re.exec(s))) {
-    const name = m[1].trim();
-    const type = m[2].trim().toLowerCase();
-    if (!name || !type) continue;
-    const key = slugify(name) + "|" + type;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ name, type, synonyms: [], fact: "", cautions: "" });
-    if (out.length >= 24) break;
-  }
-  return out;
-}
-
-async function fetchProducts(storeId, limit = 1000) {
-  const out = [];
-  const snap = await db.collection(`products/${storeId}/items`).limit(limit).get();
-  snap.forEach(d => out.push({ id: d.id, ...d.data(), storeId }));
-  return out;
 }
 
 function productToPromptInput(p, cap = 900) {
@@ -184,8 +170,8 @@ function productToPromptInput(p, cap = 900) {
   const tags = Array.isArray(p.tags)
     ? p.tags
     : typeof p.tags === "string"
-    ? p.tags.split(",").map(s => s.trim()).filter(Boolean)
-    : [];
+      ? p.tags.split(",").map(s => s.trim()).filter(Boolean)
+      : [];
   return {
     id: p.id,
     title: p.title || p.name || "",
@@ -276,10 +262,10 @@ async function upsertKbProduct({ storeId, product, extraction }) {
 // ─────────────────────────────────────────────────────────────
 // Firestore writes (idempotent + batched)
 // ─────────────────────────────────────────────────────────────
-async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
+async function upsertEntitiesAndLinks({ storeId, productId, extraction, product }) {
   const batch = db.batch();
 
-  // ⬅️ CHANGED: canonical embedding doc path
+  // Canonical embedding doc path (same doc you already write entities/evidence to)
   const linkRef = db.doc(`productEmbeddings/${storeId}/items/${productId}`);
 
   const slugs = uniq(extraction.entities.map(e => slugify(e.name)));
@@ -288,21 +274,24 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
     evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
   }));
 
+  // NEW: compute an embedding vector for this product
+  const textForEmb = productEmbedText(product);
+  const vector = await embedText(textForEmb); // [] if embed call fails
+
   batch.set(linkRef, {
     productId,
     entities: slugs.slice(0, 64),
     evidence,
+    ...(vector.length ? { vector } : {}), // ← merge vector when available
     updatedAt: nowTs(),
     schemaVersion: 1,
   }, { merge: true });
 
+  // Per-product entity facts path (unchanged)
   for (const ent of extraction.entities) {
     const slug = slugify(ent.name);
     if (!slug) continue;
-
-    // ⬅️ CHANGED: canonical per-product entity facts path
     const ref = db.doc(`products/${storeId}/items/${productId}/entities/${slug}`);
-
     batch.set(ref, {
       name: ent.name,
       type: ent.type,
@@ -323,10 +312,7 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction }) {
       for (const ent of extraction.entities) {
         const slug = slugify(ent.name);
         if (!slug) continue;
-
-        // ⬅️ CHANGED: same canonical path as above
         const ref = db.doc(`products/${storeId}/items/${productId}/entities/${slug}`);
-
         batch2.set(ref, {
           name: ent.name,
           type: ent.type,
@@ -442,16 +428,18 @@ function pLimit(n) {
           }
           if (COMMIT) {
             const base = baselineExtractFromText(productToPromptInput(p));
-            if (base.entities.length || base.specs.length) {
-              await upsertEntitiesAndLinks({
-                storeId: STORE,
-                productId: p.id,
-                extraction: { product: { id: String(p.id) }, ...base },
-              });
-              // KB from baseline (thin but better than nothing)
-              await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
-              processed++; wrote++;
-            }
+if (base.entities.length || base.specs.length) {
+  await upsertEntitiesAndLinks({
+    storeId: STORE,
+    productId: p.id,
+    extraction: { product: { id: String(p.id) }, ...base },
+    product: p, // ← required so the function can embed & write { vector }
+  });
+  // KB from baseline (thin but better than nothing)
+  await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
+  processed++; wrote++;
+}
+
           }
           return;
         }
