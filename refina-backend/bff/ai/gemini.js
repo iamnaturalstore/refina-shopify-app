@@ -93,9 +93,4 @@ export function callGemini(prompt, genConfig = {}) {
   });
 }
 
-// TEMP: inspect model output shape
-if (!raw) console.warn("[recommend] Gemini returned null");
-else console.log("[recommend] raw(len=%d) head=%s", raw.length, raw.slice(0, 240));
-
-
 export default { callGeminiStructured, callGemini };

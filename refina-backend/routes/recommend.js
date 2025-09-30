@@ -200,6 +200,15 @@ const raw = await callGemini(prompt, {
   maxOutputTokens: 1024        // optional; enough room for rich copy
 });
 
+// TEMP DEBUG (safe): inspect model output shape
+if (!raw) {
+  console.warn("[recommend] Gemini returned null");
+} else {
+  const head = raw.slice(0, 240).replace(/\n/g, " ");
+  console.log("[recommend] raw(len=%d) head=%s", raw.length, head);
+}
+
+
 // Validate & coerce to Awesome
 const vr = validateConciergeResponse(raw);
 if (!vr.ok) {
