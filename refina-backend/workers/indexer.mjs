@@ -93,7 +93,7 @@ const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.3),
   maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024),
-  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-pro",};
+  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",};
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 14000);
 const BATCH_SIZE = 400;
 
@@ -117,6 +117,24 @@ function withTimeout(promise, ms, tag = "timeout") {
     promise,
     new Promise((_, rej) => setTimeout(() => rej(new Error(tag)), ms)),
   ]);
+}
+
+// Light retry helper for transient LLM hiccups
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+async function callGeminiWithRetry(prompt, cfg, timeoutMs) {
+  // attempts: 1 initial + 2 retries with 250ms, 500ms backoff
+  const backoffs = [0, 250, 500];
+  let lastErr;
+  for (let i = 0; i < backoffs.length; i++) {
+    if (backoffs[i] > 0) await sleep(backoffs[i]);
+    try {
+      // Keep existing overall timeout guard per attempt
+      return await withTimeout(callGemini(prompt, cfg), timeoutMs, "timeout");
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("llm_failed");
 }
 
 // Build the canonical text we’ll embed (title + short desc + tags)
@@ -382,7 +400,8 @@ async function extractForProduct({ storeId, product }) {
     const cfg = { ...GENCFG, ...(schema ? { responseSchema: schema } : {}), ...(systemHint ? { system: systemHint } : {}) };
     let text;
     try {
-      text = await withTimeout(callGemini(prompt, cfg), LLM_TIMEOUT_MS, "timeout");
+      // Light retry around callGemini to smooth over transient 5xx/timeout blips
+      text = await callGeminiWithRetry(prompt, cfg, LLM_TIMEOUT_MS);
     } catch (e) {
       const reason = /timeout/i.test(String(e?.message)) ? "timeout" : "error";
       return { ok: false, reason, ms: Date.now() - started, raw: "" };

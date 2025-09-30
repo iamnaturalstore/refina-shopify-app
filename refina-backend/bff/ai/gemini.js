@@ -1,22 +1,33 @@
 // refina-backend/bff/ai/gemini.js
-// REST-only generateContent helper (no @google/generative-ai SDK).
+// SDK-only generateContent helper using @google/generative-ai.
 // Returns model text (STRICT JSON per your prompt) or null.
 
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// ─────────────────────────────────────────────────────────────
+// Env & defaults
+// ─────────────────────────────────────────────────────────────
 const API_KEY =
   process.env.GEMINI_API_KEY ||
   process.env.GOOGLE_API_KEY ||
   "";
 
-const API_BASE = (process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1").replace(/\/+$/, "");
 const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
+
 const MODEL_FALLBACKS = [
   MODEL_PRIMARY,
-  "gemini-2.0-flash",
+  // Keep a couple of nearby options; order matters for routing.
   "gemini-2.5-pro",
+  "gemini-2.0-flash",
 ];
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
+// ─────────────────────────────────────────────────────────────
+// Core: SDK generateContent with contract + optional schema
+// ─────────────────────────────────────────────────────────────
 export async function callGeminiStructured({
   prompt,
   model,
@@ -25,99 +36,95 @@ export async function callGeminiStructured({
   topP,
   maxOutputTokens,
   responseMimeType = "application/json",
-  system,
-}) {
+  responseSchema, // optional JSON schema (SDK supports this)
+  system,         // optional system instruction text
+} = {}) {
   if (!API_KEY) return null;
 
-  const candidates = Array.from(new Set([String(model || MODEL_PRIMARY).trim(), ...MODEL_FALLBACKS])).filter(Boolean);
+  const genAI = new GoogleGenerativeAI(API_KEY);
 
-  const generationConfig = {};
-  if (Number.isFinite(temperature)) generationConfig.temperature = temperature;
-  if (Number.isFinite(topP)) generationConfig.topP = topP;
-  if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutputTokens;
+  // Candidate routing (primary → fallbacks)
+  const candidates = Array.from(
+    new Set([String(model || MODEL_PRIMARY).trim(), ...MODEL_FALLBACKS])
+  ).filter(Boolean);
 
-  const bodyBase = {
-    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
+  // Prepare generationConfig (SDK expects camelCase + supports responseMimeType/Schema)
+  const baseConfig = {
+    responseMimeType, // <-- JSON contract enforced
   };
-  if (system && String(system).trim()) {
-    bodyBase.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
-  }
+  if (Number.isFinite(temperature)) baseConfig.temperature = temperature;
+  if (Number.isFinite(topP)) baseConfig.topP = topP;
+  if (Number.isFinite(maxOutputTokens)) baseConfig.maxOutputTokens = maxOutputTokens;
+  if (responseSchema) baseConfig.responseSchema = responseSchema;
 
-  // try each model with retries on 503/429
+  const userContents = [{ role: "user", parts: [{ text: String(prompt || "") }] }];
+
+  // We’ll try up to N models, each with a couple retries on transient failures.
   for (const mdl of candidates) {
-    const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
-    const body = { ...bodyBase };
+    try {
+      const modelClient = genAI.getGenerativeModel({
+        model: mdl,
+        ...(system
+          ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
+          : {}),
+      });
 
-    const attempts = 3;                   // 1 try + 2 retries
-    let delay = 250;                      // backoff base
-    for (let i = 0; i < attempts; i++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
+      let delay = 250;
+      const attempts = 3; // 1 try + 2 retries
+      for (let i = 0; i < attempts; i++) {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+          const res = await modelClient.generateContent({
+            contents: userContents,
+            generationConfig: baseConfig,
+            // Note: SDK handles MIME/schema mapping; no need to set safety settings here.
+          });
+          clearTimeout(to);
 
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => "");
-          // retry on overloaded / rate-limited
-          if (resp.status === 503 || resp.status === 429) {
-            console.warn(`[Gemini REST] ${mdl} -> ${resp.status}. Retrying in ${delay}ms…`);
+          const text = res?.response?.text?.();
+          if (typeof text === "string" && text.trim()) return text.trim();
+          // Empty output → try next model
+          break;
+        } catch (err) {
+          clearTimeout(to);
+          // Retry on timeouts/aborts and obvious transient signals
+          const name = err?.name || "";
+          const msg = err?.message || "";
+          const transient =
+            name === "AbortError" ||
+            /deadline|timeout|temporarily|overload|retry/i.test(msg);
+          if (transient && i < attempts - 1) {
             await sleep(delay);
             delay = Math.min(delay * 2, 2000);
             continue;
           }
-          console.warn(`[Gemini REST] HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 400)}`);
-          break; // non-retryable for this model → try next model
+          // Non-transient: stop retrying this model, move to the next candidate.
+          break;
         }
-
-        const data = await resp.json();
-        const parts = data?.candidates?.[0]?.content?.parts;
-        if (Array.isArray(parts)) {
-          const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
-          if (out) return out;
-        }
-        const fallback = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (typeof fallback === "string" && fallback.trim()) return fallback.trim();
-        // empty (but OK) → try next model
-        break;
-      } catch (err) {
-        clearTimeout(timer);
-        // Abort or transient network: retry this model
-        const transient = err?.name === "AbortError";
-        console.warn(`[Gemini REST] ${mdl} error: ${err?.name || ""} ${err?.message || String(err)}`);
-        if (transient && i < attempts - 1) {
-          await sleep(delay);
-          delay = Math.min(delay * 2, 2000);
-          continue;
-        }
-        // non-transient → try next model
-        break;
       }
+    } catch {
+      // If constructing/using the model fails immediately, fall through to next.
     }
-    // next model
-    console.warn(`[Gemini REST] switching model from ${mdl} → next fallback`);
   }
 
   return null;
 }
 
-export function callGemini(prompt, genConfig = {}) {
+// Thin convenience wrapper used by the rest of the codebase.
+// Accepts the same fields you previously passed in genConfig.
+export function callGemini(prompt, cfg = {}) {
   return callGeminiStructured({
     prompt,
-    model: genConfig?.model,               // you can still force one
-    temperature: genConfig?.temperature,
-    topP: genConfig?.topP,
-    maxOutputTokens: genConfig?.maxOutputTokens,
-    timeoutMs: genConfig?.timeoutMs ?? 30000,
-    system: genConfig?.system,
+    model: cfg?.model,
+    timeoutMs: cfg?.timeoutMs ?? 30000,
+    temperature: cfg?.temperature,
+    topP: cfg?.topP,
+    maxOutputTokens: cfg?.maxOutputTokens,
+    responseMimeType: "application/json",
+    responseSchema: cfg?.responseSchema,
+    system: cfg?.system,
   });
 }
-
 
 export default { callGeminiStructured, callGemini };
