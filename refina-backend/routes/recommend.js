@@ -194,11 +194,11 @@ router.post("/recommend", async (req, res) => {
     });
 
     const raw = await callGemini(prompt, {
-      responseMimeType: "application/json",
-      responseSchema: ConciergeResponseSchema,
-      timeoutMs: 12000,
-      model: process.env.GEMINI_MODEL || "gemini-1.5-flash-latest",
-    });
+  responseMimeType: "application/json",
+  // responseSchema: ConciergeResponseSchema,  ← REMOVE THIS
+  timeoutMs: 12000,
+  model: process.env.GEMINI_MODEL || "gemini-1.5-flash-latest",
+});
 
     const vr = validateConciergeResponse(raw);
     if (!vr.ok) {

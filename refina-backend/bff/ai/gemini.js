@@ -45,12 +45,14 @@ export async function callGeminiStructured({
   const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
 
   const generationConfig = {
-    ...(Number.isFinite(temperature) ? { temperature } : {}),
-    ...(Number.isFinite(topP) ? { topP } : {}),
-    ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
-    ...(responseMimeType ? { responseMimeType } : {}),
-    ...(responseSchema ? { responseSchema } : {}),
-  };
+  ...(Number.isFinite(temperature) ? { temperature } : {}),
+  ...(Number.isFinite(topP) ? { topP } : {}),
+  ...(Number.isFinite(maxOutputTokens) ? { maxOutput_tokens: maxOutputTokens } : {}), // optional: REST also accepts camelCase here, but this is safest
+  ...(responseMimeType ? { response_mime_type: responseMimeType } : {}),
+  // IMPORTANT: only pass response_schema if it’s a valid JSON Schema object.
+  // Your ConciergeResponseSchema is NOT JSON Schema; omit it for now.
+  ...(undefined), // leave out response_schema for now
+};
 
   const body = {
     contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
