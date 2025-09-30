@@ -181,6 +181,46 @@ function productToPromptInput(p, cap = 900) {
   };
 }
 
+// Read products from Firestore (source of truth written by importer)
+   async function fetchProductsFromFirestore(storeId, limit = 1000) {
+   const snap = await db.collection(`products/${storeId}/items`).limit(limit).get();
+   const out = [];
+   snap.forEach((doc) => {
+     const d = doc.data() || {};
+     out.push({
+       id: doc.id,
+       title: d.title || d.name || "",
+       name: d.name || d.title || "",
+       description: d.description || d.body_html || "",
+       body_html: d.body_html || "",
+       tags: d.tags || [],
+       productType: d.productType || d.product_type || "",
+       productType_norm: d.productType_norm || d.productTypeNormalized || "",
+       specs: d.specs || d.metafields || {},
+       usageStep: d.usageStep || d.step || "",
+       image: d.image || d.images?.[0]?.src || "",
+       handle: d.handle || d.url || "",
+     });
+   });
+   return out;
+ }
+ 
+  async function triggerEnrichment(storeId) {
+   const origin = process.env.PUBLIC_BACKEND_ORIGIN || process.env.BACKEND_ORIGIN || "";
+   const secret = process.env.ADMIN_SHARED_SECRET || "";
+   if (!origin || !secret) return;
+   try {
+     await fetch(`${origin.replace(/\/+$/,"")}/api/admin/trigger-enrichment?shop=${encodeURIComponent(storeId)}`, {
+       method: "POST",
+       headers: { "x-admin-secret": secret },
+       keepalive: true,
+     }).catch(() => {});
+     console.log(`[Indexer] enrichment trigger POST ok shop=${storeId}`);
+   } catch (e) {
+     console.log(`[Indexer] enrichment trigger failed shop=${storeId} err=${e?.message||e}`);
+   }
+ }
+
 function baselineExtractFromText(product) {
   const text = [String(product.description || ""), (product.tags || []).join(", ")].join("\n");
   const entities = [];
@@ -404,7 +444,7 @@ function pLimit(n) {
   const t0 = Date.now();
   try {
     if (MODE === "bootstrap") {
-      const products = await fetchProducts(STORE, LIMIT);
+      const products = await fetchProductsFromFirestore(STORE, LIMIT);
       if (!products.length) {
         console.log(JSON.stringify({ ok: true, commit: COMMIT, processed: 0, reason: "no_products" }, null, 2));
         return;
@@ -428,24 +468,26 @@ function pLimit(n) {
           }
           if (COMMIT) {
             const base = baselineExtractFromText(productToPromptInput(p));
-if (base.entities.length || base.specs.length) {
-  await upsertEntitiesAndLinks({
-    storeId: STORE,
-    productId: p.id,
-    extraction: { product: { id: String(p.id) }, ...base },
-    product: p, // ← required so the function can embed & write { vector }
-  });
-  // KB from baseline (thin but better than nothing)
-  await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
-  processed++; wrote++;
-}
+            if (base.entities.length || base.specs.length) {
+               // ensure product is passed for embedding text
+               await upsertEntitiesAndLinks({
+                 storeId: STORE,
+                 productId: p.id,
+                 extraction: { product: { id: String(p.id) }, ...base },
+                 product: p,
+               });
+               // KB from baseline (thin but better than nothing)
+               await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
+               processed++; wrote++;
+             }
 
           }
           return;
         }
         processed++;
         if (COMMIT) {
-          await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value });
+          // pass product so embeddings vector is computed & stored
+          await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value, product: p });
           await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
           wrote++;
         }
@@ -460,6 +502,10 @@ if (base.entities.length || base.specs.length) {
         avgLlmMs: processed ? Math.round(llmMsSum / processed) : 0,
         totalMs: ms,
       }, null, 2));
+      // Only trigger enrichment after successful writes
+       if (COMMIT && wrote > 0) {
+         await triggerEnrichment(STORE);
+       }
     } else if (MODE === "index") {
       const pid = ARGS.product || ARGS.p;
       if (!pid) throw new Error("product id required for index mode");
@@ -468,24 +514,24 @@ if (base.entities.length || base.specs.length) {
       const product = { id: doc.id, ...doc.data() };
       const r = await extractForProduct({ storeId: STORE, product });
       if (!r.ok) {
-        if (COMMIT) {
-          const base = baselineExtractFromText(productToPromptInput(product));
-          if (base.entities.length || base.specs.length) {
-            await upsertEntitiesAndLinks({
-              storeId: STORE,
-              productId: product.id,
-              extraction: { product: { id: String(product.id) }, ...base },
-            });
-            console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
-            process.exit(0);
-          }
-        }
-        await upsertKbProduct({ storeId: STORE, product, extraction: base });
+        const base = baselineExtractFromText(productToPromptInput(product));
+       if (COMMIT && (base.entities.length || base.specs.length)) {
+         await upsertEntitiesAndLinks({
+           storeId: STORE,
+           productId: product.id,
+           extraction: { product: { id: String(product.id) }, ...base },
+           product,
+         });
+         console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
+         process.exit(0);
+       }
+       // Always keep KB in sync, even when not committing entity/link writes
+       await upsertKbProduct({ storeId: STORE, product, extraction: base });
         console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
         process.exit(2);
       }
       if (COMMIT) {
-        await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value });
+        await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value, product });
         await upsertKbProduct({ storeId: STORE, product, extraction: r.value });
       }
       console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));

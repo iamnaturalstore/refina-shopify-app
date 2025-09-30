@@ -148,3 +148,33 @@ enrichmentRouter.post("/run", async (req, res) => {
     return res.status(500).json({ ok: false, error: "internal_error" });
   }
 });
+
+ /**
+  * POST /trigger-enrichment?shop=<storeId>
+  * Alias for the worker’s call site. Accepts the shop via query string.
+  * Returns 202 immediately and runs enrichment fire-and-forget.
+  */
+ enrichmentRouter.post("/trigger-enrichment", async (req, res) => {
+   try {
+     const q = String(req.query?.shop || "").trim();
+     const storeId = toMyshopifyDomain(q);
+     if (!storeId) return res.status(400).json({ ok: false, error: "shop required" });
+ 
+     // Sanity: ensure the store has products so we don't spin on empties
+     const anyProduct = await db.collection(`products/${storeId}/items`).limit(1).get();
+     if (anyProduct.empty) {
+       return res.status(404).json({ ok: false, error: "no_products_for_store" });
+     }
+ 
+     // Fire-and-forget bootstrap enrichment (indexer handles batching/concurrency)
+     // Don’t await the child; return 202 so the caller isn’t held up.
+     enrichProductsBootstrap({ storeId, limit: 5000, commit: true })
+       .then(r => console.log(`[enrich/alias] DONE shop=${storeId} parsed=${!!r.parsed}`))
+       .catch(e => console.error(`[enrich/alias] FAIL shop=${storeId}`, e?.message || e));
+ 
+     return res.status(202).json({ ok: true, shop: storeId, queued: true });
+   } catch (e) {
+     console.error("[enrich/alias] error", e);
+     return res.status(500).json({ ok: false, error: "internal_error" });
+   }
+ });
