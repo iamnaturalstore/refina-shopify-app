@@ -20,78 +20,82 @@ if (!API_KEY) {
  * Low-level structured caller via REST. Returns model **text** (string) or null on failure.
  * Supported gen params: temperature, topP, maxOutputTokens. No response schema/mime here.
  */
+// In refina-backend/bff/ai/gemini.js
+
+// REPLACE your existing callGeminiStructured function with this one
+
 export async function callGeminiStructured({
   prompt,
   model,
-  timeoutMs = 30000,          // ← give generation enough headroom
+  timeoutMs = 25000, // Generous total timeout for the entire operation
   temperature,
   topP,
   maxOutputTokens,
+  responseMimeType = "application/json",
+  responseSchema,
   system,
 }) {
-  if (!API_KEY) return null;
+  if (!genAI) return null;
 
-  const mdl = String(model || DEFAULT_MODEL).trim();
-  const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
+  const mdl = String(model || process.env.GEMINI_MODEL_NAME || "gemini-pro").trim();
 
   const generationConfig = {
     ...(Number.isFinite(temperature) ? { temperature } : {}),
     ...(Number.isFinite(topP) ? { topP } : {}),
     ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
-    // always provide a cap; large enough for concierge JSON + copy
-  maxOutputTokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : DEFAULT_MAX_TOKENS,
+    ...(responseMimeType ? { response_mime_type: responseMimeType } : {}),
   };
 
-  const body = {
-    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-    ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
-    ...(system && String(system).trim()
-      ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
-      : {}),
-  };
+  const systemInstruction =
+    system && String(system).trim()
+      ? { role: "system", parts: [{ text: String(system) }] }
+      : undefined;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const modelClient = genAI.getGenerativeModel({
+    model: mdl,
+    ...(systemInstruction ? { systemInstruction } : {}),
+    generationConfig,
+  });
 
-  try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+  // --- RESILIENCE LOGIC: EXPONENTIAL BACKOFF & RETRIES ---
+  const maxRetries = 2; // Total of 3 attempts (initial + 2 retries)
+  let lastError = null;
 
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => "");
-      console.warn(`[Gemini REST] HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 400)}`);
-      return null;
+  for (let i = 0; i <= maxRetries; i++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort("timeout"), timeoutMs);
+
+    try {
+      const result = await modelClient.generateContent(
+        { contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }] },
+        { signal: ac.signal }
+      );
+      clearTimeout(timer);
+
+      const text = result?.response?.text?.();
+      const out = typeof text === "string" ? text.trim() : "";
+      return out || null; // Success!
+
+    } catch (err) {
+      clearTimeout(timer);
+      lastError = err;
+      const msg = err?.name ? `${err.name}: ${err.message || ""}` : String(err || "");
+      console.warn(`[Gemini] Attempt ${i + 1}/${maxRetries + 1} failed:`, msg);
+
+      // Only retry on specific, temporary errors (like 503) and if it's not the last attempt.
+      if (i < maxRetries && /503|UNAVAILABLE|overloaded|timeout/i.test(msg)) {
+        const delay = Math.pow(2, i) * 1000 + Math.random() * 500; // 1s, 2s, 4s... + jitter
+        console.log(`[Gemini] Retrying in ${Math.round(delay / 1000)}s...`);
+        await new Promise(res => setTimeout(res, delay));
+      } else {
+        // Not a retryable error or we've run out of retries, so we fail.
+        break;
+      }
     }
-
-    const data = await resp.json();
-    const parts = data?.candidates?.[0]?.content?.parts;
-    if (Array.isArray(parts)) {
-      const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
-      return out || null;
-    }
-    const fallback = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return typeof fallback === "string" && fallback.trim() ? fallback.trim() : null;
-  } catch (err) {
-    const msg = err?.name ? `${err.name}: ${err.message || ""}` : String(err || "");
-    console.warn("[Gemini REST] generateContent error:", msg);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
-  const c = data?.candidates?.[0];
-if (!c) {
-  const pf = data?.promptFeedback;
-  const sr = pf?.safetyRatings || [];
-  const reasons = Array.isArray(sr) ? sr.map(r => `${r.category}:${r.probability}`).join(", ") : "none";
-  console.warn("[Gemini REST] empty candidates",
-    pf?.blockReason ? `blockReason=${pf.blockReason}` : "",
-    reasons ? `safety=${reasons}` : ""
-  );
-  return null;
+
+  console.error("[Gemini] All retry attempts failed. Last error:", lastError?.message || lastError);
+  return null; // Return null to signal a definitive failure.
 }
 
 // If we *do* have a candidate but no text parts, surface the finish reason
@@ -99,7 +103,6 @@ if (!Array.isArray(c?.content?.parts) || !c.content.parts.length) {
   const fr = c?.finishReason || "unspecified";
   console.warn("[Gemini REST] candidate has no text parts; finishReason=", fr);
   return null;
-}
 }
 
 /** Thin wrapper */
