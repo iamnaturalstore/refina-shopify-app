@@ -24,7 +24,6 @@ if (!API_KEY) {
  * @param {number} [args.temperature]
  * @param {number} [args.topP]
  * @param {number} [args.maxOutputTokens]
- * @param {string} [args.responseMimeType="application/json"]
  * @param {object} [args.responseSchema]
  * @param {string} [args.system]
  */
@@ -35,7 +34,6 @@ export async function callGeminiStructured({
   temperature,
   topP,
   maxOutputTokens,
-  responseMimeType = "application/json",
   responseSchema,
   system,
 }) {
@@ -44,20 +42,18 @@ export async function callGeminiStructured({
   const mdl = String(model || DEFAULT_MODEL).trim();
   const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
 
-  const generationConfig = {
-  ...(Number.isFinite(temperature) ? { temperature } : {}),
-  ...(Number.isFinite(topP) ? { topP } : {}),
-  ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
-  ...(responseMimeType ? { response_mime_type: responseMimeType } : {}), // ← snake_case for REST v1
-};
+  const generationConfig = {};
+if (Number.isFinite(temperature)) generationConfig.temperature = temperature;
+if (Number.isFinite(topP))        generationConfig.topP        = topP;
+if (Number.isFinite(maxOutputTokens)) generationConfig.maxOutputTokens = maxOutputTokens;
 
 
   const body = {
   contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
-  generationConfig,
+  ...(Object.keys(generationConfig).length ? { generationConfig } : {}),
   ...(system && String(system).trim()
-    ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
-    : {})
+      ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
+      : {}),
 };
 
   if (system && String(system).trim()) {
@@ -111,9 +107,7 @@ export function callGemini(prompt, genConfig = {}) {
     temperature: genConfig?.temperature,
     topP: genConfig?.topP,
     maxOutputTokens: genConfig?.maxOutputTokens,
-    timeoutMs: genConfig?.timeoutMs ?? 15000,
-    responseMimeType: genConfig?.responseMimeType ?? "application/json",
-    responseSchema: genConfig?.responseSchema,
+    timeoutMs: genConfig?.timeoutMs ?? 15000,    responseSchema: genConfig?.responseSchema,
     system: genConfig?.system,
   });
 }

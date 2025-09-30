@@ -93,9 +93,7 @@ const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.3),
   maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024),
-  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",
-  responseMimeType: "application/json",
-};
+  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",};
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 14000);
 const BATCH_SIZE = 400;
 

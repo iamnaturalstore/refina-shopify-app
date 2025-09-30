@@ -192,9 +192,7 @@ router.post("/recommend", async (req, res) => {
       ingredientFacts,
     });
 
-    const raw = await callGemini(prompt, {
-  responseMimeType: "application/json",
-  timeoutMs: 12000,
+    const raw = await callGemini(prompt, {  timeoutMs: 12000,
   model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
 });
 
