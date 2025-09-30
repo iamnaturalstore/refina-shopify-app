@@ -1,35 +1,21 @@
 // refina-backend/bff/ai/gemini.js
-// SDK-only, forced to v1 endpoint. No REST. Returns STRICT-JSON text or null.
-
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// REST-only generateContent helper (no @google/generative-ai SDK).
+// Returns STRICT-JSON text (as string) or null on failure.
 
 const API_KEY =
   process.env.GEMINI_API_KEY ||
   process.env.GOOGLE_API_KEY ||
   "";
 
-const API_ENDPOINT =
-  process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1";
+const API_BASE = (process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1").replace(/\/+$/, "");
+const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash-latest").trim();
 
 if (!API_KEY) {
-  console.warn("[Gemini] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
-}
-
-// Build a singleton SDK client, preferring the { apiKey, apiEndpoint } signature if supported.
-let genAI = null;
-try {
-  // Newer SDKs accept an options object with apiEndpoint; this forces v1 (not v1beta).
-  genAI = new GoogleGenerativeAI({ apiKey: API_KEY, apiEndpoint: API_ENDPOINT });
-  console.log("[Gemini] SDK initialized with explicit apiEndpoint:", API_ENDPOINT);
-} catch {
-  // Older SDKs only accept the API key string; constructor will pick its internal default.
-  // We still proceed, but you should upgrade the SDK to ensure v1 endpoint usage.
-  genAI = new GoogleGenerativeAI(API_KEY);
-  console.warn("[Gemini] SDK initialized without apiEndpoint (old SDK). Please upgrade @google/generative-ai.");
+  console.warn("[Gemini REST] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
 }
 
 /**
- * Low-level structured caller. Returns model **text** (string) or null on failure.
+ * Low-level structured caller via REST. Returns model **text** (string) or null on failure.
  *
  * @param {Object} args
  * @param {string} args.prompt
@@ -53,9 +39,10 @@ export async function callGeminiStructured({
   responseSchema,
   system,
 }) {
-  if (!genAI) return null;
+  if (!API_KEY) return null;
 
-  const mdl = String(model || process.env.GEMINI_MODEL || "gemini-1.5-flash-latest").trim();
+  const mdl = String(model || DEFAULT_MODEL).trim();
+  const url = `${API_BASE}/models/${encodeURIComponent(mdl)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
 
   const generationConfig = {
     ...(Number.isFinite(temperature) ? { temperature } : {}),
@@ -65,40 +52,55 @@ export async function callGeminiStructured({
     ...(responseSchema ? { responseSchema } : {}),
   };
 
-  // Optional system instruction
-  const systemInstruction =
-    system && String(system).trim()
-      ? { role: "system", parts: [{ text: String(system) }] }
-      : undefined;
-
-  // Note: Some SDK versions accept generationConfig in the model ctor, others merge at call time.
-  const modelClient = genAI.getGenerativeModel({
-    model: mdl,
-    ...(systemInstruction ? { systemInstruction } : {}),
+  const body = {
+    contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
     generationConfig,
-  });
+  };
 
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  if (system && String(system).trim()) {
+    body.systemInstruction = { role: "system", parts: [{ text: String(system) }] };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const result = await modelClient.generateContent(
-      { contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }] },
-      { signal: ac.signal }
-    );
-    clearTimeout(timer);
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
 
-    const text = result?.response?.text?.();
-    const out = typeof text === "string" ? text.trim() : "";
-    return out || null;
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      console.warn(`[Gemini REST] HTTP ${resp.status} ${resp.statusText}: ${txt.slice(0, 300)}`);
+      return null;
+    }
+
+    const data = await resp.json();
+
+    // Concatenate all text parts from the first candidate
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (Array.isArray(parts)) {
+      const out = parts.map(p => (typeof p?.text === "string" ? p.text : "")).join("").trim();
+      return out || null;
+    }
+    const fallback = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return typeof fallback === "string" && fallback.trim() ? fallback.trim() : null;
   } catch (err) {
-    clearTimeout(timer);
     const msg = err?.name ? `${err.name}: ${err.message || ""}` : String(err || "");
-    console.warn("[Gemini] generateContent error:", msg);
+    console.warn("[Gemini REST] generateContent error:", msg);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
+/**
+ * Thin wrapper used by routes/workers:
+ *   const text = await callGemini(prompt, genConfig)
+ */
 export function callGemini(prompt, genConfig = {}) {
   return callGeminiStructured({
     prompt,

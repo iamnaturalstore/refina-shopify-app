@@ -32,9 +32,6 @@ function pickPrimaryImage(p, storeId) {
     "";
   return ensureAbsolute(candidate, storeId);
 }
-
-// REPLACE your old embedText function with this new one.
-
 // Lazy-init embeddings client at call time to avoid env timing issues
 async function embedText(text) {
   const apiKey =

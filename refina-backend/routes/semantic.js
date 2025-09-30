@@ -1,64 +1,90 @@
 // refina-backend/routes/semantic.js
+// REST-only embeddings (no @google/generative-ai SDK). Cosine search over cached store vectors.
+
 import express from "express";
 import admin from "firebase-admin";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
-const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "text-embedding-004"; // or 3-large
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
+const EMBED_MODEL = (process.env.GEMINI_EMBED_MODEL || "text-embedding-004").trim(); // e.g., "text-embedding-004"
 const TOP_N = Number(process.env.SEMANTIC_TOPN || 200);
 const TTL_MS = Number(process.env.SEMANTIC_CACHE_TTL_MS || 5 * 60 * 1000);
 
-// ─────────────────────────────────────────────────────────────
-// Lazy clients
-// ─────────────────────────────────────────────────────────────
-const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+// The embeddings endpoint for text-embedding-004 is currently served under v1beta.
+const EMBED_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
-// storeId -> { ids: string[], vecs: Float32Array[], ts: number }
+// ─────────────────────────────────────────────────────────────
+// In-memory cache: storeId -> { ids: string[], vecs: Float32Array[], ts: number }
+// ─────────────────────────────────────────────────────────────
 const cache = new Map();
 
-function now() {
-  return Date.now();
-}
+const now = () => Date.now();
 
 function toFloat32(arr) {
   if (arr instanceof Float32Array) return arr;
   return new Float32Array(arr.map(Number));
 }
-
 function l2norm(v) {
   let s = 0;
   for (let i = 0; i < v.length; i++) s += v[i] * v[i];
   return Math.sqrt(s) || 1;
 }
-
 function normalize(v) {
   const out = toFloat32(v);
   const n = l2norm(out);
   for (let i = 0; i < out.length; i++) out[i] = out[i] / n;
   return out;
 }
-
 function cosine(a, b) {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s;
+  return s; // a and b are unit vectors → dot = cosine
 }
 
-async function getQueryEmbedding(text) {
-  if (!genAI) throw new Error("GEMINI_API_KEY not configured");
-  const model = genAI.getGenerativeModel({ model: EMBED_MODEL });
-  // @google/generative-ai v2 style: model.embedContent({ content: text })
-  const res = await model.embedContent(text);
-  const v = res?.embedding?.values || res?.embedding?.embedding || [];
-  if (!v || !v.length) throw new Error("Empty embedding from Gemini");
-  return normalize(v);
+// ─────────────────────────────────────────────────────────────
+// Embeddings via REST (v1beta) — no SDK.
+// ─────────────────────────────────────────────────────────────
+async function getQueryEmbedding(text, { timeoutMs = 12000 } = {}) {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
+  const url = `${EMBED_BASE}/models/${encodeURIComponent(EMBED_MODEL)}:embedContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const body = {
+    model: `models/${EMBED_MODEL}`,
+    content: { parts: [{ text: String(text || "") }] },
+  };
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      throw new Error(`embeddings HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+    }
+
+    const data = await resp.json();
+    const v = data?.embedding?.values || data?.embedding?.embedding || [];
+    if (!Array.isArray(v) || v.length === 0) throw new Error("Empty embedding from Gemini");
+    return normalize(v);
+  } finally {
+    clearTimeout(t);
+  }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Firestore vector loading
+// ─────────────────────────────────────────────────────────────
 async function loadStoreVectors(storeId) {
   const db = admin.firestore();
   const snap = await db.collection("productEmbeddings").doc(storeId).collection("items").get();
@@ -100,7 +126,7 @@ router.get("/semantic", async (req, res) => {
 
     // Load vectors (cached)
     const { ids, vecs } = await ensureCache(storeId, force);
-    if (!ids.length) return res.json({ productIds: [], scores: {} });
+    if (!ids.length) return res.json({ productIds: [], scores: {}, total: 0 });
 
     // Embed query
     const qv = await getQueryEmbedding(q);
@@ -108,7 +134,7 @@ router.get("/semantic", async (req, res) => {
     // Score
     const scored = [];
     for (let i = 0; i < vecs.length; i++) {
-      const score = cosine(qv, vecs[i]); // vectors are unit-normalized → cosine
+      const score = cosine(qv, vecs[i]); // unit-normalized → dot = cosine
       if (score >= min) scored.push([score, ids[i]]);
     }
 
