@@ -23,7 +23,7 @@ const db = admin.firestore();
 
 // 🧠 Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.VITE_GEMINI_API_KEY);
-const MODEL = "gemini-1.5-flash"; // ✅ Fast & good for structured prompts
+const MODEL = "gemini-2.5-flash"; // ✅ Fast & good for structured prompts
 
 const storeId = "iamnaturalstore"; // Change as needed
 const BATCH_SIZE = 10;

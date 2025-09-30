@@ -2,7 +2,6 @@
 // Thin adapter with embeddings via SDK (lazy-init; no module-scope client).
 
 import express from "express";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { db } from "../bff/lib/firestore.js";
 import { buildGeminiPrompt } from "../bff/ai/buildGeminiPrompt.js";
 import { ConciergeResponseSchema } from "../ai/jsonSchemas.js";
@@ -196,7 +195,7 @@ router.post("/recommend", async (req, res) => {
     const raw = await callGemini(prompt, {
   responseMimeType: "application/json",
   timeoutMs: 12000,
-  model: process.env.GEMINI_MODEL || "gemini-1.5-flash-latest",
+  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
 });
 
     const vr = validateConciergeResponse(raw);

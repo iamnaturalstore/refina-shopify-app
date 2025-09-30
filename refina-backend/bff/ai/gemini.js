@@ -8,7 +8,7 @@ const API_KEY =
   "";
 
 const API_BASE = (process.env.GEMINI_API_ENDPOINT || "https://generativelanguage.googleapis.com/v1").replace(/\/+$/, "");
-const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-1.5-flash-latest").trim();
+const DEFAULT_MODEL = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
 
 if (!API_KEY) {
   console.warn("[Gemini REST] Missing GEMINI_API_KEY — model calls will be skipped and return null.");
@@ -19,7 +19,7 @@ if (!API_KEY) {
  *
  * @param {Object} args
  * @param {string} args.prompt
- * @param {string} [args.model] - e.g. "gemini-1.5-flash-latest"
+ * @param {string} [args.model] - e.g. "gemini-2.5-flash"
  * @param {number} [args.timeoutMs=15000]
  * @param {number} [args.temperature]
  * @param {number} [args.topP]
@@ -48,9 +48,9 @@ export async function callGeminiStructured({
   ...(Number.isFinite(temperature) ? { temperature } : {}),
   ...(Number.isFinite(topP) ? { topP } : {}),
   ...(Number.isFinite(maxOutputTokens) ? { maxOutputTokens } : {}),
-  ...(responseMimeType ? { responseMimeType } : {}),
-  // Do NOT include responseSchema unless it’s a valid JSON Schema object supported by the API.
+  ...(responseMimeType ? { response_mime_type: responseMimeType } : {}), // ← snake_case for REST v1
 };
+
 
   const body = {
   contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
