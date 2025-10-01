@@ -3,6 +3,7 @@ services:
     name: refina-app
     env: node
     plan: starter
+    timeoutSeconds: 120
     buildCommand: |
       yarn install
       yarn --cwd admin-ui install
