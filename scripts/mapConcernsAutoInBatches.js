@@ -10,7 +10,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // 🧠 Gemini setup
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL = "gemini-2.5-pro"; // Fast & cheaper model
+const MODEL = "gemini-2.5-flash"; // Fast & cheaper model
 
 // 🗂️ Firebase admin init
 const serviceAccountPath = path.resolve("./service-account.json");
