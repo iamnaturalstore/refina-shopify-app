@@ -173,7 +173,7 @@ router.post("/recommend", async (req, res) => {
     }
 
     // Keep prompt tight: top 8 for stage 1
-    const candidates = shortlistCandidates(allEmb, qVec, strictness).slice(0, 8);
+    const candidates = shortlistCandidates(allEmb, qVec, strictness).slice(0, 6);
     const candidateIds = candidates.map((c) => c.id);
     const candidateDocs = await loadProductsByIds(storeId, candidateIds);
 
@@ -230,13 +230,13 @@ router.post("/recommend", async (req, res) => {
     // Stage 1: flash, 7s, 8 products, ~320 toks
     try {
       raced = true;
-      const stage1Budget = 7000;
+      const stage1Budget = 9000;
       const t0 = Date.now();
       const p1 = callGemini(prompt, {
         model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
         temperature: 0.3,
         topP: 0.8,
-        maxOutputTokens: 320,
+        maxOutputTokens: 256,
         responseSchema: ConciergeResponseSchema,
       });
       raw = await Promise.race([
@@ -257,7 +257,7 @@ router.post("/recommend", async (req, res) => {
       try {
         const remaining = Math.max(0, LLM_BUDGET_MS - llmMs);
         if (remaining > 600) {
-          const promptProductsTiny = promptProducts.slice(0, 4);
+          const promptProductsTiny = promptProducts.slice(0, 3);
           const promptTiny = buildGeminiPrompt({
             concern,
             normalizedConcern: concernNorm,
@@ -271,7 +271,7 @@ router.post("/recommend", async (req, res) => {
             model: "gemini-2.5-flash",
             temperature: 0.3,
             topP: 0.8,
-            maxOutputTokens: 256,
+            maxOutputTokens: 192,
             responseSchema: ConciergeResponseSchema,
           });
           const raw2 = await Promise.race([

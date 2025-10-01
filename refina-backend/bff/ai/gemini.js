@@ -74,10 +74,12 @@ export async function callGeminiStructured({
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), timeoutMs);
         try {
+          const tStart = Date.now();
           const res = await modelClient.generateContent({
             contents: userContents,
             generationConfig: baseConfig,
           });
+          console.warn(`[Gemini SDK] ${mdl} ok in ${Date.now() - tStart}ms`);
           clearTimeout(to);
 
           const text = res?.response?.text?.();
@@ -94,6 +96,7 @@ export async function callGeminiStructured({
             status === 429 || status === 503 ||
             /deadline|timeout|temporar|overload|retry|unavailable/i.test(msg);
           if (transient && i < attempts - 1) {
+            console.warn(`[Gemini SDK] ${mdl} transient: ${msg || name}; retrying in ${delay}ms`);
             await sleep(delay);
             delay = Math.min(delay * 2, 2000);
             continue;

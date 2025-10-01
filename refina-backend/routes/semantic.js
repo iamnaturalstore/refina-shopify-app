@@ -1,27 +1,72 @@
 // refina-backend/routes/semantic.js
-// REST-only embeddings (no @google/generative-ai SDK). Cosine search over cached store vectors.
+// Admin-only AI health probes and semantic helpers.
+// - Embeddings via REST (v1) using text-embedding-004 (no SDK here).
+// - Firestore via shared db wrapper (consistent with the rest of backend).
+// - Includes a strict JSON-mode ping endpoint to verify SDK path for generation.
 
 import express from "express";
-import admin from "firebase-admin";
+import { callGemini } from "../bff/ai/gemini.js";
+import { db } from "../bff/lib/firestore.js";
 
 const router = express.Router();
 
 // ─────────────────────────────────────────────────────────────
-// Config
+// Admin AI ping (SDK JSON mode)
 // ─────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
-const EMBED_MODEL = (process.env.GEMINI_EMBED_MODEL || "text-embedding-004").trim(); // e.g., "text-embedding-004"
+const PingSchema = {
+  type: "OBJECT",
+  properties: { ok: { type: "BOOLEAN" } },
+  required: ["ok"],
+};
+
+// GET /admin/ai-ping
+// Verifies SDK JSON-mode + schema and measures end-to-end latency.
+router.get("/admin/ai-ping", async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const raw = await callGemini('Return {"ok": true} exactly.', {
+      model,
+      maxOutputTokens: 16,
+      responseSchema: PingSchema,
+    });
+    const tookMs = Date.now() - t0;
+    return res.json({
+      ok: true,
+      tookMs,
+      rawHead: typeof raw === "string" ? raw.slice(0, 80) : null,
+      __debug: { model },
+    });
+  } catch (e) {
+    const tookMs = Date.now() - t0;
+    return res.status(500).json({
+      ok: false,
+      tookMs,
+      err: String(e?.message || e),
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Config (match the rest of the codebase)
+// ─────────────────────────────────────────────────────────────
+const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_API_KEY ||
+  process.env.VITE_GEMINI_API_KEY ||
+  "";
+
+const EMBED_MODEL = (process.env.GEMINI_EMBED_MODEL || "text-embedding-004").trim(); // e.g. "text-embedding-004"
 const TOP_N = Number(process.env.SEMANTIC_TOPN || 200);
 const TTL_MS = Number(process.env.SEMANTIC_CACHE_TTL_MS || 5 * 60 * 1000);
 
-// The embeddings endpoint for text-embedding-004 is currently served under v1beta.
-const EMBED_BASE = "https://generativelanguage.googleapis.com/v1beta";
+// Use v1 like workers/indexer.mjs and routes/recommend.js
+const EMBED_BASE = "https://generativelanguage.googleapis.com/v1";
 
 // ─────────────────────────────────────────────────────────────
 // In-memory cache: storeId -> { ids: string[], vecs: Float32Array[], ts: number }
 // ─────────────────────────────────────────────────────────────
 const cache = new Map();
-
 const now = () => Date.now();
 
 function toFloat32(arr) {
@@ -42,15 +87,18 @@ function normalize(v) {
 function cosine(a, b) {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-  return s; // a and b are unit vectors → dot = cosine
+  return s; // with unit vectors, dot = cosine
 }
 
 // ─────────────────────────────────────────────────────────────
-// Embeddings via REST (v1beta) — no SDK.
+// Embeddings via REST (v1) — consistent with the rest of backend
 // ─────────────────────────────────────────────────────────────
 async function getQueryEmbedding(text, { timeoutMs = 12000 } = {}) {
   if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY not configured");
-  const url = `${EMBED_BASE}/models/${encodeURIComponent(EMBED_MODEL)}:embedContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+
+  const url = `${EMBED_BASE}/models/${encodeURIComponent(EMBED_MODEL)}:embedContent?key=${encodeURIComponent(
+    GEMINI_API_KEY
+  )}`;
 
   const body = {
     model: `models/${EMBED_MODEL}`,
@@ -75,7 +123,7 @@ async function getQueryEmbedding(text, { timeoutMs = 12000 } = {}) {
 
     const data = await resp.json();
     const v = data?.embedding?.values || data?.embedding?.embedding || [];
-    if (!Array.isArray(v) || v.length === 0) throw new Error("Empty embedding from Gemini");
+    if (!Array.isArray(v) || !v.length) throw new Error("Empty embedding from Gemini");
     return normalize(v);
   } finally {
     clearTimeout(t);
@@ -83,16 +131,15 @@ async function getQueryEmbedding(text, { timeoutMs = 12000 } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Firestore vector loading
+// Firestore vector loading (consistent db wrapper)
 // ─────────────────────────────────────────────────────────────
 async function loadStoreVectors(storeId) {
-  const db = admin.firestore();
   const snap = await db.collection("productEmbeddings").doc(storeId).collection("items").get();
   const ids = [];
   const vecs = [];
   snap.forEach((doc) => {
     const d = doc.data();
-    const v = d?.v || d?.vector || d?.values;
+    const v = d?.vector || d?.v || d?.values; // tolerate prior shapes
     const id = (d?.id || doc.id || "").toString().trim();
     if (id && Array.isArray(v) && v.length) {
       ids.push(id);
@@ -112,7 +159,10 @@ async function ensureCache(storeId, force = false) {
   return cache.get(storeId);
 }
 
-// GET /api/search/semantic?storeId=...&q=...&topN=200&min=0.08&force=1
+// ─────────────────────────────────────────────────────────────
+// GET /semantic  (mount under /api/search to match your docs)
+// e.g. /api/search/semantic?storeId=...&q=...&topN=200&min=0.08&force=1
+// ─────────────────────────────────────────────────────────────
 router.get("/semantic", async (req, res) => {
   try {
     const storeId = String(req.query.storeId || "").trim();
@@ -131,7 +181,7 @@ router.get("/semantic", async (req, res) => {
     // Embed query
     const qv = await getQueryEmbedding(q);
 
-    // Score
+    // Score and filter
     const scored = [];
     for (let i = 0; i < vecs.length; i++) {
       const score = cosine(qv, vecs[i]); // unit-normalized → dot = cosine
