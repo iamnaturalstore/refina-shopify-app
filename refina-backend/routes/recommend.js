@@ -15,6 +15,13 @@ import {
 } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
+// ✅ define PingSchema BEFORE it’s referenced
+const PingSchema = {
+  type: "OBJECT",
+  properties: { ok: { type: "BOOLEAN" } },
+  required: ["ok"],
+};
+
 
 // ─── Utils ───────────────────────────────────────────────────────────────────
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; }
