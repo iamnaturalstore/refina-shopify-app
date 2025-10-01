@@ -15,44 +15,6 @@ import {
 } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
-// ⬇️ put near the other imports
-// (already present) import { callGemini } from "../bff/ai/gemini.js";
-
-// --- Admin probe (safe, optional token) --------------------------------------
-const PingSchema = {
-  type: "OBJECT",
-  properties: { ok: { type: "BOOLEAN" } },
-  required: ["ok"],
-};
-
-// GET /apps/refina/v1/admin/ai-ping
-router.get("/admin/ai-ping", async (req, res) => {
-  try {
-    // Optional lightweight guard: require header if ADMIN_PROBE_TOKEN is set
-    const need = process.env.ADMIN_PROBE_TOKEN;
-    if (need && req.header("x-probe-token") !== need) {
-      // Don’t reveal it exists
-      return res.status(404).end();
-    }
-
-    const t0 = Date.now();
-    const raw = await callGemini('Return {"ok": true} exactly.', {
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
-      maxOutputTokens: 16,
-      responseSchema: PingSchema,
-    });
-
-    return res.json({
-      ok: true,
-      tookMs: Date.now() - t0,
-      rawHead: typeof raw === "string" ? raw.slice(0, 80) : null,
-      __debug: { model: process.env.GEMINI_MODEL || "gemini-2.5-flash" },
-    });
-  } catch (e) {
-    return res.status(500).json({ ok: false, err: String(e?.message || e) });
-  }
-});
-
 
 // ─── Utils ───────────────────────────────────────────────────────────────────
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; }
@@ -162,6 +124,34 @@ async function writeCache(storeId, key, payload, epoch) {
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 const router = express.Router();
+// --- Admin probe (safe, optional token) --------------------------------------
+// GET /apps/refina/v1/admin/ai-ping
+router.get("/admin/ai-ping", async (req, res) => {
+  try {
+    // Optional lightweight guard: require header if ADMIN_PROBE_TOKEN is set
+    const need = process.env.ADMIN_PROBE_TOKEN;
+    if (need && req.header("x-probe-token") !== need) {
+      // Don’t reveal it exists
+      return res.status(404).end();
+    }
+
+    const t0 = Date.now();
+    const raw = await callGemini('Return {"ok": true} exactly.', {
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      maxOutputTokens: 16,
+      responseSchema: PingSchema,
+    });
+
+    return res.json({
+      ok: true,
+      tookMs: Date.now() - t0,
+      rawHead: typeof raw === "string" ? raw.slice(0, 80) : null,
+      __debug: { model: process.env.GEMINI_MODEL || "gemini-2.5-flash" },
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, err: String(e?.message || e) });
+  }
+});
 
 router.post("/recommend", async (req, res) => {
   const started = Date.now();
