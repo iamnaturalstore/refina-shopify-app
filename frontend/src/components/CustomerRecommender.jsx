@@ -6,10 +6,17 @@ const API_PREFIX = "/apps/refina/v1";
 
 // --- Helper Functions ---
 function decodeEntities(str = "") {
-  return String(str).replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return String(str)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 function teaserFromHtml(html = "", max = 140) {
-  const txt = decodeEntities(String(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  const txt = decodeEntities(
+    String(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+  );
   return txt.length > max ? `${txt.slice(0, max)}…` : txt;
 }
 function formatPrice(val) {
@@ -37,12 +44,68 @@ function useUrlSettings() {
   return settings;
 }
 
+// --- Local helpers for Awesome/copy fallbacks ---
+function normalizeProducts(list = []) {
+  // Backend sends {id,title,price,image,url} (no `name`, no `description`).
+  // Map to the UI’s expected shape and keep original fields.
+  return list.map((p) => ({
+    ...p,
+    name: p.name || p.title || "", // UI expects `name`
+    description: p.description || "", // may be empty; UI has a fallback
+  }));
+}
+function buildReasonsMapFromAwesome(awesome) {
+  const map = {};
+  if (!awesome) return map;
+  if (awesome.primary?.id && Array.isArray(awesome.primary.reasons)) {
+    map[String(awesome.primary.id)] = awesome.primary.reasons.join(" ");
+  }
+  if (Array.isArray(awesome.alternatives)) {
+    for (const alt of awesome.alternatives) {
+      if (alt?.id && Array.isArray(alt.reasons)) {
+        map[String(alt.id)] = alt.reasons.join(" ");
+      }
+    }
+  }
+  return map;
+}
+function buildCopyFromAwesome(awesome, fallbackExplanation = "") {
+  if (!awesome) {
+    return {
+      why: String(fallbackExplanation || ""),
+      rationale: "",
+      extras: "",
+    };
+  }
+  const oneLiner = awesome.explanation?.oneLiner || "";
+  const friendly = awesome.explanation?.friendlyParagraph || "";
+  const expertBullets = Array.isArray(awesome.explanation?.expertBullets)
+    ? awesome.explanation.expertBullets.join(" ")
+    : "";
+  const usageTips = Array.isArray(awesome.explanation?.usageTips)
+    ? awesome.explanation.usageTips.join(" ")
+    : "";
+
+  const why = friendly || oneLiner || "";
+  const rationale = awesome.copy?.rationale || expertBullets || "";
+  const extras = awesome.copy?.extras || usageTips || "";
+
+  return { why, rationale, extras };
+}
+function teaserForCard(product, reasonsById) {
+  const reason = reasonsById?.[product.id] || "";
+  if (reason) return decodeEntities(reason);
+  // Backend does not send `description`; if empty after decode, show a safe line.
+  const fromDesc = teaserFromHtml(product.description || "");
+  return fromDesc || "A solid match for your request.";
+}
+
 export default function CustomerRecommender() {
   const settings = useUrlSettings();
   const [concern, setConcern] = useState("");
   const [lastQuery, setLastQuery] = useState("");
   const [loading, setLoading] = useState(false);
-  
+
   const [commonConcerns, setCommonConcerns] = useState([]);
   const [matchedProducts, setMatchedProducts] = useState([]);
   const [copy, setCopy] = useState({ why: "", rationale: "", extras: "" });
@@ -57,10 +120,13 @@ export default function CustomerRecommender() {
 
     // Map URL settings to CSS variables
     const stylesToApply = {
-      '--rf-primary-color': settings.primaryColor,
-      '--rf-accent-color': settings.accentColor,
+      "--rf-primary-color": settings.primaryColor,
+      "--rf-accent-color": settings.accentColor,
       // Simple mapping for border-radius. Assumes you have CSS classes/vars for sm, md, lg, 2xl.
-      '--rf-border-radius': settings.borderRadius?.replace(/^(sm|md|lg|2xl)$/, 'var(--rf-radius-$1)'),
+      "--rf-border-radius": settings.borderRadius?.replace(
+        /^(sm|md|lg|2xl)$/,
+        "var(--rf-radius-$1)"
+      ),
     };
 
     for (const [key, value] of Object.entries(stylesToApply)) {
@@ -83,84 +149,102 @@ export default function CustomerRecommender() {
         if (!cancelled) setCommonConcerns([]);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleRecommend = useCallback(async (nextConcern) => {
-    const q = String(nextConcern ?? concern).trim();
-    if (!q) return;
+  const handleRecommend = useCallback(
+    async (nextConcern) => {
+      const q = String(nextConcern ?? concern).trim();
+      if (!q) return;
 
-    setLoading(true);
-    setMatchedProducts([]);
-    setCopy({ why: "", rationale: "", extras: "" });
-    setReasonsById({});
-    setLastQuery(q);
-
-    try {
-      // --- APPROVED DIFF: resolve storeId from ?shop= or #root[data-shop] ---
-      const storeId =
-        new URLSearchParams(location.search).get("shop") ||
-        document.getElementById("root")?.dataset.shop ||
-        "";
-
-      const resp = await fetch(`${API_PREFIX}/recommend`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // --- APPROVED DIFF: include { storeId, concern } in body ---
-        body: JSON.stringify({ storeId, concern: q })
-      });
-      if (!resp.ok) throw new Error(`recommend ${resp.status}`);
-
-      const data = await resp.json();
-      const products = Array.isArray(data?.products) ? data.products : [];
-      const cpy = data?.copy || { why: "", rationale: "", extras: "" };
-      const rbi = data?.reasonsById && typeof data.reasonsById === "object" ? data.reasonsById : {};
-
-      setMatchedProducts(products);
-      setCopy({ why: String(cpy.why || ""), rationale: String(cpy.rationale || ""), extras: String(cpy.extras || "") });
-      setReasonsById(rbi);
+      setLoading(true);
+      setMatchedProducts([]);
+      setCopy({ why: "", rationale: "", extras: "" });
+      setReasonsById({});
+      setLastQuery(q);
 
       try {
-  console.log("[Recommender] Reporting analytics event for concern:", q);
+        // --- resolve storeId from ?shop= or #root[data-shop] ---
+        const storeId =
+          new URLSearchParams(location.search).get("shop") ||
+          document.getElementById("root")?.dataset.shop ||
+          "";
 
-  // Resolve storeId the same way as for /recommend
-  const storeId =
-    new URLSearchParams(location.search).get("shop") ||
-    document.getElementById("root")?.dataset.shop ||
-    "";
-
-  const analyticsPayload = {
-    storeId, // ✅ include canonical shop id
-    type: "concern",
-    event: "recommendation_received",
-    concern: q,
-    productIds: products.map(p => p.id),
-    meta: {
-      plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
-      model: (data?.meta?.model || data?.meta?.source) || ""
-    }
-  };
-
-        
-        fetch(`${API_PREFIX}/analytics/ingest`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(analyticsPayload),
-          keepalive: true
+        const resp = await fetch(`${API_PREFIX}/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // include { storeId, concern } in body
+          body: JSON.stringify({ storeId, concern: q }),
         });
+        if (!resp.ok) throw new Error(`recommend ${resp.status}`);
 
-      } catch (analyticsError) {
-        console.warn("[Recommender] Analytics reporting failed:", analyticsError);
+        const data = await resp.json();
+
+        // 1) Normalize products to have `name`
+        const products = normalizeProducts(
+          Array.isArray(data?.products) ? data.products : []
+        );
+
+        // 2) Build reasonsById from Awesome
+        const reasonsMap = buildReasonsMapFromAwesome(data?.awesome);
+
+        // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
+        const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
+
+        setMatchedProducts(products);
+        setCopy({
+          why: String(copyOut.why || ""),
+          rationale: String(copyOut.rationale || ""),
+          extras: String(copyOut.extras || ""),
+        });
+        setReasonsById(reasonsMap);
+
+        // Analytics (best-effort)
+        try {
+          // Resolve storeId again the same way as for /recommend
+          const storeId2 =
+            new URLSearchParams(location.search).get("shop") ||
+            document.getElementById("root")?.dataset.shop ||
+            "";
+
+          const analyticsPayload = {
+            storeId: storeId2, // ✅ include canonical shop id
+            type: "concern",
+            event: "recommendation_received",
+            concern: q,
+            productIds: products.map((p) => p.id),
+            meta: {
+              plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+              model: (data?.meta?.model || data?.meta?.source) || "",
+            },
+          };
+
+          fetch(`${API_PREFIX}/analytics/ingest`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(analyticsPayload),
+            keepalive: true,
+          });
+        } catch (analyticsError) {
+          console.warn("[Recommender] Analytics reporting failed:", analyticsError);
+        }
+      } catch (_e) {
+        setMatchedProducts([]);
+        setCopy({
+          why: "Gentle, low-foam cleansing preserves your skin barrier.",
+          rationale:
+            "I couldn’t fetch smart picks just now, so I’ve kept things simple.",
+          extras: "Use lukewarm water and pat dry—no scrubbing.",
+        });
+        setReasonsById({});
+      } finally {
+        setLoading(false);
       }
-
-    } catch (_e) {
-      setMatchedProducts([]);
-      setCopy({ why: "Gentle, low-foam cleansing preserves your skin barrier.", rationale: "I couldn’t fetch smart picks just now, so I’ve kept things simple.", extras: "Use lukewarm water and pat dry—no scrubbing." });
-      setReasonsById({});
-    } finally {
-      setLoading(false);
-    }
-  }, [concern]);
+    },
+    [concern]
+  );
 
   const onTextKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -168,35 +252,150 @@ export default function CustomerRecommender() {
       if (!loading) handleRecommend(concern);
     }
   };
-  
+
   const headingText = settings.heading || "Let’s find your perfect pick";
-  const subheadingText = settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
+  const subheadingText =
+    settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
   const ctaText = settings.ctaText || "Get picks";
 
   return (
     <div className={styles.container}>
       <h1 className={styles.heading}>{headingText}</h1>
       <p className={styles.subtext}>{subheadingText}</p>
-      
+
       {commonConcerns.length > 0 && (
         <div className={styles.concernButtons}>
           {commonConcerns.slice(0, 6).map((item) => (
-            <button key={item} className={styles.chip} onClick={() => { setConcern(item); handleRecommend(item); }} aria-label={`Use suggestion: ${item}`}>{item}</button>
+            <button
+              key={item}
+              className={styles.chip}
+              onClick={() => {
+                setConcern(item);
+                handleRecommend(item);
+              }}
+              aria-label={`Use suggestion: ${item}`}
+            >
+              {item}
+            </button>
           ))}
         </div>
       )}
 
-      <textarea className={styles.textarea} value={concern} onChange={(e) => setConcern(e.target.value)} onKeyDown={onTextKeyDown} placeholder="Type your concern… (Enter to Ask, Shift+Enter for new line)" />
+      <textarea
+        className={styles.textarea}
+        value={concern}
+        onChange={(e) => setConcern(e.target.value)}
+        onKeyDown={onTextKeyDown}
+        placeholder="Type your concern… (Enter to Ask, Shift+Enter for new line)"
+      />
 
-      <button className={styles.askButton} onClick={() => handleRecommend(concern)} disabled={loading} aria-busy={loading}>
-        {loading ? <>Researching<span className={styles.dots} aria-hidden="true" /></> : ctaText}
+      <button
+        className={styles.askButton}
+        onClick={() => handleRecommend(concern)}
+        disabled={loading}
+        aria-busy={loading}
+      >
+        {loading ? (
+          <>
+            Researching<span className={styles.dots} aria-hidden="true" />
+          </>
+        ) : (
+          ctaText
+        )}
       </button>
 
-      {(copy.why || copy.rationale || copy.extras) && ( <div className={styles.responseBox} aria-live="polite"> <h2>Here’s what I’d pick</h2> {copy.why ? <p className={styles.opener}>{copy.why}</p> : null} {copy.rationale ? <p className={styles.blurb}>{copy.rationale}</p> : null} {copy.extras ? <p className={styles.usageNote}>{copy.extras}</p> : null} </div> )}
-      
-      {matchedProducts.length > 0 && ( <> <div className={styles.responseBox}> <h2>Top matches</h2> <p>Tap a product to see details.</p> </div> <div className={styles.grid} role="list"> {matchedProducts.map((product, idx) => { const isTopPick = idx === 0; const reason = reasonsById?.[product.id] || ""; const teaser = reason || teaserFromHtml(product.description || ""); return ( <div key={product.id || product.name} className={styles.card} role="listitem" onClick={() => setSelectedProduct(product)}> <img src={product.image} alt={product.name} className={styles.image} onError={(e) => { e.currentTarget.src = "https://cdn.shopify.com/s/images/admin/no-image-compact.gif"; }} /> {isTopPick && <div className={styles.topPickBadge} aria-label="Top pick">Top pick</div>} <h3 className={styles.productTitle}>{product.name}</h3> <p className={styles.productDescription}>{decodeEntities(teaser)}</p> {formatPrice(product.price) && <div className={styles.price}>{formatPrice(product.price)}</div>} </div> ); })} </div> </> )}
-      
-      {selectedProduct && ( <div className={styles.modalOverlay} onClick={() => setSelectedProduct(null)}> <div className={styles.modal} onClick={(e) => e.stopPropagation()}> <h2>{selectedProduct.name}</h2> <div style={{ marginTop: 4, opacity: 0.7, fontSize: 13 }}> Why this fits <span style={{ opacity: 0.6 }}>— “{lastQuery}”</span> </div> <img src={selectedProduct.image} alt={selectedProduct.name} onError={(e) => { e.currentTarget.src = "https://cdn.shopify.com/s/images/admin/no-image-compact.gif"; }} style={{ marginTop: 12 }} /> <div style={{ marginTop: 12, lineHeight: 1.5 }}> {reasonsById?.[selectedProduct.id] ? (<p>{reasonsById[selectedProduct.id]}</p>) : (<p>{teaserFromHtml(selectedProduct.description || "")}</p>)} {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null} </div> <a href={selectedProduct.url || selectedProduct.link || "#"} target="_blank" rel="noopener noreferrer" className={styles.buyNow}> Buy Now </a> </div> </div> )}
+      {(copy.why || copy.rationale || copy.extras) && (
+        <div className={styles.responseBox} aria-live="polite">
+          <h2>Here’s what I’d pick</h2>
+          {copy.why ? <p className={styles.opener}>{copy.why}</p> : null}
+          {copy.rationale ? <p className={styles.blurb}>{copy.rationale}</p> : null}
+          {copy.extras ? <p className={styles.usageNote}>{copy.extras}</p> : null}
+        </div>
+      )}
+
+      {matchedProducts.length > 0 && (
+        <>
+          <div className={styles.responseBox}>
+            <h2>Top matches</h2>
+            <p>Tap a product to see details.</p>
+          </div>
+
+          <div className={styles.grid} role="list">
+            {matchedProducts.map((product, idx) => {
+              const isTopPick = idx === 0;
+              const teaser = teaserForCard(product, reasonsById);
+
+              return (
+                <div
+                  key={product.id || product.name}
+                  className={styles.card}
+                  role="listitem"
+                  onClick={() => setSelectedProduct(product)}
+                >
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    className={styles.image}
+                    onError={(e) => {
+                      e.currentTarget.src =
+                        "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
+                    }}
+                  />
+                  {isTopPick && (
+                    <div className={styles.topPickBadge} aria-label="Top pick">
+                      Top pick
+                    </div>
+                  )}
+                  <h3 className={styles.productTitle}>{product.name}</h3>
+                  <p className={styles.productDescription}>{teaser}</p>
+                  {formatPrice(product.price) && (
+                    <div className={styles.price}>{formatPrice(product.price)}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {selectedProduct && (
+        <div
+          className={styles.modalOverlay}
+          onClick={() => setSelectedProduct(null)}
+        >
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <h2>{selectedProduct.name}</h2>
+            <div style={{ marginTop: 4, opacity: 0.7, fontSize: 13 }}>
+              Why this fits <span style={{ opacity: 0.6 }}>— “{lastQuery}”</span>
+            </div>
+            <img
+              src={selectedProduct.image}
+              alt={selectedProduct.name}
+              onError={(e) => {
+                e.currentTarget.src =
+                  "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
+              }}
+              style={{ marginTop: 12 }}
+            />
+            <div style={{ marginTop: 12, lineHeight: 1.5 }}>
+              {reasonsById?.[selectedProduct.id] ? (
+                <p>{reasonsById[selectedProduct.id]}</p>
+              ) : (
+                <p>{teaserFromHtml(selectedProduct.description || "") || "A solid match for your request."}</p>
+              )}
+              {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null}
+            </div>
+            <a
+              href={selectedProduct.url || selectedProduct.link || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.buyNow}
+            >
+              Buy Now
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
