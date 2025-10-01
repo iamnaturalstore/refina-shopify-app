@@ -15,9 +15,8 @@ const API_KEY =
 const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
 
 const MODEL_FALLBACKS = [
-  MODEL_PRIMARY,
-  // Keep a couple of nearby options; order matters for routing.
-  "gemini-2.5-pro",
+  MODEL_PRIMARY,          // prefer flash for latency
+  "gemini-2.5-pro",       // then pro if needed
   "gemini-2.0-flash",
 ];
 
@@ -58,15 +57,15 @@ export async function callGeminiStructured({
   if (responseSchema) baseConfig.responseSchema = responseSchema;
 
   const userContents = [{ role: "user", parts: [{ text: String(prompt || "") }] }];
+  const systemInstr = (system && String(system).trim())
+    ? { role: "system", parts: [{ text: String(system).trim() }] }
+    : null;
 
-  // We’ll try up to N models, each with a couple retries on transient failures.
   for (const mdl of candidates) {
     try {
       const modelClient = genAI.getGenerativeModel({
         model: mdl,
-        ...(system
-          ? { systemInstruction: { role: "system", parts: [{ text: String(system) }] } }
-          : {}),
+        ...(systemInstr ? { systemInstruction: systemInstr } : {}),
       });
 
       let delay = 250;
@@ -78,7 +77,6 @@ export async function callGeminiStructured({
           const res = await modelClient.generateContent({
             contents: userContents,
             generationConfig: baseConfig,
-            // Note: SDK handles MIME/schema mapping; no need to set safety settings here.
           });
           clearTimeout(to);
 
@@ -88,12 +86,13 @@ export async function callGeminiStructured({
           break;
         } catch (err) {
           clearTimeout(to);
-          // Retry on timeouts/aborts and obvious transient signals
           const name = err?.name || "";
           const msg = err?.message || "";
+          const status = err?.status ?? err?.code ?? 0;
           const transient =
             name === "AbortError" ||
-            /deadline|timeout|temporarily|overload|retry/i.test(msg);
+            status === 429 || status === 503 ||
+            /deadline|timeout|temporar|overload|retry|unavailable/i.test(msg);
           if (transient && i < attempts - 1) {
             await sleep(delay);
             delay = Math.min(delay * 2, 2000);
