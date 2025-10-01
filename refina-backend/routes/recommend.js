@@ -12,39 +12,13 @@ import { db } from "../bff/lib/firestore.js";
 import { buildGeminiPrompt } from "../bff/ai/buildGeminiPrompt.js";
 import { ConciergeResponseSchema } from "../ai/jsonSchemas.js";
 import { validateConciergeResponse } from "../ai/validateConcierge.js";
-import * as KB from "../bff/lib/knowledge.js";
-
-const normConcern = KB.normConcern;
-const expandConcernToIngredients = KB.expandConcernToIngredients;
-const getIngredientFacts = KB.getIngredientFacts;
-
-// Fallback EO denylist if not exported yet by knowledge.js
-const EO_SLUGS = Array.isArray(KB.EO_SLUGS) && KB.EO_SLUGS.length ? KB.EO_SLUGS : [
-  "lavandula", "citrus", "mentha", "eucalyptus", "melaleuca", "cinnamomum",
-  "rosmarinus", "salvia", "pelargonium", "cananga", "ylang", "ocimum",
-  "pogostemon", "juniperus", "pinus", "cedrus", "cymbopogon", "citronell",
-  "bergamia", "limon", "linalool", "limonene", "citral", "eugenol"
-];
-
-// Fallback constraint detector if not exported yet by knowledge.js
-const detectConstraints = typeof KB.detectConstraints === "function"
-  ? KB.detectConstraints
-  : (normalizedConcern = "") => {
-      const s = String(normalizedConcern).toLowerCase();
-      const flags = {
-        sensitive: /sensitive|reactive|irritat/.test(s),
-        avoidEO: /avoid\s+(eo|essential\s+oil|fragrance)|fragrance[-\s]?free/.test(s),
-      };
-      let step = null;
-      if (/moisturizer|moisturiser|face[-\s]?cream|cream\b/.test(s)) step = "moisturizer";
-      else if (/\bserum|treatment\b/.test(s)) step = "serum";
-      else if (/\bcleanser|wash\b/.test(s)) step = "cleanser";
-      // extract first 2-digit age we see (60–99) or 2 digits near 'age'
-      const mAge = s.match(/\b(6[0-9]|[7-9][0-9])\b/) || s.match(/age[^0-9]{0,6}(\d{2})/);
-      const age = mAge ? Number(mAge[1] || mAge[0]) : null;
-      return { step, age, flags };
-    };
-
+import {
+  normConcern,
+  expandConcernToIngredients,
+  getIngredientFacts,
+  detectConstraints,
+  EO_DENYLIST,
+} from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
 // ─── Admin ping schema (for /admin/ai-ping) ──────────────────────────────────
