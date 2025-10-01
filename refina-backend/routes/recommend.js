@@ -1,6 +1,7 @@
 // refina-backend/routes/recommend.js
 // Thin adapter with embeddings via REST (vectors) and generation via SDK (strict JSON).
-// Adds: two-stage generation (fast), hard latency cap, and a 7d cache.
+// Adds: broader retrieval (Top-60), KB filtering/scoring, EO hard filter,
+// two-stage generation (8→12), hard latency cap, 7d cache, and ID-mapping safety.
 
 import express from "express";
 import crypto from "node:crypto";
@@ -15,15 +16,18 @@ import {
 } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
-// ✅ define PingSchema BEFORE it’s referenced
+// ─────────────────────────────────────────────────────────────
+// Admin ping schema (keep SDK JSON-mode honest)
+// ─────────────────────────────────────────────────────────────
 const PingSchema = {
   type: "OBJECT",
   properties: { ok: { type: "BOOLEAN" } },
   required: ["ok"],
 };
 
-
-// ─── Utils ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Utils
+// ─────────────────────────────────────────────────────────────
 function dot(a, b) { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; }
 function norm(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i]; return Math.sqrt(s); }
 function cosine(a, b) { const na = norm(a), nb = norm(b); if (!na || !nb) return 0; return dot(a, b) / (na * nb); }
@@ -45,7 +49,9 @@ function pickPrimaryImage(p, storeId) {
   return ensureAbsolute(candidate, storeId);
 }
 
-// ─── Embeddings (REST) ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Embeddings (REST)
+// ─────────────────────────────────────────────────────────────
 async function embedText(text) {
   const apiKey =
     process.env.GEMINI_API_KEY ||
@@ -100,11 +106,14 @@ function shortlistCandidates(embeds, qVec, strictness) {
   const scored = embeds
     .map((e) => ({ ...e, sim: cosine(qVec, e.vector || []) }))
     .sort((a, b) => b.sim - a.sim);
+  // Note: we’ll take Top-60 from this downstream regardless of strictness.
   const cap = strictness === "strict" ? 60 : strictness === "relaxed" ? 200 : 120;
   return scored.slice(0, cap);
 }
 
-// ─── Cache (7d TTL; version + epoch invalidation) ────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Cache (7d TTL; version + epoch invalidation)
+// ─────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_VERSION = "concierge-v1";
 
@@ -129,18 +138,95 @@ async function writeCache(storeId, key, payload, epoch) {
   );
 }
 
-// ─── Router ──────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// Constraint detection + EO denylist + rule scoring
+// ─────────────────────────────────────────────────────────────
+const EO_SLUGS = [
+  // common essentials (normalized slugs you store in ingredientsNormalized)
+  "lavandula", "citrus", "citrus-limon", "citrus-aurantium", "mentha",
+  "eucalyptus", "melaleuca", "tea-tree", "cinnamomum", "rosmarinus",
+  "salvia", "pelargonium", "ylang", "ylang-ylang", "cedrus", "pinus",
+  "cananga", "bergamot", "lemongrass", "citral", "citronellol", "linalool",
+];
+
+function detectConstraints(normalizedConcern = "") {
+  const s = String(normalizedConcern || "").toLowerCase();
+  const constraints = {
+    avoidEO: /avoid(ing)? essential oils|no essential oils|fragrance[-\s]?free|scent[-\s]?free/.test(s),
+    sensitive: /sensitive|reactive|redness|rosacea|irritat/.test(s),
+    step: null,
+    age: null,
+  };
+  // step / type hints
+  if (/(moisturizer|moisturiser|face[-\s]?cream|night[-\s]?cream|day[-\s]?cream)/.test(s)) constraints.step = "moisturizer";
+  else if (/(cleanser|face[-\s]?wash)/.test(s)) constraints.step = "cleanser";
+  else if (/(serum|treatment)/.test(s)) constraints.step = "serum";
+  else if (/(sunscreen|spf)/.test(s)) constraints.step = "spf";
+
+  // age (simple pickup)
+  const ageMatch = s.match(/\b(1[6-9]|[2-9]\d|1\d{2})\b/);
+  if (ageMatch) constraints.age = Number(ageMatch[0]);
+
+  return constraints;
+}
+
+function hasEOAllergen(prod) {
+  const ings = Array.isArray(prod?.ingredientsNormalized)
+    ? prod.ingredientsNormalized.map(x => String(x || "").toLowerCase())
+    : [];
+  return ings.some(slug => EO_SLUGS.includes(slug));
+}
+
+function overlapCount(a = [], b = []) {
+  if (!a.length || !b.length) return 0;
+  const A = new Set(a.map(x => String(x).toLowerCase()));
+  let n = 0;
+  for (const y of b) if (A.has(String(y).toLowerCase())) n++;
+  return n;
+}
+
+function ruleScore(prod, constraints, concernTokens) {
+  let score = 0;
+
+  // type/step match
+  const typeNorm = (prod.productType_norm || prod.productTypeNormalized || "").toLowerCase();
+  const step = (prod.usageStep || "").toLowerCase();
+  if (constraints.step) {
+    if (typeNorm.includes(constraints.step)) score += 1.0;
+    else if (step.includes(constraints.step)) score += 0.8;
+  }
+
+  // concern/benefit overlap
+  const benefits = Array.isArray(prod.benefitsNormalized) ? prod.benefitsNormalized : (Array.isArray(prod.benefits) ? prod.benefits : []);
+  const concerns = Array.isArray(prod.concernsNormalized) ? prod.concernsNormalized : (Array.isArray(prod.concerns) ? prod.concerns : []);
+  const cbHits = overlapCount(benefits, concernTokens) + overlapCount(concerns, concernTokens);
+  score += Math.min(2.0, cbHits * 0.5);
+
+  // audience fit (sensitive skin etc.)
+  if (constraints.sensitive) {
+    const aud = prod.audience || {};
+    const skinType = String(aud.skinType || aud.skintype || "").toLowerCase();
+    if (skinType.includes("sensitive") || overlapCount(concerns, ["sensitive", "redness"]) > 0) score += 0.5;
+  }
+
+  // EO penalty (hard filter is applied elsewhere when avoidEO=true; here a soft penalty for general asks)
+  if (!constraints.avoidEO && hasEOAllergen(prod)) score -= 0.2;
+
+  // normalize to 0..1-ish clamp
+  return Math.max(0, Math.min(1, score / 3.5));
+}
+
+// ─────────────────────────────────────────────────────────────
+// Router
+// ─────────────────────────────────────────────────────────────
 const router = express.Router();
-// --- Admin probe (safe, optional token) --------------------------------------
+
+// Admin probe (safe, optional token)
 // GET /apps/refina/v1/admin/ai-ping
 router.get("/admin/ai-ping", async (req, res) => {
   try {
-    // Optional lightweight guard: require header if ADMIN_PROBE_TOKEN is set
     const need = process.env.ADMIN_PROBE_TOKEN;
-    if (need && req.header("x-probe-token") !== need) {
-      // Don’t reveal it exists
-      return res.status(404).end();
-    }
+    if (need && req.header("x-probe-token") !== need) return res.status(404).end();
 
     const t0 = Date.now();
     const raw = await callGemini('Return {"ok": true} exactly.', {
@@ -208,15 +294,86 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Keep prompt tight: top 8 for stage 1
-    const candidates = shortlistCandidates(allEmb, qVec, strictness).slice(0, 6);
-    const candidateIds = candidates.map((c) => c.id);
-    const candidateDocs = await loadProductsByIds(storeId, candidateIds);
+    // ─────────────────────────────────────────────────────────
+    // Broader retrieval: Top-60 by cosine
+    // ─────────────────────────────────────────────────────────
+    const vectorRanked = allEmb
+      .map(e => ({ id: e.id, sim: cosine(qVec, e.vector || []) }))
+      .sort((a, b) => b.sim - a.sim);
+    const top60 = vectorRanked.slice(0, 60);
+    const top60Ids = top60.map(x => x.id);
+    const top60Docs = await loadProductsByIds(storeId, top60Ids);
 
+    // Constraint detection
+    const constraints = detectConstraints(concernNorm);
+
+    // Tokenize normalized concern for overlap checks
+    const concernTokens = String(concernNorm || "")
+      .toLowerCase()
+      .split(/[^a-z0-9+]+/)
+      .filter(Boolean);
+
+    // Hard filter allergens if avoidEO
+    const filtered = constraints.avoidEO
+      ? top60Docs.filter(p => !hasEOAllergen(p))
+      : top60Docs.slice();
+
+    // Score by KB rules + cosine
+    const simMap = new Map(top60.map(x => [String(x.id), x.sim]));
+    const scored = filtered.map(p => {
+      const rs = ruleScore(p, constraints, concernTokens);
+      const sim = simMap.get(String(p.id)) || 0;
+      const finalScore = 0.7 * sim + 0.3 * rs;
+      return { p, rs, sim, finalScore };
+    }).sort((a, b) => b.finalScore - a.finalScore);
+
+    // Finalists: Top-12 (Stage-1 sees 8; Stage-2 may widen to 12)
+    const finalists = scored.slice(0, 12).map(x => x.p);
+    const finalistsIds = finalists.map(p => String(p.id));
+
+    if (!finalists.length) {
+      // Nothing after filters → quick vector fallback (top 6 by sim)
+      const fallbackIds = vectorRanked.slice(0, 6).map(x => String(x.id));
+      const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
+      const products = enrichedFallback.map((p) => {
+        const title = p.title || p.name || "";
+        const price = p.price != null ? p.price : undefined;
+        const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+        let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+        if (!urlCandidate && p.path) urlCandidate = p.path;
+        const url = ensureAbsolute(urlCandidate, storeId);
+        const image = pickPrimaryImage(p, storeId);
+        return {
+          id: p.id,
+          title,
+          price,
+          ...(price_formatted ? { price_formatted } : {}),
+          image,
+          image_url: image,
+          url,
+        };
+      });
+      return res.json({
+        productIds: fallbackIds,
+        products,
+        explanation: "Here are the strongest matches from the catalogue while the assistant warms up.",
+        followUps: [],
+        awesome: null,
+        source: "gemini-fallback",
+        tookMs: Date.now() - started,
+        __debug: {
+          raced: false, llmMs: 0, budgetMs: LLM_BUDGET_MS,
+          candidateCount: 0, validator: "no-finalists",
+          attempts: [],
+        },
+      });
+    }
+
+    // Prompt compaction helpers
     const stripHtml = (s = "") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const cap = (s, n = 220) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
-    const promptProducts = candidateDocs.map((p) =>
+    const compactProducts = (docs) => docs.map((p) =>
       pick(
         {
           id: p.id || p.name,
@@ -229,23 +386,28 @@ router.post("/recommend", async (req, res) => {
               : [],
           productType: p.productType || "",
           productType_norm: p.productType_norm || p.productTypeNormalized || "",
+          usageStep: p.usageStep || p.step || "",
           category: p.categoryNormalized || p.category || "",
           keywords: Array.isArray(p.keywords) ? p.keywords : [],
           keywordsNormalized: Array.isArray(p.keywordsNormalized) ? p.keywordsNormalized : [],
+          benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized : [],
+          concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized : [],
+          ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : [],
         },
         [
-          "id",
-          "name",
-          "description",
-          "tags",
-          "productType",
-          "productType_norm",
-          "category",
-          "keywords",
-          "keywordsNormalized",
+          "id","name","description","tags","productType","productType_norm","usageStep",
+          "category","keywords","keywordsNormalized","benefitsNormalized",
+          "concernsNormalized","ingredientsNormalized"
         ]
       )
     );
+
+    // Stage-1 set: top 8; Stage-2 may widen to 12 if needed/constraints present
+    const stage1Docs = finalists.slice(0, 8);
+    const stage2Docs = finalists.slice(0, 12);
+
+    const promptProductsStage1 = compactProducts(stage1Docs);
+    const promptProductsStage2 = compactProducts(stage2Docs);
 
     const ingSlugs = await expandConcernToIngredients(concernNorm);
     const ingredientFacts = await getIngredientFacts(ingSlugs);
@@ -255,18 +417,20 @@ router.post("/recommend", async (req, res) => {
       normalizedConcern: concernNorm,
       category,
       tone,
-      products: promptProducts,
+      products: promptProductsStage1,
       ingredientFacts,
     });
 
-    // ── Two-stage generation within 12s budget ───────────────────────────────
+    // ─────────────────────────────────────────────────────────
+    // Two-stage generation within 12s budget
+    // ─────────────────────────────────────────────────────────
     let raw = null;
     let rawHead = null;
 
-    // Stage 1: flash, 7s, 8 products, ~320 toks
+    // Stage 1: flash
     try {
       raced = true;
-      const stage1Budget = 9000;
+      const stage1Budget = 7000; // leave room for stage-2
       const t0 = Date.now();
       const p1 = callGemini(prompt, {
         model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
@@ -287,27 +451,26 @@ router.post("/recommend", async (req, res) => {
       raw = null;
     }
 
-    // If invalid or absent, Stage 2: tiny retry, remaining budget, 4 products, 256 toks
+    // Validate; if invalid, Stage 2: widen to 12 (especially if constraints)
     let vr = validateConciergeResponse(raw);
     if (!vr.ok) {
       try {
         const remaining = Math.max(0, LLM_BUDGET_MS - llmMs);
         if (remaining > 600) {
-          const promptProductsTiny = promptProducts.slice(0, 3);
-          const promptTiny = buildGeminiPrompt({
+          const t1 = Date.now();
+          const promptWider = buildGeminiPrompt({
             concern,
             normalizedConcern: concernNorm,
             category,
             tone,
-            products: promptProductsTiny,
+            products: promptProductsStage2,
             ingredientFacts,
           });
-          const t1 = Date.now();
-          const p2 = callGemini(promptTiny, {
+          const p2 = callGemini(promptWider, {
             model: "gemini-2.5-flash",
             temperature: 0.3,
             topP: 0.8,
-            maxOutputTokens: 192,
+            maxOutputTokens: 256,
             responseSchema: ConciergeResponseSchema,
           });
           const raw2 = await Promise.race([
@@ -329,9 +492,12 @@ router.post("/recommend", async (req, res) => {
 
     if (typeof raw === "string") rawHead = raw.slice(0, 220);
 
-    // ── Validation & fallback ────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────
+    // Validation & fallbacks (incl. ID-mapping safety)
+    // ─────────────────────────────────────────────────────────
     if (!vr.ok) {
-      const fallbackIds = candidateDocs.slice(0, 6).map((p) => String(p.id));
+      // Useful fallback based on finalists (top 6)
+      const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
       const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
       const products = enrichedFallback.map((p) => {
         const title = p.title || p.name || "";
@@ -363,7 +529,7 @@ router.post("/recommend", async (req, res) => {
           raced,
           llmMs,
           budgetMs: LLM_BUDGET_MS,
-          candidateCount: candidateDocs.length,
+          candidateCount: finalists.length,
           validator: "fail",
           rawHead,
           attempts,
@@ -371,47 +537,20 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Enforce candidate allowlist
-    const allow = new Set(candidateDocs.map((p) => String(p.id)));
-    const productIds = vr.value.productIds.filter((id) => allow.has(String(id)));
+    // Enforce candidate allowlist; if Gemini picked out-of-set IDs, map prose to our finalists
+    const finalistsSet = new Set(finalistsIds);
+    let productIds = vr.value.productIds.filter((id) => finalistsSet.has(String(id)));
+
     if (!productIds.length) {
-      const fallbackIds = candidateDocs.slice(0, 6).map((p) => String(p.id));
-      const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
-      const products = enrichedFallback.map((p) => {
-        const title = p.title || p.name || "";
-        const price = p.price != null ? p.price : undefined;
-        const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-        let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-        if (!urlCandidate && p.path) urlCandidate = p.path;
-        const url = ensureAbsolute(urlCandidate, storeId);
-        const image = pickPrimaryImage(p, storeId);
-        return {
-          id: p.id,
-          title,
-          price,
-          ...(price_formatted ? { price_formatted } : {}),
-          image,
-          image_url: image,
-          url,
-        };
-      });
-      return res.json({
-        productIds: fallbackIds,
-        products,
-        explanation: "Here are the strongest matches from the catalogue.",
-        followUps: [],
-        awesome: null,
-        source: "no-allowed-ids-fallback",
-        tookMs: Date.now() - started,
-        __debug: {
-          raced,
-          llmMs,
-          budgetMs: LLM_BUDGET_MS,
-          candidateCount: candidateDocs.length,
-          validator: "ok-but-out-of-corpus",
-          attempts,
-        },
-      });
+      // ID-mapping safety: remap prose onto our top finalists
+      productIds = finalistsIds.slice(0, 3);
+      // Mutate vr.value primary/alternatives IDs to match our finalists (keep prose)
+      if (vr.value.primary) vr.value.primary.id = productIds[0] || vr.value.primary.id;
+      if (Array.isArray(vr.value.alternatives)) {
+        for (let i = 0; i < vr.value.alternatives.length; i++) {
+          if (productIds[i + 1]) vr.value.alternatives[i].id = productIds[i + 1];
+        }
+      }
     }
 
     // Enrich product docs for UI
@@ -455,7 +594,7 @@ router.post("/recommend", async (req, res) => {
         raced,
         llmMs,
         budgetMs: LLM_BUDGET_MS,
-        candidateCount: candidateDocs.length,
+        candidateCount: finalists.length,
         validator: "ok",
         rawHead,
         attempts,

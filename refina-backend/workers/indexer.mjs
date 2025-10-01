@@ -9,6 +9,8 @@ import { db, nowTs } from "../bff/lib/firestore.js";
 import { callGemini } from "../bff/ai/gemini.js";
 import { buildExtractEntitiesPrompt } from "../ai/prompts/extractEntities.js";
 import { validateExtractionOutput } from "../ai/jsonSchemas.js";
+// NEW: EO denylist for the product-level EO flag
+import { EO_DENYLIST } from "../bff/lib/knowledge.js";
 
 // ─────────────────────────────────────────────────────────────
 // CLI args
@@ -28,8 +30,6 @@ if (!MODE || !STORE) {
   process.exit(1);
 }
 
-// ─────────────────────────────────────────────────────────────
-// JSON Schemas for model compliance (Gemini REST subset)
 // ─────────────────────────────────────────────────────────────
 const MIN_SCHEMA = {
   type: "OBJECT",
@@ -93,7 +93,8 @@ const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.3),
   maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024),
-  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",};
+  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",
+};
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 14000);
 const BATCH_SIZE = 400;
 
@@ -122,13 +123,11 @@ function withTimeout(promise, ms, tag = "timeout") {
 // Light retry helper for transient LLM hiccups
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 async function callGeminiWithRetry(prompt, cfg, timeoutMs) {
-  // attempts: 1 initial + 2 retries with 250ms, 500ms backoff
   const backoffs = [0, 250, 500];
   let lastErr;
   for (let i = 0; i < backoffs.length; i++) {
     if (backoffs[i] > 0) await sleep(backoffs[i]);
     try {
-      // Keep existing overall timeout guard per attempt
       return await withTimeout(callGemini(prompt, cfg), timeoutMs, "timeout");
     } catch (e) {
       lastErr = e;
@@ -137,7 +136,7 @@ async function callGeminiWithRetry(prompt, cfg, timeoutMs) {
   throw lastErr || new Error("llm_failed");
 }
 
-// Build the canonical text we’ll embed (title + short desc + tags)
+// Build canonical text for embeddings (title + short desc + tags)
 function productEmbedText(p, descCap = 900) {
   const title = String(p.title || p.name || "").trim();
   const raw = stripHtml(p.description || p.body_html || "");
@@ -199,45 +198,45 @@ function productToPromptInput(p, cap = 900) {
   };
 }
 
-// Read products from Firestore (source of truth written by importer)
-   async function fetchProductsFromFirestore(storeId, limit = 1000) {
-   const snap = await db.collection(`products/${storeId}/items`).limit(limit).get();
-   const out = [];
-   snap.forEach((doc) => {
-     const d = doc.data() || {};
-     out.push({
-       id: doc.id,
-       title: d.title || d.name || "",
-       name: d.name || d.title || "",
-       description: d.description || d.body_html || "",
-       body_html: d.body_html || "",
-       tags: d.tags || [],
-       productType: d.productType || d.product_type || "",
-       productType_norm: d.productType_norm || d.productTypeNormalized || "",
-       specs: d.specs || d.metafields || {},
-       usageStep: d.usageStep || d.step || "",
-       image: d.image || d.images?.[0]?.src || "",
-       handle: d.handle || d.url || "",
-     });
-   });
-   return out;
- }
- 
-  async function triggerEnrichment(storeId) {
-   const origin = process.env.PUBLIC_BACKEND_ORIGIN || process.env.BACKEND_ORIGIN || "";
-   const secret = process.env.ADMIN_SHARED_SECRET || "";
-   if (!origin || !secret) return;
-   try {
-     await fetch(`${origin.replace(/\/+$/,"")}/api/admin/trigger-enrichment?shop=${encodeURIComponent(storeId)}`, {
-       method: "POST",
-       headers: { "x-admin-secret": secret },
-       keepalive: true,
-     }).catch(() => {});
-     console.log(`[Indexer] enrichment trigger POST ok shop=${storeId}`);
-   } catch (e) {
-     console.log(`[Indexer] enrichment trigger failed shop=${storeId} err=${e?.message||e}`);
-   }
- }
+// Read products from Firestore
+async function fetchProductsFromFirestore(storeId, limit = 1000) {
+  const snap = await db.collection(`products/${storeId}/items`).limit(limit).get();
+  const out = [];
+  snap.forEach((doc) => {
+    const d = doc.data() || {};
+    out.push({
+      id: doc.id,
+      title: d.title || d.name || "",
+      name: d.name || d.title || "",
+      description: d.description || d.body_html || "",
+      body_html: d.body_html || "",
+      tags: d.tags || [],
+      productType: d.productType || d.product_type || "",
+      productType_norm: d.productType_norm || d.productTypeNormalized || "",
+      specs: d.specs || d.metafields || {},
+      usageStep: d.usageStep || d.step || "",
+      image: d.image || d.images?.[0]?.src || "",
+      handle: d.handle || d.url || "",
+    });
+  });
+  return out;
+}
+
+async function triggerEnrichment(storeId) {
+  const origin = process.env.PUBLIC_BACKEND_ORIGIN || process.env.BACKEND_ORIGIN || "";
+  const secret = process.env.ADMIN_SHARED_SECRET || "";
+  if (!origin || !secret) return;
+  try {
+    await fetch(`${origin.replace(/\/+$/,"")}/api/admin/trigger-enrichment?shop=${encodeURIComponent(storeId)}`, {
+      method: "POST",
+      headers: { "x-admin-secret": secret },
+      keepalive: true,
+    }).catch(() => {});
+    console.log(`[Indexer] enrichment trigger POST ok shop=${storeId}`);
+  } catch (e) {
+    console.log(`[Indexer] enrichment trigger failed shop=${storeId} err=${e?.message||e}`);
+  }
+}
 
 function baselineExtractFromText(product) {
   const text = [String(product.description || ""), (product.tags || []).join(", ")].join("\n");
@@ -314,16 +313,27 @@ function deriveKbFromExtraction(product, extraction) {
       .filter((e) => String(e.type || "").toLowerCase().includes(t))
       .map((e) => e.name)
       .filter(Boolean);
-  const ingredients = uniq(getByType("ingredient")).slice(0, 24);
-  const effects = uniq(
-    getByType("benefit").concat(getByType("purpose")).concat(getByType("effect"))
-  ).slice(0, 24);
+
+  // Separate ingredients / benefits / concerns when possible
+  const ingredients = uniq(getByType("ingredient")).slice(0, 48);
+  const benefits = uniq(
+    getByType("benefit")
+      .concat(getByType("purpose"))
+      .concat(getByType("effect"))
+  ).slice(0, 32);
+  const concerns = uniq(
+    getByType("concern")
+      .concat(getByType("condition"))
+      .concat(getByType("issue"))
+  ).slice(0, 32);
+
   const tags = Array.isArray(product.tags)
     ? product.tags
     : typeof product.tags === "string"
-    ? product.tags.split(",").map((s) => s.trim())
-    : [];
-  const keywords = uniq([...tags.slice(0, 16), ...ents.map((e) => e.name)]).slice(0, 24);
+      ? product.tags.split(",").map((s) => s.trim())
+      : [];
+
+  const keywords = uniq([...tags.slice(0, 16), ...ents.map((e) => e.name)]).slice(0, 32);
   const productType = product.productType || "";
   const productType_norm =
     product.productType_norm || product.productTypeNormalized || productType.toLowerCase();
@@ -332,15 +342,53 @@ function deriveKbFromExtraction(product, extraction) {
   return {
     productType,
     productType_norm,
+    // keep original names
     ingredients,
-    benefits: effects,
+    benefits,
+    concerns,
     keywords,
     usageStep,
+    // normalized/sluggy forms used by recommender filters
+    ingredientsNormalized: ingredients.map((n) => slugify(n)),
+    benefitsNormalized: benefits.map((n) => slugify(n)),
+    concernsNormalized: concerns.map((n) => slugify(n)),
   };
+}
+
+// NEW: write normalized fields back to the product doc
+async function upsertProductNormalizedFields({ storeId, productId, kb }) {
+  // EO flag (broad substring match on normalized slugs)
+  const hasEO = Array.isArray(kb.ingredientsNormalized)
+    ? kb.ingredientsNormalized.some((slug) =>
+        EO_DENYLIST.some((ban) => String(slug).includes(ban))
+      )
+    : false;
+
+  const ref = db.doc(`products/${storeId}/items/${productId}`);
+  await ref.set(
+    {
+      productType_norm: kb.productType_norm || "",
+      usageStep: kb.usageStep || "",
+      // arrays
+      ingredientsNormalized: kb.ingredientsNormalized || [],
+      ingredients_norm: kb.ingredientsNormalized || [], // back-compat
+      benefitsNormalized: kb.benefitsNormalized || [],
+      concernsNormalized: kb.concernsNormalized || [],
+      // optional flags container
+      ingredientFlags: {
+        containsEssentialOil: hasEO,
+      },
+      // soft breadcrumb for debugging
+      kbLastEnrichedAt: nowTs(),
+    },
+    { merge: true }
+  );
 }
 
 async function upsertKbProduct({ storeId, product, extraction }) {
   const kb = deriveKbFromExtraction(product, extraction);
+
+  // Write KB doc (unchanged)
   const ref = db.doc(`kb/${storeId}/products/${product.id}`);
   await ref.set(
     {
@@ -351,6 +399,13 @@ async function upsertKbProduct({ storeId, product, extraction }) {
     },
     { merge: true }
   );
+
+  // NEW: ensure product doc carries normalized fields immediately
+  await upsertProductNormalizedFields({
+    storeId,
+    productId: product.id,
+    kb,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -359,7 +414,7 @@ async function upsertKbProduct({ storeId, product, extraction }) {
 async function upsertEntitiesAndLinks({ storeId, productId, extraction, product }) {
   const batch = db.batch();
 
-  // Canonical embedding doc path (same doc you already write entities/evidence to)
+  // Canonical embedding doc path
   const linkRef = db.doc(`productEmbeddings/${storeId}/items/${productId}`);
 
   const slugs = uniq(extraction.entities.map(e => slugify(e.name)));
@@ -368,7 +423,7 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction, product 
     evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
   }));
 
-  // NEW: compute an embedding vector for this product
+  // Compute & store embedding vector
   const textForEmb = productEmbedText(product);
   const vector = await embedText(textForEmb); // [] if embed call fails
 
@@ -376,7 +431,7 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction, product 
     productId,
     entities: slugs.slice(0, 64),
     evidence,
-    ...(vector.length ? { vector } : {}), // ← merge vector when available
+    ...(vector.length ? { vector } : {}),
     updatedAt: nowTs(),
     schemaVersion: 1,
   }, { merge: true });
@@ -427,8 +482,6 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction, product 
 }
 
 // ─────────────────────────────────────────────────────────────
-// LLM extraction per product (3 attempts, then salvage)
-// ─────────────────────────────────────────────────────────────
 async function extractForProduct({ storeId, product }) {
   async function tryOnce(cap, schema, systemHint) {
     const started = Date.now();
@@ -436,7 +489,6 @@ async function extractForProduct({ storeId, product }) {
     const cfg = { ...GENCFG, ...(schema ? { responseSchema: schema } : {}), ...(systemHint ? { system: systemHint } : {}) };
     let text;
     try {
-      // Light retry around callGemini to smooth over transient 5xx/timeout blips
       text = await callGeminiWithRetry(prompt, cfg, LLM_TIMEOUT_MS);
     } catch (e) {
       const reason = /timeout/i.test(String(e?.message)) ? "timeout" : "error";
@@ -524,24 +576,24 @@ function pLimit(n) {
           if (COMMIT) {
             const base = baselineExtractFromText(productToPromptInput(p));
             if (base.entities.length || base.specs.length) {
-               // ensure product is passed for embedding text
-               await upsertEntitiesAndLinks({
-                 storeId: STORE,
-                 productId: p.id,
-                 extraction: { product: { id: String(p.id) }, ...base },
-                 product: p,
-               });
-               // KB from baseline (thin but better than nothing)
-               await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
-               processed++; wrote++;
-             }
-
+              await upsertEntitiesAndLinks({
+                storeId: STORE,
+                productId: p.id,
+                extraction: { product: { id: String(p.id) }, ...base },
+                product: p,
+              });
+              await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
+              processed++; wrote++;
+            } else {
+              processed++;
+            }
+          } else {
+            processed++;
           }
           return;
         }
         processed++;
         if (COMMIT) {
-          // pass product so embeddings vector is computed & stored
           await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value, product: p });
           await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
           wrote++;
@@ -557,10 +609,9 @@ function pLimit(n) {
         avgLlmMs: processed ? Math.round(llmMsSum / processed) : 0,
         totalMs: ms,
       }, null, 2));
-      // Only trigger enrichment after successful writes
-       if (COMMIT && wrote > 0) {
-         await triggerEnrichment(STORE);
-       }
+      if (COMMIT && wrote > 0) {
+        await triggerEnrichment(STORE);
+      }
     } else if (MODE === "index") {
       const pid = ARGS.product || ARGS.p;
       if (!pid) throw new Error("product id required for index mode");
@@ -570,18 +621,19 @@ function pLimit(n) {
       const r = await extractForProduct({ storeId: STORE, product });
       if (!r.ok) {
         const base = baselineExtractFromText(productToPromptInput(product));
-       if (COMMIT && (base.entities.length || base.specs.length)) {
-         await upsertEntitiesAndLinks({
-           storeId: STORE,
-           productId: product.id,
-           extraction: { product: { id: String(product.id) }, ...base },
-           product,
-         });
-         console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
-         process.exit(0);
-       }
-       // Always keep KB in sync, even when not committing entity/link writes
-       await upsertKbProduct({ storeId: STORE, product, extraction: base });
+        if (COMMIT && (base.entities.length || base.specs.length)) {
+          await upsertEntitiesAndLinks({
+            storeId: STORE,
+            productId: product.id,
+            extraction: { product: { id: String(product.id) }, ...base },
+            product,
+          });
+          await upsertKbProduct({ storeId: STORE, product, extraction: base });
+          console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
+          process.exit(0);
+        }
+        // Keep KB in sync even when not committing entity/link writes
+        await upsertKbProduct({ storeId: STORE, product, extraction: base });
         console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
         process.exit(2);
       }
@@ -619,4 +671,25 @@ function parseArgs(argv) {
     }
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// JSON extractor (kept local to avoid import churn)
+// ─────────────────────────────────────────────────────────────
+function extractJson(text) {
+  // find first {...} or [...] block
+  const s = String(text || "");
+  const start = s.search(/[\{\[]/);
+  if (start < 0) throw new Error("no_json");
+  // naive balance parse
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "{" || ch === "[") depth++;
+    if (ch === "}" || ch === "]") depth--;
+    if (depth === 0) { end = i + 1; break; }
+  }
+  if (end < 0) throw new Error("unbalanced_json");
+  return JSON.parse(s.slice(start, end));
 }

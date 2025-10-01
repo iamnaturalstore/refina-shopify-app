@@ -6,12 +6,58 @@ function stripHtml(s) {
   return String(s || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function shorten(text = "", max = 280) {
+function shorten(text = "", max = 200) {
   const s = String(text).replace(/\s+/g, " ").trim();
   return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
 }
 
-function productToCompact(p) {
+function tokensFrom(norm = "") {
+  return String(norm || "")
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter(Boolean);
+}
+
+function overlapCount(a = [], b = []) {
+  if (!a.length || !b.length) return 0;
+  const A = new Set(a.map(x => String(x).toLowerCase()));
+  let n = 0;
+  for (const y of b) if (A.has(String(y).toLowerCase())) n++;
+  return n;
+}
+
+function computeTinyFacts(p, constraints = {}, concernTokens = []) {
+  const typeNorm = (p.productType_norm || p.productTypeNormalized || p.productType || "").toLowerCase();
+  const step = (p.usageStep || p.step || "").toLowerCase();
+  const benefitsNorm = Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized : (Array.isArray(p.benefits) ? p.benefits : []);
+  const concernsNorm = Array.isArray(p.concernsNormalized) ? p.concernsNormalized : (Array.isArray(p.concerns) ? p.concerns : []);
+  const aud = p.audience || {};
+  const skinType = String(aud.skinType || aud.skintype || "").toLowerCase();
+
+  const typeMatch = constraints?.step
+    ? (typeNorm.includes(constraints.step) || step.includes(constraints.step))
+    : false;
+
+  const audienceMatch = constraints?.sensitive
+    ? (skinType.includes("sensitive") || overlapCount(concernsNorm, ["sensitive", "redness"]) > 0)
+    : false;
+
+  const concernHits = overlapCount(benefitsNorm, concernTokens) + overlapCount(concernsNorm, concernTokens);
+
+  // Prefer server-provided ruleScore if present; otherwise a light local estimate
+  let ruleScore = typeof p.ruleScore === "number" ? p.ruleScore : undefined;
+  if (ruleScore == null) {
+    let s = 0;
+    if (typeMatch) s += 1.0;
+    if (audienceMatch) s += 0.5;
+    s += Math.min(2.0, concernHits * 0.25);
+    ruleScore = Math.max(0, Math.min(1, s / 2.5));
+  }
+
+  return { typeMatch, audienceMatch, concernHits, ruleScore };
+}
+
+function productToCompact(p, constraints = {}, concernTokens = []) {
   const name = p.title || p.name || "";
   const productTypeNormalized =
     p.productType_norm || p.productTypeNormalized || p.productType || "";
@@ -36,10 +82,12 @@ function productToCompact(p) {
     (Array.isArray(p.keywords_norm) && p.keywords_norm) ||
     null;
 
+  const tinyFacts = computeTinyFacts(p, constraints, concernTokens);
+
   return {
     id: p.id,
     name,
-    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 280),
+    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 200),
     tags: Array.isArray(p.tags)
       ? p.tags.slice(0, 12)
       : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
@@ -51,8 +99,15 @@ function productToCompact(p) {
     benefits,
     concerns,
     audience,
+    // normalized faceting fields explicitly present for the model:
+    benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized.slice(0, 16) : [],
+    concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized.slice(0, 16) : [],
+    ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized.slice(0, 16) : [],
     category: p.categoryNormalized || p.category || "",
     price: p.price ?? p.minPrice ?? undefined,
+
+    // compact guidance for the model; these are hints, not hard rules:
+    tinyFacts,
   };
 }
 
@@ -80,7 +135,11 @@ export function buildGeminiPrompt({
   routineMode = false,
   ingredientFacts = {},
 }) {
-  const compact = (Array.isArray(products) ? products : []).slice(0, 120).map(productToCompact);
+  const concernTokens = tokensFrom(normalizedConcern);
+  const compact = (Array.isArray(products) ? products : [])
+    .slice(0, 120)
+    .map((p) => productToCompact(p, constraints, concernTokens));
+
   const middleWord = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
     ? "ingredients"
     : "features";
@@ -118,6 +177,7 @@ ${normalizedConcern ? `CUSTOMER CONCERN (normalized): ${normalizedConcern}` : ""
 ${constraintLines.length ? `CONSTRAINTS:\n${constraintLines.join("\n")}` : ""}
 
 You have a candidate set of store products (JSON array).
+Each product includes normalized fields and a small "tinyFacts" hint blob.
 Consider **only** these:
 ${JSON.stringify(compact, null, 2)}
 
