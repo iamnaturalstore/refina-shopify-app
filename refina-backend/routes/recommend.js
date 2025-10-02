@@ -113,7 +113,7 @@ function intersects(a = [], b = []) {
 function hasEO(ingredientsNormalized = []) {
   if (!Array.isArray(ingredientsNormalized)) return false;
   const lower = ingredientsNormalized.map(x => String(x).toLowerCase().trim());
-  const eo = new Set(EO_SLUGS);
+  const eo = new Set(EO_DENYLIST);
   for (const ing of lower) {
     for (const eoSlug of eo) {
       if (ing.includes(eoSlug)) return true;
