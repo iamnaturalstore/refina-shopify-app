@@ -395,66 +395,42 @@ router.post("/recommend", async (req, res) => {
         })
       : null;
 
-    // ── Two-stage SDK call (JSON + schema) ───────────────────────────────────
+    // ── Single, Patient SDK Call ───────────────────────────────────
     let raw = null;
     let rawHead = null;
     let vr = { ok: false };
 
-    // Stage 1
     try {
-      raced = true;
-      const stage1Budget = 9000;
-      const t0 = Date.now();
-      const p1 = callGemini(prompt1, {
-        model: process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+      // Make one single, patient call to our robust gemini.js function.
+      // It has its own 60-second timeout and retry logic built-in.
+      const t0_llm = Date.now();
+      raw = await callGemini(prompt1, {
+        model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
         temperature: 0.3,
         topP: 0.8,
-        maxOutputTokens: 256,
-        responseSchema: ConciergeResponseSchema,
+        // Note: We no longer pass responseSchema here.
+        // Our gemini.js file handles the JSON mode for us.
       });
-      raw = await Promise.race([
-        p1,
-        new Promise((_, rej) => setTimeout(() => rej(new Error("llm_timeout_stage1")), stage1Budget)),
-      ]);
-      const ms = Date.now() - t0;
-      llmMs += ms;
-      attempts.push({ stage: 1, ok: !!raw, ms });
+      llmMs = Date.now() - t0_llm;
+      
+      // Validate the response we got back.
       vr = validateConciergeResponse(raw);
-    } catch (e1) {
-      attempts.push({ stage: 1, ok: false, err: String(e1?.message || e1) });
-    }
+      
+      // For debugging, record what happened.
+      if (typeof raw === "string") rawHead = raw.slice(0, 220);
+      attempts.push({ 
+        stage: 1, 
+        ok: vr.ok, 
+        ms: llmMs, 
+        err: vr.ok ? undefined : (raw ? "validation_failed" : "llm_returned_null") 
+      });
 
-    // Stage 2 (widen) if needed/invalid and time remains
-    if ((!vr.ok) && prompt2) {
-      try {
-        const remaining = Math.max(0, LLM_BUDGET_MS - llmMs);
-        if (remaining > 600) {
-          const t1 = Date.now();
-          const p2 = callGemini(prompt2, {
-            model: "gemini-2.5-flash",
-            temperature: 0.3,
-            topP: 0.8,
-            maxOutputTokens: 256,
-            responseSchema: ConciergeResponseSchema,
-          });
-          const raw2 = await Promise.race([
-            p2,
-            new Promise((_, rej) => setTimeout(() => rej(new Error("llm_timeout_stage2")), remaining)),
-          ]);
-          const ms2 = Date.now() - t1;
-          llmMs += ms2;
-          attempts.push({ stage: 2, ok: !!raw2, ms: ms2 });
-          if (raw2) {
-            raw = raw2;
-            vr = validateConciergeResponse(raw2);
-          }
-        }
-      } catch (e2) {
-        attempts.push({ stage: 2, ok: false, err: String(e2?.message || e2) });
-      }
+    } catch (e) {
+      // This catch block will now only be hit by very unexpected errors,
+      // as our callGemini function is designed to handle its own errors and return null.
+      console.error("[recommend] Unexpected error during callGemini:", e);
+      attempts.push({ stage: 1, ok: false, err: String(e?.message || e) });
     }
-
-    if (typeof raw === "string") rawHead = raw.slice(0, 220);
 
     // ── If still invalid → graceful fallback ─────────────────────────────────
     if (!vr.ok) {
