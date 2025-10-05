@@ -1,3 +1,4 @@
+// refina-backend/routes/analytics.js
 // Admin Analytics routes (full-domain shop keys only)
 // Final URLs (server mounts at /api/admin):
 //   GET /api/admin/analytics/logs
@@ -68,10 +69,10 @@ function coerceDateMaybe(v) {
   return null;
 }
 
-// Query helpers (prefer createdAt when available, else fallback to docId)
+// --- Query helper: prefer 'ts' descending, with safe fallbacks ---
 async function loadRecent(logsCol, cap) {
   try {
-    const snap = await logsCol.orderBy("createdAt", "desc").limit(cap).get();
+    const snap = await logsCol.orderBy("ts", "desc").limit(cap).get();
     return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
   } catch {
     try {
@@ -97,7 +98,7 @@ async function handleLogs(req, res) {
   const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const limit = Math.min(Number(req.query.limit) || 50, 1000);
 
-  // Forward-only: canonical collection
+  // ✅ Canonical SoT path
   const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
   try {
@@ -106,7 +107,7 @@ async function handleLogs(req, res) {
 
     const rows = recent
       .map(({ id, data }) => {
-        const tsRaw = data.createdAt ?? data.ts ?? data.timestamp ?? null;
+        const tsRaw = data.ts ?? data.timestamp ?? null; // we don't use createdAt anymore
         const dateObj = coerceDateMaybe(tsRaw);
         return { id, data, dateObj };
       })
@@ -118,10 +119,10 @@ async function handleLogs(req, res) {
         concern: data.concern ?? null,
         productIds: Array.isArray(data.productIds) ? data.productIds : null,
         plan: data.planLevel ?? null,
-        model: (data.meta && data.meta.model) ?? null,
-        source: data.source ?? null,   // 'gemini' | 'fallback' | 'mapping'
-        surface: data.surface ?? null, // 'storefront' | 'admin' | 'api'
-        ts: toISO(data.createdAt ?? data.ts ?? data.timestamp ?? null),
+        model: (data.model ?? data.meta?.model) ?? null,
+        source: data.source ?? null,    // 'gemini' | 'fallback' | 'mapping'
+        surface: data.surface ?? null,  // 'storefront' | 'admin' | 'api'
+        ts: toISO(data.ts ?? data.timestamp ?? null),
         meta: data.meta ?? null,
       }));
 
@@ -155,11 +156,11 @@ async function handleOverview(req, res) {
 
     const entries = recent
       .map(({ data }) => {
-        const tsRaw = data.createdAt ?? data.ts ?? data.timestamp ?? null;
+        const tsRaw = data.ts ?? data.timestamp ?? null;
         return {
           ts: coerceDateMaybe(tsRaw),
           plan: data.planLevel ?? null,
-          model: (data.meta && data.meta.model) ?? null,
+          model: (data.model ?? data.meta?.model) ?? null,
           source: data.source ?? null,
           surface: data.surface ?? null,
           sessionId: data.sessionId ?? null,
