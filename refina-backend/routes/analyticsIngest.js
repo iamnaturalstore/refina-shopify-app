@@ -76,9 +76,9 @@ function sanitizeEventBody(body = {}) {
    };
    // Never trust client-provided identity/time
    delete toWrite.shop;
-   delete toWrite.storeId;   // re-set above to authoritative shop
    delete toWrite.createdAt; // always server-set
     await ref.set(toWrite);
+    console.info("[analytics/write]", { id: ref.id, shop });
    return ref.id;
  }
 
