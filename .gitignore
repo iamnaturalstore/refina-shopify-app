@@ -92,3 +92,6 @@ refina-migrate/
 
 # Build artifacts
 refina-backend/admin-ui-dist/
+
+# backups
+*.bundle
