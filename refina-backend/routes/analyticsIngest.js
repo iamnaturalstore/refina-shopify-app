@@ -6,32 +6,42 @@
 // - Telemetry headers set; Cache-Control no-store
 // - Do NOT persist storeId or createdAt fields
 
+// refina-backend/routes/analyticsIngest.js
+// Canonical analytics ingest → conversations/{shop}/logs
+// Works with BOTH mount styles without touching server.js:
+//
+//   A) app.use("/apps/refina/v1",           analyticsIngestRouter)
+//        → POST /analytics/ingest
+//        → GET  /analytics/selftest
+//
+//   B) app.use("/apps/refina/v1/analytics", analyticsIngestRouter)
+//        → POST /ingest
+//        → GET  /selftest
+//
+// Debugging:
+//   - Set RF_VERBOSE_INGEST=1 to return 201 JSON (id, projectId, path).
+//   - Logs: [analytics/ingest ENTER], [analytics/write]
+
 import { Router } from "express";
 import { db, nowTs, getDocSafe, projectId } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 const router = Router({ caseSensitive: false });
 
-/**
-* Resolve the canonical shop from the request.
-* ✅ Prefer App Proxy / header (authoritative)
-* → then ?shop / ?storeId (query)
-* → then body.storeId / body.shop (legacy/dev only)
- */
+// ─────────────────────────────────────────────────────────────
+// Identity: prefer App Proxy header → query → body (secure)
+// ─────────────────────────────────────────────────────────────
 function canonShopFrom(req) {
   const headerRaw = req.get("x-shopify-shop-domain") || "";
-  const queryRaw = (req.query && (req.query.shop || req.query.storeId)) || "";
-  const bodyRaw  = (req.body && (req.body.storeId || req.body.shop)) || "";
-
-
-  const raw = String(bodyRaw || queryRaw || headerRaw || "")
-    .toLowerCase()
-    .trim();
-
+  const queryRaw  = (req.query && (req.query.shop || req.query.storeId)) || "";
+  const bodyRaw   = (req.body && (req.body.storeId || req.body.shop)) || "";
+  const raw = String(headerRaw || queryRaw || bodyRaw || "").toLowerCase().trim();
   return toMyshopifyDomain(raw);
 }
 
+// ─────────────────────────────────────────────────────────────
 // Accept/sanitize event payload from widget/Admin UI
+// ─────────────────────────────────────────────────────────────
 function sanitizeEventBody(body = {}) {
   const out = {};
   if (!body || typeof body !== "object") return out;
@@ -56,7 +66,7 @@ function sanitizeEventBody(body = {}) {
     out.meta = sanitizedMeta;
   }
 
-  // Legacy payload passthrough (bounded by caller)
+  // Optional passthrough (bounded by caller)
   if (body.payload && typeof body.payload === "object") {
     out.payload = body.payload;
   }
@@ -64,98 +74,109 @@ function sanitizeEventBody(body = {}) {
   return out;
 }
 
-// Core write for Admin Analytics: conversations/{shop}/logs/<autoId>
- async function writeLog(shop, data) {
-   const ref = db.collection("conversations").doc(shop).collection("logs").doc();
-   const toWrite = {
-     ...data,
-     // Admin canonical timestamps/fields
-     createdAt: nowTs(),
-     ts: nowTs(), // keep legacy ts if you want it
-     storeId: shop,
-   };
-   // Never trust client-provided identity/time
-   delete toWrite.shop;
-   delete toWrite.createdAt; // always server-set
-    await ref.set(toWrite);
-    console.info("[analytics/write]", { id: ref.id, shop });
-   return ref.id;
- }
+// ─────────────────────────────────────────────────────────────
+// Core write → conversations/{shop}/logs/{autoId}
+// ─────────────────────────────────────────────────────────────
+async function writeLog(shop, data) {
+  const ref = db.collection("conversations").doc(shop).collection("logs").doc();
+  const toWrite = {
+    ...data,
+    createdAt: nowTs(), // canonical for Admin
+    ts: nowTs(),        // optional legacy
+    storeId: shop,      // explicit for collectionGroup queries
+  };
+  // Never trust client-provided identity/time
+  delete toWrite.shop;
+  delete toWrite.createdAt;
+
+  await ref.set(toWrite);
+  console.info("[analytics/write]", { id: ref.id, shop });
+  return ref.id;
+}
 
 // ─────────────────────────────────────────────────────────────
-// Routes
-// ─────────────────────────────────────────────────────────────
-
-// Storefront/App UI root (when mounted at /proxy/refina/v1/analytics/ingest)
-router.post("/", async (req, res) => {
+async function handleIngest(req, res, surfaceHint) {
   res.set("Cache-Control", "no-store");
-  res.set("X-RF-Handler", "analytics-ingest-storefront-v2");
+  res.set("X-RF-Handler", "analytics-ingest-v3");
+  console.info("[analytics/ingest ENTER]", { url: req.originalUrl });
 
   const shop = canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
 
   try {
     const clean = sanitizeEventBody(req.body || {});
-    // Enrich planLevel from plans/{shop} (read-only, billing-neutral)
-     const planDoc = await getDocSafe(db.collection("plans").doc(shop));
-     const planLevel = (planDoc && planDoc.level) || "free";
-     // Distinguish model source vs surface:
-     // - source: 'gemini' | 'fallback' | 'mapping'  (origin of answer)
-     // - surface: 'storefront' | 'admin' | 'api'    (where it was triggered)
-     const surface = "storefront";
-     const modelSource =
-       (clean?.meta && typeof clean.meta.model === "string") ? "gemini" :
-       (clean?.event === "mapping_applied" ? "mapping" : "gemini");
- 
-     const id = await writeLog(shop, {
-       ...clean,
-       source: modelSource,
-       surface,
-       planLevel,
-     });
-     // Temporary verbose mode for validation (set RF_VERBOSE_INGEST=1)
-     res.set("X-RF-Shop", shop);
-     if (process.env.RF_VERBOSE_INGEST === "1") {
-       return res.status(201).json({ id, resolvedStoreId: shop, targetPath: `conversations/${shop}/logs`, projectId });
-     }
-     return res.status(204).end();
-  } catch (e) {
-    console.error("[analyticsIngest] storefront write failed:", e?.message || e);
-    return res.status(500).json({ error: "internal_error" });
-  }
-});
 
-// Admin/API alias (also used when router mounted at /apps/refina/v1 → /apps/refina/v1/analytics/ingest)
-router.post("/analytics/ingest", async (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.set("X-RF-Handler", "analytics-ingest-admin-v2");
-
-  const shop = canonShopFrom(req);
-  if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
-
-  try {
-    const clean = sanitizeEventBody(req.body || {});
+    // Enrich plan level (read-only; Billing remains sole writer of plans/*)
     const planDoc = await getDocSafe(db.collection("plans").doc(shop));
     const planLevel = (planDoc && planDoc.level) || "free";
-    const surface = "admin";
+
+    // Distinguish model origin vs surface
+    const surface = surfaceHint || req.get("x-rf-surface") || "storefront";
     const modelSource =
       (clean?.meta && typeof clean.meta.model === "string") ? "gemini" :
       (clean?.event === "mapping_applied" ? "mapping" : "gemini");
 
     const id = await writeLog(shop, {
       ...clean,
-      source: modelSource,
-      surface,
-      planLevel,
+      source: modelSource, // 'gemini' | 'fallback' | 'mapping'
+      surface,             // 'storefront' | 'admin' | 'api'
+      planLevel,           // 'free' | 'pro' | 'premium' | 'plus'
     });
+
     if (process.env.RF_VERBOSE_INGEST === "1") {
-      return res.status(201).json({ id, resolvedStoreId: shop, targetPath: `conversations/${shop}/logs`, projectId });
+      return res.status(201).json({
+        id,
+        resolvedStoreId: shop,
+        targetPath: `conversations/${shop}/logs`,
+        projectId,
+      });
     }
     return res.status(204).end();
   } catch (e) {
-    console.error("[analyticsIngest] admin write failed:", e?.message || e);
+    console.error("[analytics/ingest ERROR]", e?.message || e);
     return res.status(500).json({ error: "internal_error" });
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Support BOTH mount styles without changing server.js
+//   A) Mounted at /apps/refina/v1           → POST /analytics/ingest
+//   B) Mounted at /apps/refina/v1/analytics → POST /ingest
+// ─────────────────────────────────────────────────────────────
+router.post("/analytics/ingest", (req, res) => handleIngest(req, res, "storefront"));
+router.post("/ingest",           (req, res) => handleIngest(req, res, "storefront"));
+
+// Optional diagnostics (works with both mounts):
+//   GET /apps/refina/v1/analytics/selftest?shop=refina-demo.myshopify.com
+//   GET /apps/refina/v1/selftest?shop=refina-demo.myshopify.com
+router.get("/analytics/selftest", async (req, res) => {
+  const shop = canonShopFrom(req);
+  if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
+  const id = await writeLog(shop, {
+    concern: "SELFTEST",
+    normalizedConcern: "selftest",
+    productIds: [],
+    explanation: "diagnostic write",
+    source: "mapping",
+    surface: "admin",
+    planLevel: "free",
+  });
+  return res.status(200).json({ ok: true, id, shop, projectId });
+});
+
+router.get("/selftest", async (req, res) => {
+  const shop = canonShopFrom(req);
+  if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
+  const id = await writeLog(shop, {
+    concern: "SELFTEST",
+    normalizedConcern: "selftest",
+    productIds: [],
+    explanation: "diagnostic write",
+    source: "mapping",
+    surface: "admin",
+    planLevel: "free",
+  });
+  return res.status(200).json({ ok: true, id, shop, projectId });
 });
 
 export default router;
