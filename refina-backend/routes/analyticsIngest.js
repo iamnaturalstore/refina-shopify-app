@@ -7,21 +7,22 @@
 // - Do NOT persist storeId or createdAt fields
 
 import { Router } from "express";
-import { db, nowTs } from "../lib/firestore.js";
+import { db, nowTs, getDocSafe, projectId } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 const router = Router({ caseSensitive: false });
 
 /**
- * Resolve the canonical shop from the request.
- * ✅ Prefer body.storeId / body.shop (widget/Admin UI)
- * → then ?shop / ?storeId (query)
- * → then x-shopify-shop-domain (proxy/header)
+* Resolve the canonical shop from the request.
+* ✅ Prefer App Proxy / header (authoritative)
+* → then ?shop / ?storeId (query)
+* → then body.storeId / body.shop (legacy/dev only)
  */
 function canonShopFrom(req) {
-  const bodyRaw = (req.body && (req.body.storeId || req.body.shop)) || "";
-  const queryRaw = (req.query && (req.query.shop || req.query.storeId)) || "";
   const headerRaw = req.get("x-shopify-shop-domain") || "";
+  const queryRaw = (req.query && (req.query.shop || req.query.storeId)) || "";
+  const bodyRaw  = (req.body && (req.body.storeId || req.body.shop)) || "";
+
 
   const raw = String(bodyRaw || queryRaw || headerRaw || "")
     .toLowerCase()
@@ -63,22 +64,23 @@ function sanitizeEventBody(body = {}) {
   return out;
 }
 
-// Core write: analytics/{shop}/events/<autoId>
-// (Keep path aligned with Admin readers.)
-async function writeEvent(shop, data) {
-  const ref = db.collection('analytics').doc(shop).collection('events').doc();
-  const toWrite = {
-    ...data,
-    ts: nowTs(), // server timestamp
-  };
-  // Remove fields we don't want to persist
-  delete toWrite.shop;
-  delete toWrite.storeId;
-  delete toWrite.createdAt;
-
-  await ref.set(toWrite);
-  return ref.id;
-}
+// Core write for Admin Analytics: conversations/{shop}/logs/<autoId>
+ async function writeLog(shop, data) {
+   const ref = db.collection("conversations").doc(shop).collection("logs").doc();
+   const toWrite = {
+     ...data,
+     // Admin canonical timestamps/fields
+     createdAt: nowTs(),
+     ts: nowTs(), // keep legacy ts if you want it
+     storeId: shop,
+   };
+   // Never trust client-provided identity/time
+   delete toWrite.shop;
+   delete toWrite.storeId;   // re-set above to authoritative shop
+   delete toWrite.createdAt; // always server-set
+    await ref.set(toWrite);
+   return ref.id;
+ }
 
 // ─────────────────────────────────────────────────────────────
 // Routes
@@ -94,10 +96,29 @@ router.post("/", async (req, res) => {
 
   try {
     const clean = sanitizeEventBody(req.body || {});
-    await writeEvent(shop, { ...clean, source: "storefront" });
-    // Historical behavior: No Content
-    res.set("X-RF-Shop", shop);
-    return res.status(204).end();
+    // Enrich planLevel from plans/{shop} (read-only, billing-neutral)
+     const planDoc = await getDocSafe(db.collection("plans").doc(shop));
+     const planLevel = (planDoc && planDoc.level) || "free";
+     // Distinguish model source vs surface:
+     // - source: 'gemini' | 'fallback' | 'mapping'  (origin of answer)
+     // - surface: 'storefront' | 'admin' | 'api'    (where it was triggered)
+     const surface = "storefront";
+     const modelSource =
+       (clean?.meta && typeof clean.meta.model === "string") ? "gemini" :
+       (clean?.event === "mapping_applied" ? "mapping" : "gemini");
+ 
+     const id = await writeLog(shop, {
+       ...clean,
+       source: modelSource,
+       surface,
+       planLevel,
+     });
+     // Temporary verbose mode for validation (set RF_VERBOSE_INGEST=1)
+     res.set("X-RF-Shop", shop);
+     if (process.env.RF_VERBOSE_INGEST === "1") {
+       return res.status(201).json({ id, resolvedStoreId: shop, targetPath: `conversations/${shop}/logs`, projectId });
+     }
+     return res.status(204).end();
   } catch (e) {
     console.error("[analyticsIngest] storefront write failed:", e?.message || e);
     return res.status(500).json({ error: "internal_error" });
@@ -114,8 +135,22 @@ router.post("/analytics/ingest", async (req, res) => {
 
   try {
     const clean = sanitizeEventBody(req.body || {});
-    await writeEvent(shop, { ...clean, source: "admin" });
-    // Historical behavior: No Content
+    const planDoc = await getDocSafe(db.collection("plans").doc(shop));
+    const planLevel = (planDoc && planDoc.level) || "free";
+    const surface = "admin";
+    const modelSource =
+      (clean?.meta && typeof clean.meta.model === "string") ? "gemini" :
+      (clean?.event === "mapping_applied" ? "mapping" : "gemini");
+
+    const id = await writeLog(shop, {
+      ...clean,
+      source: modelSource,
+      surface,
+      planLevel,
+    });
+    if (process.env.RF_VERBOSE_INGEST === "1") {
+      return res.status(201).json({ id, resolvedStoreId: shop, targetPath: `conversations/${shop}/logs`, projectId });
+    }
     return res.status(204).end();
   } catch (e) {
     console.error("[analyticsIngest] admin write failed:", e?.message || e);

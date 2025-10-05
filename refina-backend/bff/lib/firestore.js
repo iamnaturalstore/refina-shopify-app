@@ -54,16 +54,15 @@ function loadFirebaseCred() {
 
 // Single admin app init (safe under hot restarts)
 let app;
+let _projectId = "(unknown-project)";
 if (!admin.apps.length) {
   const cred = loadFirebaseCred();
+  _projectId = cred.project_id || process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "(unknown-project)";
   app = admin.initializeApp({
     credential: admin.credential.cert(cred),
-    // Ensure the project is set explicitly when present in the key
-    projectId: cred.project_id || process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT,
+    projectId: _projectId,
   });
-  // Minimal, useful log without leaking file paths or secrets
-  const pj = cred.project_id || "(unknown-project)";
-  console.log(`[Firebase] Admin initialized for project ${pj}`);
+  console.log(`[Firebase] Admin initialized for project ${_projectId}`);
 } else {
   app = admin.app();
 }
@@ -71,6 +70,9 @@ if (!admin.apps.length) {
 // Firestore (ignoreUndefinedProperties avoids accidental write errors)
 export const db = getFirestore(app);
 db.settings?.({ ignoreUndefinedProperties: true }); // no-op if not supported
+// Alias admin-style handle to the same Firestore app to avoid double-inits anywhere else
+export const dbAdmin = db;
+export const projectId = _projectId;
 
 // Safe helpers
 export async function getDocSafe(ref) {
@@ -83,3 +85,6 @@ export async function setDocSafe(ref, data) {
 export function nowTs() {
   return FieldValue.serverTimestamp();
 }
+
+// Re-export FieldValue to keep session/billing code happy from one place
+export { FieldValue };

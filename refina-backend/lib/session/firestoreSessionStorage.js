@@ -2,6 +2,7 @@
 "use strict";
 
 import { Session } from "@shopify/shopify-api";
+// Uses the unified Firestore initializer (same app/project as BFF)
 import { dbAdmin, FieldValue } from "../firestore.js"; // you already have this
 
 const COLL = "shopify_sessions";
