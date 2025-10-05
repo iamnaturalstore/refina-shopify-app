@@ -1,14 +1,5 @@
-// refina-backend/routes/analyticsIngest.js
-// // PROD-CHECKLIST:
-// - Enforce full-domain shop only (toMyshopifyDomain); no short IDs
-// - No wildcards; no renames; keep aliases so storefront posts don't miss
-// - Security: HMAC for App Proxy path handled upstream; here we canonicalize & bound inputs
-// - Telemetry headers set; Cache-Control no-store
-// - Do NOT persist storeId or createdAt fields
-
-// refina-backend/routes/analyticsIngest.js
 // Canonical analytics ingest → conversations/{shop}/logs
-// Works with BOTH mount styles without touching server.js:
+// Works with ALL mount styles without touching server.js:
 //
 //   A) app.use("/apps/refina/v1",           analyticsIngestRouter)
 //        → POST /analytics/ingest
@@ -18,9 +9,12 @@
 //        → POST /ingest
 //        → GET  /selftest
 //
+//   C) app.use("/apps/refina/v1/analytics/ingest", analyticsIngestRouter)
+//        → POST /            (this file handles "/")
+//
 // Debugging:
 //   - Set RF_VERBOSE_INGEST=1 to return 201 JSON (id, projectId, path).
-//   - Logs: [analytics/ingest ENTER], [analytics/write]
+//   - Logs include: [analytics/ingest ENTER], [analytics/write]
 
 import { Router } from "express";
 import { db, nowTs, getDocSafe, projectId } from "../lib/firestore.js";
@@ -46,18 +40,13 @@ function sanitizeEventBody(body = {}) {
   const out = {};
   if (!body || typeof body !== "object") return out;
 
-  // Primary fields
   if (typeof body.type === "string") out.type = body.type.slice(0, 64);
   if (typeof body.concern === "string") out.concern = body.concern.slice(0, 512);
-  if (Array.isArray(body.productIds)) {
-    out.productIds = body.productIds.map((id) => String(id)).slice(0, 50);
-  }
+  if (Array.isArray(body.productIds)) out.productIds = body.productIds.map(String).slice(0, 50);
 
-  // Generic/legacy fields
   if (typeof body.event === "string") out.event = body.event.slice(0, 64);
   if (typeof body.uid === "string") out.uid = body.uid.slice(0, 128);
 
-  // Meta object (bounded)
   if (body.meta && typeof body.meta === "object") {
     const sanitizedMeta = {};
     for (const [key, value] of Object.entries(body.meta).slice(0, 20)) {
@@ -65,11 +54,7 @@ function sanitizeEventBody(body = {}) {
     }
     out.meta = sanitizedMeta;
   }
-
-  // Optional passthrough (bounded by caller)
-  if (body.payload && typeof body.payload === "object") {
-    out.payload = body.payload;
-  }
+  if (body.payload && typeof body.payload === "object") out.payload = body.payload;
 
   return out;
 }
@@ -85,16 +70,15 @@ async function writeLog(shop, data) {
     ts: nowTs(),        // optional legacy
     storeId: shop,      // explicit for collectionGroup queries
   };
-  // Never trust client-provided identity/time
-  delete toWrite.shop;
-  delete toWrite.createdAt;
+  delete toWrite.shop;       // never trust client-provided identity
+  delete toWrite.createdAt;  // always server-set
 
   await ref.set(toWrite);
   console.info("[analytics/write]", { id: ref.id, shop });
   return ref.id;
 }
 
-// ─────────────────────────────────────────────────────────────
+// Shared handler
 async function handleIngest(req, res, surfaceHint) {
   res.set("Cache-Control", "no-store");
   res.set("X-RF-Handler", "analytics-ingest-v3");
@@ -105,12 +89,9 @@ async function handleIngest(req, res, surfaceHint) {
 
   try {
     const clean = sanitizeEventBody(req.body || {});
-
-    // Enrich plan level (read-only; Billing remains sole writer of plans/*)
-    const planDoc = await getDocSafe(db.collection("plans").doc(shop));
+    const planDoc = await getDocSafe(db.collection("plans").doc(shop)); // read-only; Billing owns writes
     const planLevel = (planDoc && planDoc.level) || "free";
 
-    // Distinguish model origin vs surface
     const surface = surfaceHint || req.get("x-rf-surface") || "storefront";
     const modelSource =
       (clean?.meta && typeof clean.meta.model === "string") ? "gemini" :
@@ -120,7 +101,7 @@ async function handleIngest(req, res, surfaceHint) {
       ...clean,
       source: modelSource, // 'gemini' | 'fallback' | 'mapping'
       surface,             // 'storefront' | 'admin' | 'api'
-      planLevel,           // 'free' | 'pro' | 'premium' | 'plus'
+      planLevel,           // 'free' | 'starter/pro' | 'premium' | 'plus'
     });
 
     if (process.env.RF_VERBOSE_INGEST === "1") {
@@ -139,16 +120,14 @@ async function handleIngest(req, res, surfaceHint) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Support BOTH mount styles without changing server.js
-//   A) Mounted at /apps/refina/v1           → POST /analytics/ingest
-//   B) Mounted at /apps/refina/v1/analytics → POST /ingest
+// Support ALL mount styles (A, B, C above)
 // ─────────────────────────────────────────────────────────────
-router.post("/analytics/ingest", (req, res) => handleIngest(req, res, "storefront"));
-router.post("/ingest",           (req, res) => handleIngest(req, res, "storefront"));
+router.post("/analytics/ingest", (req, res) => handleIngest(req, res, "storefront")); // A
+router.post("/ingest",           (req, res) => handleIngest(req, res, "storefront")); // B
+router.post("/",                 (req, res) => handleIngest(req, res, "storefront")); // C
 
-// Optional diagnostics (works with both mounts):
+// Optional diagnostics for A/B:
 //   GET /apps/refina/v1/analytics/selftest?shop=refina-demo.myshopify.com
-//   GET /apps/refina/v1/selftest?shop=refina-demo.myshopify.com
 router.get("/analytics/selftest", async (req, res) => {
   const shop = canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
@@ -164,6 +143,10 @@ router.get("/analytics/selftest", async (req, res) => {
   return res.status(200).json({ ok: true, id, shop, projectId });
 });
 
+// Optional diagnostics for B/C:
+//   GET /apps/refina/v1/analytics/selftest  (when mounted at /apps/refina/v1/analytics)
+//   GET /apps/refina/v1/analytics/ingest    (when mounted at /apps/refina/v1/analytics/ingest)
+//   → use POST "/" for ingest; GET here just to verify router is mounted
 router.get("/selftest", async (req, res) => {
   const shop = canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
@@ -180,5 +163,5 @@ router.get("/selftest", async (req, res) => {
 });
 
 export default router;
-// Allow other routers (e.g., routes/analytics.js) to delegate to the canonical handler
+// also export the handler in case another router wants to delegate
 export { handleIngest };

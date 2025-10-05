@@ -6,7 +6,6 @@
 import { Router } from "express";
 import { db } from "../lib/firestore.js";
 import { FieldPath } from "firebase-admin/firestore";
-import { handleIngest } from "./analyticsIngest.js"; // imported for potential delegation/diag, not required here
 
 console.log("[analytics] router loaded (registering /analytics/logs & /analytics/overview)");
 
@@ -24,7 +23,6 @@ function requireFullShop(req, res) {
   return candidate;
 }
 
-// --- Helper functions ---
 function parseYYYYMMDD(s) {
   if (!s) return null;
   const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -70,16 +68,19 @@ function coerceDateMaybe(v) {
   return null;
 }
 
-// FINAL FIX: A simpler, more robust function to fetch documents (fallback).
-async function fetchRecentDocs(logsCol, cap = 500) {
+// Query helpers (prefer createdAt when available, else fallback to docId)
+async function loadRecent(logsCol, cap) {
   try {
-    // Fallback ordering by documentId (lexicographic) — works even without indexes.
-    const snap = await logsCol.orderBy(FieldPath.documentId(), "desc").limit(cap).get();
-    if (!snap.docs) return [];
+    const snap = await logsCol.orderBy("createdAt", "desc").limit(cap).get();
     return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
-  } catch (err) {
-    console.error("Error in fetchRecentDocs:", err.message);
-    return [];
+  } catch {
+    try {
+      const snap = await logsCol.orderBy(FieldPath.documentId(), "desc").limit(cap).get();
+      return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
+    } catch (err) {
+      console.error("[analytics] loadRecent error:", err?.message || err);
+      return [];
+    }
   }
 }
 
@@ -96,20 +97,12 @@ async function handleLogs(req, res) {
   const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const limit = Math.min(Number(req.query.limit) || 50, 1000);
 
-  // Read from the canonical path the writer uses
+  // Forward-only: canonical collection
   const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
   try {
-    const fallbackCap = Math.max(limit * 4, 200);
-
-    // Prefer ordering by server timestamp when present; otherwise fall back
-    let recent = [];
-    try {
-      const snap = await logsCol.orderBy("createdAt", "desc").limit(fallbackCap).get();
-      recent = snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
-    } catch (e) {
-      recent = await fetchRecentDocs(logsCol, fallbackCap);
-    }
+    const cap = Math.max(limit * 4, 200);
+    const recent = await loadRecent(logsCol, cap);
 
     const rows = recent
       .map(({ id, data }) => {
@@ -124,9 +117,8 @@ async function handleLogs(req, res) {
         id,
         concern: data.concern ?? null,
         productIds: Array.isArray(data.productIds) ? data.productIds : null,
-        // New field names from the canonical writer:
-        plan: data.planLevel ?? data.plan ?? null,
-        model: (data.meta && data.meta.model) ?? data.model ?? null,
+        plan: data.planLevel ?? null,
+        model: (data.meta && data.meta.model) ?? null,
         source: data.source ?? null,   // 'gemini' | 'fallback' | 'mapping'
         surface: data.surface ?? null, // 'storefront' | 'admin' | 'api'
         ts: toISO(data.createdAt ?? data.ts ?? data.timestamp ?? null),
@@ -158,23 +150,16 @@ async function handleOverview(req, res) {
   const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
   try {
-    const fallbackCap = Math.max(limit * 4, 500);
-
-    let recent = [];
-    try {
-      const snap = await logsCol.orderBy("createdAt", "desc").limit(fallbackCap).get();
-      recent = snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
-    } catch (e) {
-      recent = await fetchRecentDocs(logsCol, fallbackCap);
-    }
+    const cap = Math.max(limit * 4, 500);
+    const recent = await loadRecent(logsCol, cap);
 
     const entries = recent
       .map(({ data }) => {
         const tsRaw = data.createdAt ?? data.ts ?? data.timestamp ?? null;
         return {
           ts: coerceDateMaybe(tsRaw),
-          plan: data.planLevel ?? data.plan ?? null,
-          model: (data.meta && data.meta.model) ?? data.model ?? null,
+          plan: data.planLevel ?? null,
+          model: (data.meta && data.meta.model) ?? null,
           source: data.source ?? null,
           surface: data.surface ?? null,
           sessionId: data.sessionId ?? null,
