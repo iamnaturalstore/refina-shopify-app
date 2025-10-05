@@ -341,14 +341,16 @@ app.use("/api/privacy", privacyWebhooksRoutes);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors());
 
+// Mount the real analytics ingest router under the same prefix the widget uses.
+// Place it BEFORE any other /apps/refina/v1 handlers so it can't be shadowed.
+app.use('/apps/refina/v1', analyticsIngestRouter);
+
+// Other widget APIs
 app.use('/apps/refina/v1', recommendRouter);
 
 // 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
 // (Moved ABOVE the canonical redirect middleware)
-app.post('/apps/refina/v1/analytics/ingest', (req, res, next) => {
-  if (typeof handleAnalyticsIngest === 'function') return handleAnalyticsIngest(req, res, next);
-  res.status(204).end();
-});
+// NOTE: removed the old shim that returned 204 so our router handles this path.
 
 // ───────── Canonical host + HTTPS enforcement (pre-router) ─────────
 const CANONICAL_ORIGIN = String(process.env.APP_URL || process.env.HOST || '').replace(/\/+$/, '');
