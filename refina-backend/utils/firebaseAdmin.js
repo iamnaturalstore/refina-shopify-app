@@ -1,3 +1,14 @@
+/**
+ * DEPRECATED: Pass-through to the unified Firestore initializer.
+ * Do NOT call admin.initializeApp() here.
+ */
+export {
+  db as dbAdmin,   // legacy alias
+  FieldValue,
+  nowTs,
+  projectId,
+} from "../bff/lib/firestore.js"; // adjust path to ../bff/... or ./bff/... as needed
+
 import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
