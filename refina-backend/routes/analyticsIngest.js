@@ -180,3 +180,5 @@ router.get("/selftest", async (req, res) => {
 });
 
 export default router;
+// Allow other routers (e.g., routes/analytics.js) to delegate to the canonical handler
+export { handleIngest };

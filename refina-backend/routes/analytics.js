@@ -6,6 +6,7 @@
 import { Router } from "express";
 import { db } from "../lib/firestore.js";
 import { FieldPath } from "firebase-admin/firestore";
+import { handleIngest } from "./analyticsIngest.js"; // imported for potential delegation/diag, not required here
 
 console.log("[analytics] router loaded (registering /analytics/logs & /analytics/overview)");
 
@@ -69,20 +70,15 @@ function coerceDateMaybe(v) {
   return null;
 }
 
-// FINAL FIX: A simpler, more robust function to fetch documents.
+// FINAL FIX: A simpler, more robust function to fetch documents (fallback).
 async function fetchRecentDocs(logsCol, cap = 500) {
   try {
-    // This is the modern, standard way to order by document creation time.
-    // It's reliable and doesn't require complex fallbacks.
+    // Fallback ordering by documentId (lexicographic) — works even without indexes.
     const snap = await logsCol.orderBy(FieldPath.documentId(), "desc").limit(cap).get();
-    
-    // Ensure we always return an array, even if there are no docs.
-    if (!snap.docs) return []; 
-    
+    if (!snap.docs) return [];
     return snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
   } catch (err) {
     console.error("Error in fetchRecentDocs:", err.message);
-    // If the query fails for any reason (e.g., permissions), return an empty array.
     return [];
   }
 }
@@ -100,15 +96,24 @@ async function handleLogs(req, res) {
   const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const limit = Math.min(Number(req.query.limit) || 50, 1000);
 
-  const logsCol = db.collection("analytics").doc(shop).collection("events");
+  // Read from the canonical path the writer uses
+  const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
   try {
     const fallbackCap = Math.max(limit * 4, 200);
-    const recent = await fetchRecentDocs(logsCol, fallbackCap);
+
+    // Prefer ordering by server timestamp when present; otherwise fall back
+    let recent = [];
+    try {
+      const snap = await logsCol.orderBy("createdAt", "desc").limit(fallbackCap).get();
+      recent = snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
+    } catch (e) {
+      recent = await fetchRecentDocs(logsCol, fallbackCap);
+    }
 
     const rows = recent
       .map(({ id, data }) => {
-        const tsRaw = data.ts ?? data.createdAt ?? data.timestamp ?? null;
+        const tsRaw = data.createdAt ?? data.ts ?? data.timestamp ?? null;
         const dateObj = coerceDateMaybe(tsRaw);
         return { id, data, dateObj };
       })
@@ -119,9 +124,12 @@ async function handleLogs(req, res) {
         id,
         concern: data.concern ?? null,
         productIds: Array.isArray(data.productIds) ? data.productIds : null,
-        plan: data.plan ?? null,
-        model: data.model ?? null,
-        ts: toISO(data.ts ?? data.createdAt ?? data.timestamp ?? null),
+        // New field names from the canonical writer:
+        plan: data.planLevel ?? data.plan ?? null,
+        model: (data.meta && data.meta.model) ?? data.model ?? null,
+        source: data.source ?? null,   // 'gemini' | 'fallback' | 'mapping'
+        surface: data.surface ?? null, // 'storefront' | 'admin' | 'api'
+        ts: toISO(data.createdAt ?? data.ts ?? data.timestamp ?? null),
         meta: data.meta ?? null,
       }));
 
@@ -147,21 +155,34 @@ async function handleOverview(req, res) {
   const from = fromQ || new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const limit = Math.min(Number(req.query.limit) || 1000, 5000);
 
-  const logsCol = db.collection("analytics").doc(shop).collection("events");
+  const logsCol = db.collection("conversations").doc(shop).collection("logs");
 
   try {
     const fallbackCap = Math.max(limit * 4, 500);
-    const recent = await fetchRecentDocs(logsCol, fallbackCap);
+
+    let recent = [];
+    try {
+      const snap = await logsCol.orderBy("createdAt", "desc").limit(fallbackCap).get();
+      recent = snap.docs.map((d) => ({ id: d.id, data: d.data() || {} }));
+    } catch (e) {
+      recent = await fetchRecentDocs(logsCol, fallbackCap);
+    }
 
     const entries = recent
       .map(({ data }) => {
-        const tsRaw = data.ts ?? data.createdAt ?? data.timestamp ?? null;
+        const tsRaw = data.createdAt ?? data.ts ?? data.timestamp ?? null;
         return {
           ts: coerceDateMaybe(tsRaw),
-          plan: data.plan ?? null,
-          model: data.model ?? null,
+          plan: data.planLevel ?? data.plan ?? null,
+          model: (data.meta && data.meta.model) ?? data.model ?? null,
+          source: data.source ?? null,
+          surface: data.surface ?? null,
           sessionId: data.sessionId ?? null,
-          hadAi: !!(data.concern || data.model || (Array.isArray(data.productIds) && data.productIds.length > 0)),
+          hadAi: !!(
+            data.concern ||
+            data.model ||
+            (Array.isArray(data.productIds) && data.productIds.length > 0)
+          ),
         };
       })
       .filter((e) => e.ts && e.ts >= startOfDayUTC(from) && e.ts <= endOfDayUTC(to))
@@ -190,4 +211,3 @@ const analyticsRouter = Router();
 analyticsRouter.get("/analytics/logs", handleLogs);
 analyticsRouter.get("/analytics/overview", handleOverview);
 export default analyticsRouter;
-
