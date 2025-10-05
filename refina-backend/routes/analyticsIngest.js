@@ -22,6 +22,17 @@ import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 const router = Router({ caseSensitive: false });
 
+// Trace every request that reaches THIS router (any subpath)
+router.use((req, _res, next) => {
+  console.info("[analytics/router HIT]", req.method, req.originalUrl);
+  next();
+});
+
+// If mounted exactly at /apps/refina/v1/analytics/ingest, this catches GET/POST to that base URL.
+router.get("/", (_req, res) => res.status(200).json({ ok: true, handler: "analytics-ingest-v3" }));
+router.post("/", (req, res) => handleIngest(req, res, "storefront"));
+
+
 // ─────────────────────────────────────────────────────────────
 // Identity: prefer App Proxy header → query → body (secure)
 // ─────────────────────────────────────────────────────────────
