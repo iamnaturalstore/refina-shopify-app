@@ -2,7 +2,9 @@
 // Centralized AI gate: plan on/off, per-minute ceiling, monthly quota, trims.
 // No env reads. Safe defaults if plan doc is sparse.
 
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+// Use the same admin singleton as billing.js to avoid init-order issues
+import { dbAdmin as db, FieldValue, Timestamp } from "../../lib/firestore.js";
+
 
 /**
  * Return shape:
@@ -13,7 +15,7 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
  * }
  */
 export async function aiGuard({ storeId, intent, longForm = false, expectedPromptChars = 0 }) {
-  const db = getFirestore();
+
 
   // 1) Read plan (server-authoritative)
   const planRef = db.collection("plans").doc(storeId);

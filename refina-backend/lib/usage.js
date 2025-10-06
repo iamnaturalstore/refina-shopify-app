@@ -3,11 +3,11 @@
 // - Monthly counter lives on plans/{storeId}.usage.requestsThisPeriod
 // - Per-minute counter lives on aiUsageMinute/{storeId} (runtime doc)
 
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { dbAdmin as db, FieldValue, Timestamp } from "./firestore.js";
+
 
 export async function incrementOnInvoke(storeId, { count = 1 } = {}) {
   if (!storeId) return;
-  const db = getFirestore();
 
   const planRef = db.collection("plans").doc(storeId);
   const minuteRef = db.collection("aiUsageMinute").doc(storeId);

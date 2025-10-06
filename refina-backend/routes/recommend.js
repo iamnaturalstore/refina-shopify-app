@@ -344,12 +344,25 @@ async function deterministicFallback(guard) {
 }
 
 // ── Billing & Limits Gate (before cache/model) ──────────────────────────────
-const guard = await aiGuard({
-  storeId,
-  intent: "recommend",
-  longForm: false,
-  expectedPromptChars: 12000, // conservative budget; we’ll also clamp later
-});
+let guard = null;
+try {
+  guard = await aiGuard({
+    storeId,
+    intent: "recommend",
+    longForm: false,
+    expectedPromptChars: 12000,
+  });
+} catch (e) {
+  // If the guard has a transient issue, behave like "limited" with a friendly message,
+  // and serve deterministic fallback instead of bubbling to the outer error handler.
+  console.error("[recommend] aiGuard error, serving fallback:", e?.message || e);
+  const pseudoGuard = {
+    state: "limited",
+    message: "The assistant is warming up. Here are strong matches from your catalogue.",
+    trim: { maxProducts: 12, charBudget: 28000 },
+  };
+  return await deterministicFallback(pseudoGuard);
+}
 
 if (guard?.state === "off" || guard?.state === "limited") {
   return await deterministicFallback(guard);
