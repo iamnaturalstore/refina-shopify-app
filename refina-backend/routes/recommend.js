@@ -430,6 +430,58 @@ const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 40)); // 
 const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
 const finalistsSet = new Set(finalists.map(p => String(p.id)));
 
+// Compact product shape for prompts (uses constraints & concernNorm in closure)
+function compactForPrompt(p) {
+  const ben = Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized : (Array.isArray(p.benefits) ? p.benefits : []);
+  const con = Array.isArray(p.concernsNormalized) ? p.concernsNormalized : (Array.isArray(p.concerns) ? p.concerns : []);
+  const ing = Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : (Array.isArray(p.ingredients) ? p.ingredients : []);
+  const pt = p.productType_norm || p.productTypeNormalized || p.productType || "";
+  const step = p.usageStep || p.step || "";
+
+  // local helpers (no external deps)
+  const stripHtmlLocal = (s = "") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const capLocal = (s, n = 200) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+  const rs = ruleScore(p, constraints, concernNorm); // [-Inf, 1]
+  const typeMatch = constraints.step
+    ? ([pt, step].map(String).map(s => s.toLowerCase()).includes(String(constraints.step).toLowerCase()))
+    : false;
+
+  const audienceMatch = !!(constraints.flags?.sensitive && (
+    ben.concat(con).some(s => /sensitive/i.test(String(s))) || !hasEO(ing)
+  ));
+
+  const toks = Array.from(concernTokens(concernNorm));
+  const lowerBen = ben.map(s => String(s).toLowerCase());
+  const lowerCon = con.map(s => String(s).toLowerCase());
+  const hits = [];
+  for (const k of toks) {
+    if (lowerBen.some(s => s.includes(k)) || lowerCon.some(s => s.includes(k))) hits.push(k);
+  }
+
+  return {
+    id: p.id,
+    name: p.title || p.name || "",
+    descriptionShort: capLocal(stripHtmlLocal(p.description || p.body_html || "")),
+    productType: p.productType || "",
+    productType_norm: pt,
+    usageStep: step,
+    category: p.categoryNormalized || p.category || "",
+    benefitsNormalized: ben.slice(0, 12),
+    concernsNormalized: con.slice(0, 12),
+    ingredientsNormalized: ing.slice(0, 12),
+    tags: Array.isArray(p.tags)
+      ? p.tags.slice(0, 12)
+      : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
+    keywords: Array.isArray(p.keywordsNormalized) ? p.keywordsNormalized.slice(0, 12) : (Array.isArray(p.keywords) ? p.keywords.slice(0, 12) : []),
+    // tiny evidence for the model:
+    ruleScore: Number((Number.isFinite(rs) ? rs : 0).toFixed(3)),
+    typeMatch,
+    audienceMatch,
+    concernHits: hits.slice(0, 6),
+  };
+}
+
 // Stage sizes (respect plan trims)
 const stage1Count = Math.min(8, finalists.length);
 const needWiden =
