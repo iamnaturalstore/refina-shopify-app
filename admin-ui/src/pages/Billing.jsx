@@ -25,6 +25,18 @@ const PENDING_KEY = "refina:billing:pending";
 
 // ── Plan meta (EDIT here to change prices/blurbs) ────────────────────────
 const PLAN_DETAILS = {
+  pro: {
+    label: "Pro",
+    priceMonthly: "$19/mo",
+    priceAnnualNote: "", // Pro annual not offered at launch
+    tooltip: "Pro — 2,000 AI requests/mo • per-minute 10 • core AI answers",
+    ribbon: "Great for getting started",
+    features: [
+      "Core AI answers",
+      "2,000 requests per month",
+      "Per-minute ceiling 10",
+    ],
+  },
   premium: {
     label: "Premium",
     priceMonthly: "$49/mo",
@@ -42,14 +54,16 @@ const PLAN_DETAILS = {
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
-  if (/\bpremium\b/.test(v) || /\bpro\s*\+|\bpro\W*plus\b/.test(v)) return "premium";
-  if (/\bpro\b/.test(v)) return "premium";
+  if (v === "pro") return "pro";
+  if (v === "premium" || v === "pro+") return "premium";
+  if (v === "plus") return "plus";
   return "free";
 }
 function labelFromLevel(level) {
-  const v = (level || "").toLowerCase();
-  if (v === "premium" || v === "pro+") return "Premium";
-  if (v === "pro") return "Premium";
+  const v = normalizeLevel(level);
+  if (v === "pro") return "Pro";
+  if (v === "premium") return "Premium";
+  if (v === "plus") return "Plus";
   return "Free";
 }
 function parsePlanResponse(jsonResponse) {
@@ -103,8 +117,6 @@ export default function Billing() {
   const [reauthUrl, setReauthUrl] = React.useState(""); // show reauth banner when present
   const pollRef = React.useRef(null);
   const timeoutRef = React.useRef(null);
-
-  const premiumMeta = PLAN_DETAILS.premium;
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -197,28 +209,42 @@ React.useEffect(() => {
     };
   }, []);
 
-  async function subscribe(which /* "premium" */, interval /* "monthly" | "annual" */) {
-    try {
-      setBusy(true); setError(""); setReauthUrl("");
-      const sep = window.location.href.includes("?") ? "&" : "?";
-      const returnUrl = `${window.location.href}${sep}billing=success`;
-      const { data: json } = await billingApi.upgrade({ returnUrl, interval });
+  async function subscribe(which /* "premium" | "pro" */, interval /* "monthly" | "annual" */) {
+  try {
+    setBusy(true); setError(""); setReauthUrl("");
+
+    if (which === "pro") {
+      // Pro → create subscription via /api/billing/subscribe (monthly only at launch)
+      const resp = await api.post("/api/billing/subscribe", { plan: "pro" });
+      const json = resp?.data || {};
       const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
       if (!url) throw new Error("No confirmation URL returned");
       try { localStorage.setItem(PENDING_KEY, which); } catch {}
-      redirectTop(url); // App Bridge top-frame redirect
-    } catch (e) {
-      console.error("[Billing] Upgrade failed:", e);
-      const { need, url } = getReauthInfo(e);
-      if (need && url) {
-        setReauthUrl(url);
-      } else {
-        setError(e?.message || "Upgrade failed");
-      }
-    } finally {
-      setBusy(false);
+      redirectTop(url);
+      return;
     }
+
+    // Premium (existing protocol) → use /api/billing/upgrade with body
+    const sep = window.location.href.includes("?") ? "&" : "?";
+    const returnUrl = `${window.location.href}${sep}billing=success`;
+    const { data: json } = await billingApi.upgrade({ returnUrl, interval });
+    const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
+    if (!url) throw new Error("No confirmation URL returned");
+    try { localStorage.setItem(PENDING_KEY, which); } catch {}
+    redirectTop(url);
+  } catch (e) {
+    console.error("[Billing] Subscribe/Upgrade failed:", e);
+    const { need, url } = getReauthInfo(e);
+    if (need && url) {
+      setReauthUrl(url);
+    } else {
+      setError(e?.message || "Upgrade failed");
+    }
+  } finally {
+    setBusy(false);
   }
+}
+
 
   async function downgrade() {
     try {
@@ -241,10 +267,19 @@ React.useEffect(() => {
   }
 
   const currentLevel = plan ? normalizeLevel(plan.level) : null;
-  const currentInterval = (plan?.billingInterval || "").toLowerCase();
-  const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
-  const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
-  const isPremium = currentLevel === "premium";
+const currentInterval = (plan?.billingInterval || "").toLowerCase();
+const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
+const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
+
+const isPro = currentLevel === "pro";
+const isPremium = currentLevel === "premium";
+const isPlus = currentLevel === "plus";
+const isPaid = isPro || isPremium || isPlus;
+
+// pick meta for current plan if available (for tooltip/badge)
+const currentMeta = PLAN_DETAILS[currentLevel] || null;
+const premiumMeta = PLAN_DETAILS.premium;
+
 
   if (loading) {
     return (
@@ -257,63 +292,65 @@ React.useEffect(() => {
     );
   }
 
-  function PlanTile({ id, meta, current, onChoose }) {
-    const isCurrent = current === id;
-    return (
-      <Card>
-        <BlockStack gap="300">
-          <InlineStack align="space-between" blockAlign="center">
-            <InlineStack gap="200" blockAlign="center">
-              <Text as="h3" variant="headingLg">{meta.label}</Text>
-              {isCurrent && <Badge tone="success">Current</Badge>}
-              {!isCurrent && meta.ribbon && <Badge tone="attention">{meta.ribbon}</Badge>}
-            </InlineStack>
-            <BlockStack gap="050" align="end">
-              <Tooltip content={meta.tooltip}>
-                <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
-              </Tooltip>
-              {meta.priceAnnualNote && (
-                <Text as="span" tone="subdued" variant="bodySm">
-                  {meta.priceAnnualNote}
-                </Text>
-              )}
-            </BlockStack>
+  function PlanTile({ id, meta, current, onChoose, allowAnnual = true }) {
+  const isCurrent = current === id;
+  return (
+    <Card>
+      <BlockStack gap="300">
+        <InlineStack align="space-between" blockAlign="center">
+          <InlineStack gap="200" blockAlign="center">
+            <Text as="h3" variant="headingLg">{meta.label}</Text>
+            {isCurrent && <Badge tone="success">Current</Badge>}
+            {!isCurrent && meta.ribbon && <Badge tone="attention">{meta.ribbon}</Badge>}
           </InlineStack>
-
-          <BlockStack gap="150">
-            {meta.features.map((f, i) => (
-              <InlineStack key={i} gap="150" blockAlign="center">
-                <Icon source={CheckIcon} tone="success" />
-                <Text as="span" tone="subdued">{f}</Text>
-              </InlineStack>
-            ))}
+          <BlockStack gap="050" align="end">
+            <Tooltip content={meta.tooltip}>
+              <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
+            </Tooltip>
+            {meta.priceAnnualNote && allowAnnual && (
+              <Text as="span" tone="subdued" variant="bodySm">
+                {meta.priceAnnualNote}
+              </Text>
+            )}
           </BlockStack>
+        </InlineStack>
 
-          <Divider />
+        <BlockStack gap="150">
+          {meta.features.map((f, i) => (
+            <InlineStack key={i} gap="150" blockAlign="center">
+              <Icon source={CheckIcon} tone="success" />
+              <Text as="span" tone="subdued">{f}</Text>
+            </InlineStack>
+          ))}
+        </BlockStack>
 
-          <InlineStack gap="200" align="start">
+        <Divider />
+
+        <InlineStack gap="200" align="start">
+          <Button
+            variant="primary"
+            disabled={Boolean(isCurrent || !onChoose)}
+            onClick={() => onChoose?.(id, "monthly")}
+          >
+            {isCurrent && currentInterval === "monthly"
+              ? `Current (Monthly)`
+              : `Choose Monthly`}
+          </Button>
+          {allowAnnual && (
             <Button
-              variant="primary"
-              disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id, "monthly")}
-            >
-              {isCurrent && currentInterval === "monthly"
-                ? `Current (Monthly)`
-                : busy ? "Opening…" : `Choose Monthly`}
-            </Button>
-            <Button
-              disabled={busy || isCurrent || loading}
-              onClick={() => onChoose(id, "annual")}
+              disabled={Boolean(isCurrent || !onChoose)}
+              onClick={() => onChoose?.(id, "annual")}
             >
               {isCurrent && currentInterval === "annual"
                 ? `Current (Annual)`
-                : busy ? "Opening…" : `Choose Annual`}
+                : `Choose Annual`}
             </Button>
-          </InlineStack>
-        </BlockStack>
-      </Card>
-    );
-  }
+          )}
+        </InlineStack>
+      </BlockStack>
+    </Card>
+  );
+}
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
@@ -342,13 +379,14 @@ React.useEffect(() => {
         <BlockStack gap="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Billing</Text>
-            <Tooltip content={isPremium ? premiumMeta.tooltip : ""}>
-              <Badge tone={isPremium ? "success" : "subdued"}>
-                {currentLabel || "—"}
-                {isPremium && currentInterval && <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>}
-                {currentStatus && <>&nbsp;{currentStatus}</>}
-              </Badge>
-            </Tooltip>
+            <Tooltip content={currentMeta?.tooltip || ""}>
+  <Badge tone={isPaid ? "success" : "subdued"}>
+    {currentLabel || "—"}
+    {isPaid && currentInterval && <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>}
+    {currentStatus && <>&nbsp;{currentStatus}</>}
+  </Badge>
+</Tooltip>
+
           </InlineStack>
 
           <InlineStack align="space-between" blockAlign="center">
@@ -369,25 +407,45 @@ React.useEffect(() => {
           </InlineStack>
 
           <InlineStack gap="400" wrap>
-            <Box minWidth="320px" maxWidth="520px" width="100%">
-              <PlanTile id="premium" meta={premiumMeta} current={currentLevel} onChoose={subscribe} />
-            </Box>
-          </InlineStack>
+  {/* Pro (monthly only) */}
+  <Box minWidth="320px" maxWidth="520px" width="100%">
+    <PlanTile
+      id="pro"
+      meta={PLAN_DETAILS.pro}
+      current={currentLevel}
+      onChoose={subscribe}
+      allowAnnual={false}
+    />
+  </Box>
 
-          {isPremium && (
-            <>
-              <Divider />
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="p" variant="bodyMd" fontWeight="semibold">Manage your subscription</Text>
-                  <Text as="p" tone="subdued">You can downgrade to Free at any time. We’ll cancel the current subscription with proration.</Text>
-                </BlockStack>
-                <Button tone="critical" onClick={downgrade} disabled={busy}>
-                  Downgrade to Free
-                </Button>
-              </InlineStack>
-            </>
-          )}
+  {/* Premium (monthly + annual) */}
+  <Box minWidth="320px" maxWidth="520px" width="100%">
+    <PlanTile
+      id="premium"
+      meta={PLAN_DETAILS.premium}
+      current={currentLevel}
+      onChoose={subscribe}
+      allowAnnual={true}
+    />
+  </Box>
+</InlineStack>
+
+
+          {isPaid && (
+  <>
+    <Divider />
+    <InlineStack align="space-between" blockAlign="center">
+      <BlockStack gap="100">
+        <Text as="p" variant="bodyMd" fontWeight="semibold">Manage your subscription</Text>
+        <Text as="p" tone="subdued">You can downgrade to Free at any time. We’ll cancel the current subscription with proration.</Text>
+      </BlockStack>
+      <Button tone="critical" onClick={downgrade} disabled={busy}>
+        Downgrade to Free
+      </Button>
+    </InlineStack>
+  </>
+)}
+
 
           <Divider />
 
