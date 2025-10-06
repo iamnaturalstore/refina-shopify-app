@@ -368,18 +368,142 @@ if (guard?.state === "off" || guard?.state === "limited") {
   return await deterministicFallback(guard);
 }
 
+    // Clamp a cached payload to current plan trims (non-destructive: does not rewrite cache)
+function clampCachedPayload(payload, guard) {
+  try {
+    if (!payload || typeof payload !== "object") return payload;
+    const maxItems = Math.max(1, Number(guard?.trim?.maxProducts || 12));
+
+    // 1) Slice products and ids
+    const products = Array.isArray(payload.products) ? payload.products.slice(0, maxItems) : [];
+    const keepIds = new Set(products.map(p => String(p.id)));
+    const productIds = Array.isArray(payload.productIds)
+      ? payload.productIds.filter(id => keepIds.has(String(id))).slice(0, maxItems)
+      : Array.from(keepIds);
+
+    // 2) Prune awesome block to kept ids
+    let awesome = payload.awesome || null;
+    if (awesome && typeof awesome === "object") {
+      const primaryOk = awesome.primary && keepIds.has(String(awesome.primary.id)) ? awesome.primary : null;
+      const alternatives = Array.isArray(awesome.alternatives)
+        ? awesome.alternatives.filter(a => a && keepIds.has(String(a.id))).slice(0, Math.max(0, maxItems - (primaryOk ? 1 : 0)))
+        : [];
+      awesome = { ...awesome, primary: primaryOk, alternatives, productIds };
+    }
+
+    // 3) Prune reasonsById to kept ids
+    const reasonsById = payload.reasonsById && typeof payload.reasonsById === "object" ? Object.fromEntries(
+      Object.entries(payload.reasonsById).filter(([k]) => keepIds.has(String(k)))
+    ) : {};
+
+    // 4) Optionally cap explanation length for tighter plans
+    const charBudget = Number(guard?.trim?.charBudget || 28000);
+    const expCap = charBudget <= 20000 ? 280 : 480; // conservative caps for lighter plans
+    let explanation = typeof payload.explanation === "string" ? payload.explanation : "";
+    if (explanation.length > expCap) explanation = explanation.slice(0, expCap - 1) + "…";
+
+    // 5) Build clamped payload (preserve other fields verbatim)
+    return {
+      ...payload,
+      productIds,
+      products,
+      awesome,
+      reasonsById,
+      explanation,
+    };
+  } catch {
+    return payload; // on any unexpected shape, return original
+  }
+}
+
+// Transform a rich payload into a Pro-tier "basic" payload (no `awesome`, short rationale).
+function transformToBasicIfNeeded(payload, guard) {
+  try {
+    if (!payload || typeof payload !== "object") return payload;
+
+    // Detect Pro without assuming exact shape of guard
+    const level =
+      (guard?.plan?.level || guard?.level || "").toString().toLowerCase();
+    const isPro = level === "pro";
+    if (!isPro) return payload;
+
+    // Keep products & productIds exactly the same
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    const productIds = Array.isArray(payload.productIds) ? payload.productIds : (products.map(p => String(p.id)));
+
+    // Choose primary id (prefer awesome.primary.id, else first productId)
+    const primaryId =
+      (payload?.awesome?.primary?.id && String(payload.awesome.primary.id)) ||
+      (productIds.length ? String(productIds[0]) : null);
+
+    // Build a single concise rationale for the primary
+    const maxReasonLen = 90;
+    const fromReasonsById = primaryId && payload.reasonsById && payload.reasonsById[primaryId]
+      ? String(payload.reasonsById[primaryId])
+      : "";
+
+    const fromAwesomeReasons = Array.isArray(payload?.awesome?.primary?.reasons)
+      ? payload.awesome.primary.reasons.join(" ")
+      : "";
+
+    const fromCopy = payload?.copy?.why || payload?.copy?.rationale || "";
+
+    let primaryReason = (fromReasonsById || fromAwesomeReasons || fromCopy || "").trim();
+    if (!primaryReason) primaryReason = "Top match for your concern.";
+
+    // neat trim: cut at last whitespace under cap (avoid mid-word cut)
+    function cleanTrim(s, cap) {
+      if (s.length <= cap) return s;
+      const slice = s.slice(0, cap - 1);
+      const cut = slice.lastIndexOf(" ");
+      return (cut > 40 ? slice.slice(0, cut) : slice) + "…";
+    }
+    primaryReason = cleanTrim(primaryReason, maxReasonLen);
+
+    // Short explanation (basic)
+    const expCap = 220;
+    let explanation = typeof payload.explanation === "string"
+      ? payload.explanation.trim()
+      : "Here are the strongest matches for your concern.";
+    explanation = cleanTrim(explanation, expCap);
+
+    // Build new reasonsById with only the primary (if we have one)
+    const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
+
+    // Return payload with copy-only changes: NO `awesome`, concise rationale
+    return {
+      ...payload,
+      awesome: null,
+      explanation,
+      reasonsById,
+      // remove verbose copy fields by setting to undefined (omitted in JSON)
+      copy: undefined,
+    };
+  } catch {
+    // On any unexpected shape, return original
+    return payload;
+  }
+}
+
     // Cache
     const concernNorm = normConcern(concern);
     const ck = cacheKey(storeId, concernNorm);
     const cached = await readCache(storeId, ck, cacheEpoch);
+    
     if (cached) {
-      return res.json({
-        ...cached,
-        source: "cache",
-        cacheHit: true,
-        tookMs: Date.now() - started,
-      });
-    }
+  // Ensure cached responses respect current plan. First clamp,
+  // then down-convert to "basic" for Pro (no `awesome`, concise rationale).
+  let shaped = clampCachedPayload(cached, guard);
+  shaped = transformToBasicIfNeeded(shaped, guard);
+
+  return res.json({
+    ...shaped,
+    source: "cache",
+    cacheHit: true,
+    limitMessage: guard?.message || null, // keep friendly gating note visible
+    tookMs: Date.now() - started,
+  });
+}
 
     // Embedding retrieval
     const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
@@ -507,6 +631,20 @@ while (estimateChars(forStage2) > charBudget && forStage2.length > stage1Count) 
   forStage2 = forStage2.slice(0, forStage2.length - 1);
 }
 
+// Ingredient facts for prompt (keep before buildGeminiPrompt)
+const ingSlugs = await expandConcernToIngredients(concernNorm);
+const ingredientFacts = await getIngredientFacts(ingSlugs);
+
+// Stage-1 prompt (uses smaller set)
+const prompt1 = buildGeminiPrompt({
+  concern,
+  normalizedConcern: concernNorm,
+  category,
+  tone,
+  products: forStage1,
+  ingredientFacts,
+});
+
 const prompt2 = needWiden
   ? buildGeminiPrompt({
       concern,
@@ -517,7 +655,6 @@ const prompt2 = needWiden
       ingredientFacts,
     })
   : null;
-
 
     // ── Single, Patient SDK Call ───────────────────────────────────
     let raw = null;
@@ -677,9 +814,15 @@ const prompt2 = needWiden
 };
 
     // Cache on success
-    try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}
+    // Cache the full (rich) payload
+try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}
 
-    return res.json(payload);
+// Down-convert to Pro "basic" response if needed (no `awesome`)
+const responsePayload = transformToBasicIfNeeded(payload, guard);
+
+// Return to client (limitMessage already included above; preserved)
+return res.json(responsePayload);
+
   } catch (err) {
     console.error("❌ /apps/refina/v1/recommend error:", err);
     return res.json({
