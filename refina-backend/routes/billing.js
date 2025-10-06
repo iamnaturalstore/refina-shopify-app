@@ -25,12 +25,13 @@ function absoluteAppUrl(req) {
 
 function normalizePlan(data) {
   if (!data) return null;
-  let level = String(data.level || "").toLowerCase();
+  // Preserve exact level; do NOT remap 'pro' to 'premium'
+  const level = String(data.level || "").toLowerCase();
   const status = String(data.status || "NONE").toUpperCase();
-  if (level === "pro" || level === "pro+") level = "premium";
   const billingInterval = (data.billingInterval || data.interval || "").toLowerCase();
   return { level, status, billingInterval };
 }
+
 
 function sendReauth(res, req, opts = {}) {
   const shopParam = (opts.shop || String(req.query?.shop || "")).toLowerCase();
