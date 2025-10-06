@@ -421,15 +421,23 @@ function transformToBasicIfNeeded(payload, guard) {
   try {
     if (!payload || typeof payload !== "object") return payload;
 
-    // Detect Pro without assuming exact shape of guard
-    const level =
-      (guard?.plan?.level || guard?.level || "").toString().toLowerCase();
-    const isPro = level === "pro";
+    // ——— Robust Pro detection (don’t rely on one field) ———
+    const lvlA = (guard?.plan?.level || "").toString().toLowerCase();
+    const lvlB = (guard?.level || "").toString().toLowerCase();
+    const longFormOff = guard?.features && guard.features.longForm === false;
+    const trims = guard?.trim || {};
+    const proLikeTrims =
+      Number(trims.maxProducts || 999) <= 14 &&
+      Number(trims.charBudget || 999999) <= 20000;
+
+    const isPro = lvlA === "pro" || lvlB === "pro" || longFormOff || proLikeTrims;
     if (!isPro) return payload;
 
     // Keep products & productIds exactly the same
     const products = Array.isArray(payload.products) ? payload.products : [];
-    const productIds = Array.isArray(payload.productIds) ? payload.productIds : (products.map(p => String(p.id)));
+    const productIds = Array.isArray(payload.productIds)
+      ? payload.productIds
+      : products.map((p) => String(p.id));
 
     // Choose primary id (prefer awesome.primary.id, else first productId)
     const primaryId =
@@ -438,9 +446,10 @@ function transformToBasicIfNeeded(payload, guard) {
 
     // Build a single concise rationale for the primary
     const maxReasonLen = 90;
-    const fromReasonsById = primaryId && payload.reasonsById && payload.reasonsById[primaryId]
-      ? String(payload.reasonsById[primaryId])
-      : "";
+    const fromReasonsById =
+      primaryId && payload.reasonsById && payload.reasonsById[primaryId]
+        ? String(payload.reasonsById[primaryId])
+        : "";
 
     const fromAwesomeReasons = Array.isArray(payload?.awesome?.primary?.reasons)
       ? payload.awesome.primary.reasons.join(" ")
@@ -453,8 +462,9 @@ function transformToBasicIfNeeded(payload, guard) {
 
     // neat trim: cut at last whitespace under cap (avoid mid-word cut)
     function cleanTrim(s, cap) {
-      if (s.length <= cap) return s;
-      const slice = s.slice(0, cap - 1);
+      const str = String(s || "");
+      if (str.length <= cap) return str;
+      const slice = str.slice(0, cap - 1);
       const cut = slice.lastIndexOf(" ");
       return (cut > 40 ? slice.slice(0, cut) : slice) + "…";
     }
@@ -462,9 +472,10 @@ function transformToBasicIfNeeded(payload, guard) {
 
     // Short explanation (basic)
     const expCap = 220;
-    let explanation = typeof payload.explanation === "string"
-      ? payload.explanation.trim()
-      : "Here are the strongest matches for your concern.";
+    let explanation =
+      typeof payload.explanation === "string" && payload.explanation.trim()
+        ? payload.explanation.trim()
+        : "Here are the strongest matches for your concern.";
     explanation = cleanTrim(explanation, expCap);
 
     // Build new reasonsById with only the primary (if we have one)
