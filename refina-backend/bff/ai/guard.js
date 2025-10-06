@@ -3,7 +3,8 @@
 // No env reads. Safe defaults if plan doc is sparse.
 
 // Use the same admin singleton as billing.js to avoid init-order issues
-import { dbAdmin as db, FieldValue, Timestamp } from "../../lib/firestore.js";
+import { dbAdmin as db, FieldValue } from "../../lib/firestore.js";
+import { Timestamp } from "firebase-admin/firestore";
 
 
 /**
