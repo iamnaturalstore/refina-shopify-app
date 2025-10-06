@@ -7,6 +7,7 @@ import { dbAdmin, FieldValue } from "../lib/firestore.js";
 
 const router = express.Router();
 
+
 /* --------------------------- Helpers: reauth --------------------------- */
 
 function computeHostFromShop(shop) {
@@ -266,12 +267,20 @@ function inferPlanFromSubs(subs) {
   let level = "free";
   let status = "NONE";
   let activeId = null;
+  const proName = String(process.env.SHOPIFY_BILLING_PRO_NAME || "Pro").toLowerCase();
+  const premiumName = String(process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium").toLowerCase();
   for (const s of subs || []) {
     const n = String(s?.name || "").toLowerCase();
     const st = String(s?.status || "UNKNOWN").toUpperCase();
     if (st !== "ACTIVE") continue;
-    if (/\bpremium\b/.test(n) || /\bpro\s*\+|\bpro\W*plus\b|\bpro\b/.test(n)) {
+    if (premiumName && n.includes(premiumName)) {
       level = "premium";
+      status = st;
+      activeId = s?.id || activeId;
+      break;
+    }
+    if (proName && n.includes(proName)) {
+      level = "pro";
       status = st;
       activeId = s?.id || activeId;
       break;
@@ -524,7 +533,7 @@ router.post("/sync", async (req, res) => {
   }
 });
 
-/** POST /api/billing/subscribe (legacy) → { confirmationUrl } */
+/** POST /api/billing/subscribe → { confirmationUrl } (supports pro|premium) */
 router.post("/subscribe", async (req, res) => {
   try {
     const { shop } = await resolveShopContext(req, res);
@@ -533,18 +542,11 @@ router.post("/subscribe", async (req, res) => {
 
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
     const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    const target =
-      /\bpremium\b/.test(normalized) || /\bpro\s*\+|\bpro\s*plus\b|^proplus$/.test(normalized)
-        ? "premium"
-        : "";
-
-    if (target !== "premium") {
-      return res.status(410).json({ error: "This plan is no longer available." });
-    }
+    const target = normalized === "pro" ? "pro" : "premium";
 
     const existing = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
-    if (currentLevel === "premium") {
+    if (currentLevel === target) {
       return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
     }
 
@@ -558,7 +560,16 @@ router.post("/subscribe", async (req, res) => {
 
     const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
-    const PLAN = { name: "Premium", amount: "49.00" };
+    const PLAN = target === "pro"
+      ? {
+          name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
+          amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "19.00"),
+        }
+      : {
+          name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
+          amount: String(process.env.SHOPIFY_BILLING_PREMIUM_PRICE || "49.00"),
+        };
+
     const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
@@ -638,13 +649,24 @@ router.post("/upgrade", async (req, res) => {
     try { origin = new URL(originCandidate).origin; } catch { origin = originCandidate.replace(/^(https?:\/\/[^\/?#]+).*/, "$1"); }
 
     const requestedInterval = String(req.body?.interval || "").toLowerCase();
+    const requestedPlan = String(req.body?.plan || "").toLowerCase();
+    const target = requestedPlan === "pro" ? "pro" : "premium";
     const intervalEnum = requestedInterval === "annual" ? "ANNUAL" : "EVERY_30_DAYS";
     const isAnnual = intervalEnum === "ANNUAL";
     const returnUrl =
       `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}` +
       `&interval=${isAnnual ? "annual" : "monthly"}`;
 
-    const PLAN = { name: "Premium", amount: isAnnual ? "490.00" : "49.00" };
+    const PLAN = (target === "pro")
+      ? {
+          name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
+          // Pro annual not offered at launch; use monthly price
+          amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "19.00"),
+        }
+      : {
+          name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
+          amount: isAnnual ? "490.00" : "49.00", // preserve existing Premium annual logic
+        };
     const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||

@@ -21,6 +21,9 @@ import {
 } from "../bff/lib/knowledge.js";
 import { callGemini } from "../bff/ai/gemini.js";
 
+import { aiGuard } from "../bff/ai/guard.js";
+import { incrementOnInvoke } from "../lib/usage.js";
+
 // ─── Admin ping schema (for /admin/ai-ping) ──────────────────────────────────
 const PingSchema = {
   type: "OBJECT",
@@ -258,6 +261,100 @@ router.post("/recommend", async (req, res) => {
     const strictness = settings?.aiControls?.promptStrictness || "balanced";
     const cacheEpoch = settings?.cacheEpoch || null;
 
+    // Helper: deterministic catalogue fallback without invoking the model.
+// Reuses existing retrieval logic and UI mapping.
+async function deterministicFallback(guard) {
+  const concernNormLocal = normConcern(concern);
+
+  // Retrieval inputs (embeddings + products)
+  const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
+  if (!allEmb.length || !qVec.length) {
+    return res.json({
+      productIds: [],
+      products: [],
+      explanation: guard?.message || "AI is currently unavailable for your plan.",
+      followUps: [],
+      awesome: null,
+      source: guard?.state === "off" ? "ai-off" : "limit-exceeded",
+      tookMs: Date.now() - started,
+      limitMessage: guard?.message || null,
+    });
+  }
+
+  // Score → Top-60 (cosine), ruleScore blend, allergen guard
+  const scored = allEmb
+    .map(e => ({ id: e.id, sim: cosine(qVec, (e.vector || [])) }))
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, 60);
+  const top60Ids = scored.map(s => s.id);
+  const top60Docs = await loadProductsByIds(storeId, top60Ids);
+  const byId = new Map(scored.map(s => [String(s.id), s.sim]));
+  const constraints = detectConstraints(concernNormLocal);
+
+  const filtered = [];
+  for (const p of top60Docs) {
+    const ingNorm =
+      (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
+      (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
+      [];
+    if (constraints.flags?.avoidEO && hasEO(ingNorm)) continue;
+    const sim = byId.get(String(p.id)) || 0;
+    const rs = ruleScore(p, constraints, concernNormLocal);
+    if (rs === -Infinity) continue;
+    const finalScore = 0.7 * sim + 0.3 * rs;
+    filtered.push({ p, sim, rs, finalScore });
+  }
+  filtered.sort((a, b) => b.finalScore - a.finalScore);
+
+  // Cap by plan; still return a small, stable subset for UI
+  const capN = Math.min(guard?.trim?.maxProducts || 12, 12);
+  const finalists = filtered.slice(0, capN).map(x => x.p);
+  const outIds = finalists.slice(0, 6).map(p => String(p.id));
+  const enriched = await loadProductsByIds(storeId, outIds);
+
+  const products = enriched.map((p) => {
+    const title = p.title || p.name || "";
+    const price = p.price != null ? p.price : undefined;
+    const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+    let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+    if (!urlCandidate && p.path) urlCandidate = p.path;
+    const url = ensureAbsolute(urlCandidate, storeId);
+    const image = pickPrimaryImage(p, storeId);
+    return {
+      id: p.id,
+      title,
+      price,
+      ...(price_formatted ? { price_formatted } : {}),
+      image,
+      image_url: image,
+      url,
+    };
+  });
+
+  return res.json({
+    productIds: outIds,
+    products,
+    explanation: guard?.message || "Here are strong matches from your catalogue.",
+    followUps: [],
+    awesome: null,
+    source: guard?.state === "off" ? "ai-off" : "limit-exceeded",
+    tookMs: Date.now() - started,
+    limitMessage: guard?.message || null,
+  });
+}
+
+// ── Billing & Limits Gate (before cache/model) ──────────────────────────────
+const guard = await aiGuard({
+  storeId,
+  intent: "recommend",
+  longForm: false,
+  expectedPromptChars: 12000, // conservative budget; we’ll also clamp later
+});
+
+if (guard?.state === "off" || guard?.state === "limited") {
+  return await deterministicFallback(guard);
+}
+
     // Cache
     const concernNorm = normConcern(concern);
     const ck = cacheKey(storeId, concernNorm);
@@ -314,86 +411,48 @@ router.post("/recommend", async (req, res) => {
       filtered.push({ p, sim, rs, finalScore });
     }
 
-    // Finalists (Top-12 by combined score)
-    filtered.sort((a, b) => b.finalScore - a.finalScore);
-    const finalists = filtered.slice(0, 12).map(x => x.p);
-    const finalistsSet = new Set(finalists.map(p => String(p.id)));
+    // Finalists (plan-capped by combined score)
+filtered.sort((a, b) => b.finalScore - a.finalScore);
+const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 40)); // Pro 14 / Premium 24 / Plus 32–40
+const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
+const finalistsSet = new Set(finalists.map(p => String(p.id)));
 
-    // Prompt products (compact + evidence)
-    const stripHtml = (s = "") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    const cap = (s, n = 200) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+// Stage sizes (respect plan trims)
+const stage1Count = Math.min(8, finalists.length);
+const needWiden =
+  constraints.flags?.sensitive ||
+  constraints.flags?.avoidEO ||
+  !!constraints.step ||
+  (constraints.age && constraints.age >= 55);
 
-    function compactForPrompt(p) {
-      const ben = Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized : (Array.isArray(p.benefits) ? p.benefits : []);
-      const con = Array.isArray(p.concernsNormalized) ? p.concernsNormalized : (Array.isArray(p.concerns) ? p.concerns : []);
-      const ing = Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized : (Array.isArray(p.ingredients) ? p.ingredients : []);
-      const pt = p.productType_norm || p.productTypeNormalized || p.productType || "";
-      const step = p.usageStep || p.step || "";
-      const rs = ruleScore(p, constraints, concernNorm);
-      const tMatch = constraints.step ? ([pt, step].map(String).map(s => s.toLowerCase()).includes(String(constraints.step).toLowerCase())) : false;
-      const audMatch = !!(constraints.flags?.sensitive && (ben.concat(con).some(s => /sensitive/i.test(String(s))) || !hasEO(ing)));
-      const toks = Array.from(concernTokens(concernNorm));
-      const hits = [];
-      const lowerBen = ben.map(s => String(s).toLowerCase()); const lowerCon = con.map(s => String(s).toLowerCase());
-      for (const k of toks) {
-        if (lowerBen.some(s => s.includes(k)) || lowerCon.some(s => s.includes(k))) hits.push(k);
-      }
-      return {
-        id: p.id,
-        name: p.title || p.name || "",
-        descriptionShort: cap(stripHtml(p.description || p.body_html || "")),
-        productType: p.productType || "",
-        productType_norm: pt,
-        usageStep: step,
-        category: p.categoryNormalized || p.category || "",
-        benefitsNormalized: ben.slice(0, 12),
-        concernsNormalized: con.slice(0, 12),
-        ingredientsNormalized: ing.slice(0, 12),
-        tags: Array.isArray(p.tags)
-          ? p.tags.slice(0, 12)
-          : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
-        keywords: Array.isArray(p.keywordsNormalized) ? p.keywordsNormalized.slice(0, 12) : (Array.isArray(p.keywords) ? p.keywords.slice(0, 12) : []),
-        // tiny evidence for the model:
-        ruleScore: Number(rs.toFixed(3)),
-        typeMatch: tMatch,
-        audienceMatch: audMatch,
-        concernHits: hits.slice(0, 6),
-      };
-    }
+const forStage1 = finalists.slice(0, stage1Count).map(compactForPrompt);
+const forStage2Base = (needWiden ? finalists : finalists.slice(0, stage1Count)).map(compactForPrompt);
 
-    // Stage sizes
-    const stage1Count = 8;
-    const needWiden =
-      constraints.flags?.sensitive ||
-      constraints.flags?.avoidEO ||
-      !!constraints.step ||
-      (constraints.age && constraints.age >= 55);
+// Character budget guard for Stage-2 (simple length estimate)
+function estimateChars(productsArr) {
+  try {
+    return JSON.stringify(productsArr).length + String(concern).length + 512; // system overhead fudge
+  } catch {
+    return 999999;
+  }
+}
+const charBudget = guard?.trim?.charBudget || 28000; // Pro ~18k, Premium ~28k, Plus higher
+let forStage2 = forStage2Base;
+while (estimateChars(forStage2) > charBudget && forStage2.length > stage1Count) {
+  forStage2 = forStage2.slice(0, forStage2.length - 1);
+}
 
-    const forStage1 = finalists.slice(0, stage1Count).map(compactForPrompt);
-    const forStage2 = (needWiden ? finalists : finalists.slice(0, stage1Count)).map(compactForPrompt);
-
-    const ingSlugs = await expandConcernToIngredients(concernNorm);
-    const ingredientFacts = await getIngredientFacts(ingSlugs);
-
-    const prompt1 = buildGeminiPrompt({
+const prompt2 = needWiden
+  ? buildGeminiPrompt({
       concern,
       normalizedConcern: concernNorm,
       category,
       tone,
-      products: forStage1,
+      products: forStage2,
       ingredientFacts,
-    });
+    })
+  : null;
 
-    const prompt2 = needWiden
-      ? buildGeminiPrompt({
-          concern,
-          normalizedConcern: concernNorm,
-          category,
-          tone,
-          products: forStage2,
-          ingredientFacts,
-        })
-      : null;
 
     // ── Single, Patient SDK Call ───────────────────────────────────
     let raw = null;
@@ -401,10 +460,15 @@ router.post("/recommend", async (req, res) => {
     let vr = { ok: false };
 
     try {
-      // Make one single, patient call to our robust gemini.js function.
-      // It has its own 60-second timeout and retry logic built-in.
-      const t0_llm = Date.now();
-      raw = await callGemini(prompt1, {
+  // Only now that we will actually call the model, increment usage.
+  // Cache/fallback paths above do NOT increment.
+  try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
+
+  // Make one single, patient call to our robust gemini.js function.
+  // It has its own 60-second timeout and retry logic built-in.
+  const t0_llm = Date.now();
+  raw = await callGemini(prompt1, {
+
         model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
         temperature: 0.3,
         topP: 0.8,
@@ -455,23 +519,24 @@ router.post("/recommend", async (req, res) => {
         };
       });
       return res.json({
-        productIds: fallbackIds,
-        products,
-        explanation: "Here are the strongest matches from the catalogue while the assistant warms up.",
-        followUps: [],
-        awesome: null,
-        source: "gemini-fallback",
-        tookMs: Date.now() - started,
-        __debug: {
-          raced,
-          llmMs,
-          budgetMs: LLM_BUDGET_MS,
-          candidateCount: finalists.length,
-          validator: "fail",
-          rawHead,
-          attempts,
-        },
-      });
+  productIds: fallbackIds,
+  products,
+  explanation: guard?.message || "Here are the strongest matches from the catalogue while the assistant warms up.",
+  followUps: [],
+  awesome: null,
+  source: "gemini-fallback",
+  tookMs: Date.now() - started,
+  limitMessage: guard?.message || null,
+  __debug: {
+    raced,
+    llmMs,
+    budgetMs: LLM_BUDGET_MS,
+    candidateCount: finalists.length,
+    validator: "fail",
+    rawHead,
+    attempts,
+  },
+});
     }
 
     // ── Enforce finalist allowlist & map prose if needed ─────────────────────
@@ -517,33 +582,34 @@ router.post("/recommend", async (req, res) => {
     }
 
     const payload = {
-      productIds: outIds,
-      products,
-      explanation:
-        (vr.value?.explanation?.oneLiner || vr.value?.copy?.why || "Here are the strongest matches for your concern.").trim(),
-      followUps: [],
-      awesome: {
-        primary: vr.value.primary,
-        alternatives: vr.value.alternatives,
-        explanation: vr.value.explanation,
-        copy: vr.value.copy,
-        productIds: outIds,
-      },
-      // legacy-friendly fields used by the current widget:
-      copy: vr.value.copy || { why: "", rationale: "", extras: "" },
-      reasonsById,
-      tookMs: Date.now() - started,
-      source: "gemini",
-      __debug: {
-        raced,
-        llmMs,
-        budgetMs: LLM_BUDGET_MS,
-        candidateCount: finalists.length,
-        validator: "ok",
-        rawHead,
-        attempts,
-      },
-    };
+  productIds: outIds,
+  products,
+  explanation:
+    (vr.value?.explanation?.oneLiner || vr.value?.copy?.why || "Here are the strongest matches for your concern.").trim(),
+  followUps: [],
+  awesome: {
+    primary: vr.value.primary,
+    alternatives: vr.value.alternatives,
+    explanation: vr.value.explanation,
+    copy: vr.value.copy,
+    productIds: outIds,
+  },
+  // legacy-friendly fields used by the current widget:
+  copy: vr.value.copy || { why: "", rationale: "", extras: "" },
+  reasonsById,
+  tookMs: Date.now() - started,
+  source: "gemini",
+  limitMessage: guard?.message || null,
+  __debug: {
+    raced,
+    llmMs,
+    budgetMs: LLM_BUDGET_MS,
+    candidateCount: finalists.length,
+    validator: "ok",
+    rawHead,
+    attempts,
+  },
+};
 
     // Cache on success
     try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}

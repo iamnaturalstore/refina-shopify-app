@@ -22,6 +22,12 @@ function canonicalize({ shopDomain }) {
   throw new Error("shopDomain required");
 }
 
+// Only normalize to our supported set; everything else → 'free'
+function normalizeLevel(raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  return v === "pro" || v === "premium" || v === "plus" ? v : "free";
+}
+
 /**
  * plans/{<shop>.myshopify.com}
  * {
@@ -37,7 +43,7 @@ export async function setPlan({ shopDomain, level, chargeId = null, trialEndsAt 
   const shopFull = canonicalize({ shopDomain });
 
   const payload = {
-    level,
+    level: normalizeLevel(level),
     shopDomain: shopFull,
     chargeId: chargeId ?? null,
     trialEndsAt: trialEndsAt ?? null,
