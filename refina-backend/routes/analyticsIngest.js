@@ -24,7 +24,6 @@ const router = Router({ caseSensitive: false });
 
 // Trace every request that reaches THIS router (any subpath)
 router.use((req, _res, next) => {
-  console.info("[analytics/router HIT]", req.method, req.originalUrl);
   next();
 });
 
@@ -85,7 +84,6 @@ async function writeLog(shop, data) {
   delete toWrite.createdAt;  // always server-set
 
   await ref.set(toWrite);
-  console.info("[analytics/write]", { id: ref.id, shop });
   return ref.id;
 }
 
@@ -93,7 +91,6 @@ async function writeLog(shop, data) {
 async function handleIngest(req, res, surfaceHint) {
   res.set("Cache-Control", "no-store");
   res.set("X-RF-Handler", "analytics-ingest-v3");
-  console.info("[analytics/ingest ENTER]", { url: req.originalUrl });
 
   const shop = canonShopFrom(req);
   if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });

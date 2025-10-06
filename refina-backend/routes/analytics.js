@@ -3,6 +3,7 @@
 // Final URLs (server mounts at /api/admin):
 //   GET /api/admin/analytics/logs
 //   GET /api/admin/analytics/overview
+// writer → conversations/{shop}/logs, reader → order by ts desc; fields: concern, productIds, planLevel, model, source, surface, ts.
 
 import { Router } from "express";
 import { db } from "../lib/firestore.js";
