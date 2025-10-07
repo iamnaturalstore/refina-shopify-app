@@ -274,6 +274,50 @@ export default function Home() {
         </Box>
       </Card>
 
+      {/* ───────────────── Plan + Usage Banners ───────────────── */}
+<Box paddingBlockStart="400">
+  {/* FREE → Upsell to Pro */}
+  {level === "free" && (
+    <Banner
+      tone="info"
+      title="Turn on AI answers with Pro — 2,000 AI requests/mo. 7-day free trial."
+      action={{ content: "Upgrade to Pro", url: `#/billing${qs}` }}
+    >
+      <p>Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your storefront theme required.</p>
+    </Banner>
+  )}
+
+  {/* PRO → Usage near cap */}
+  {level === "pro" && limit > 0 && pct(used, limit) >= 85 && (
+    <Banner
+      tone="warning"
+      title={`You're at ${Math.round(pct(used, limit))}% of your monthly AI allowance`}
+      action={{ content: "Manage billing", url: `#/billing${qs}` }}
+    >
+      <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Consider upgrading to Premium for higher limits.`}</p>
+    </Banner>
+  )}
+
+  {/* PRO → Light heads-up when not near cap */}
+  {level === "pro" && limit > 0 && pct(used, limit) < 85 && (
+    <Banner
+      tone="info"
+      title="Pro plan active — AI answers enabled"
+      action={{ content: "Manage billing", url: `#/billing${qs}` }}
+    >
+      <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Premium unlocks higher limits and advanced analytics.`}</p>
+    </Banner>
+  )}
+
+  {/* PREMIUM → simple confirmation */}
+  {level === "premium" && (
+    <Banner tone="success" title="Premium active — higher limits & advanced analytics">
+      <p>Thanks for being on Premium. You’re getting the highest-quality answers and expanded analytics.</p>
+    </Banner>
+  )}
+</Box>
+
+
       {reauthHint && (
         <Box paddingBlockStart="400">
           <Banner

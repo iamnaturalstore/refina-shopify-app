@@ -205,6 +205,30 @@ export default function Analytics() {
         <Text as="h1" variant="headingLg" className={styles.pageTitle}>Analytics</Text>
         <Text as="p" tone="subdued">See what your customers are asking for and how Refina is helping them find the perfect product.</Text>
 
+        {/* ─────────────── Usage Banner (safe: renders only if usage present) ─────────────── */}
+{summary?.usage && typeof summary.usage.limit === "number" && summary.usage.limit > 0 && (
+  <Box paddingBlockStart="300">
+    {(() => {
+      const used = Number(summary.usage.used || 0);
+      const limit = Number(summary.usage.limit || 0);
+      const pct = limit ? Math.min(100, Math.round((100 * used) / limit)) : 0;
+      if (pct >= 85) {
+        return (
+          <Banner tone="warning" title={`You're at ${pct}% of your monthly AI allowance`}>
+            <p>{`${used.toLocaleString()} of ${limit.toLocaleString()} AI requests used this month. Upgrade on the Billing page for higher limits.`}</p>
+          </Banner>
+        );
+      }
+      return (
+        <Banner tone="info" title="AI usage this month">
+          <p>{`${used.toLocaleString()} of ${limit.toLocaleString()} AI requests used.`}</p>
+        </Banner>
+      );
+    })()}
+  </Box>
+)}
+
+
         {err && <Banner tone="critical" onDismiss={() => setErr("")}><p>{err}</p></Banner>}
 
         {loading ? (
