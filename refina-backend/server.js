@@ -110,6 +110,23 @@ function tokenize(s) {
     .filter(Boolean);
 }
 
+// Extract parent (storefront) origin from headers
+function getParentOrigin(req) {
+  const h = req.headers || {};
+  const origin = typeof h.origin === "string" ? h.origin : "";
+  if (origin && /^https?:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(origin)) return origin;
+
+  const referer = typeof h.referer === "string" ? h.referer : "";
+  if (referer) {
+    try {
+      const u = new URL(referer);
+      const o = `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ""}`;
+      if (/^https?:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(o)) return o;
+    } catch { /* ignore */ }
+  }
+  return ""; // fallback
+}
+
 // Ranker with mode & ingredient/type awareness (from BFF)
 function rankProducts(products, concern, opts = {}) {
   const { rankMode = 'relevant', targetIngredients = [], productType = '' } = opts;
@@ -551,19 +568,33 @@ app.post('/api/admin/store-settings', async (req, res) => {
 // ───────────────────────── App Proxy (storefront) ─────────────────────────
 
 // (A) HTML shell served on App Proxy → loads /apps/refina/concierge.(css|js)
-app.get('/proxy/refina', (_req, res) => {
+
+app.get('/proxy/refina', (req, res) => {
+  // Compose CSP that *also* allows the live storefront domain to frame us
+  const parent = getParentOrigin(req); // e.g. https://www.iamnaturalstore.com.au
+
+  const baseDirectives = [
+    "default-src 'self' https: data: blob:",
+    "connect-src 'self' https: wss:",
+    "img-src 'self' https: data: blob:",
+    "style-src 'self' 'unsafe-inline' https:",
+    "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
+  ];
+
+  // Always allow Shopify; add storefront origin if we detected one
+  const frameAncestors = [
+    "https://*.myshopify.com",
+    "https://admin.shopify.com",
+    parent || null,
+  ].filter(Boolean).join(" ");
+
   res.setHeader(
-    'Content-Security-Policy',
-    [
-      "default-src 'self' https: data: blob:",
-      'frame-ancestors https://*.myshopify.com https://admin.shopify.com',
-      "connect-src 'self' https: wss:",
-      "img-src 'self' https: data: blob:",
-      "style-src 'self' 'unsafe-inline' https:",
-      "script-src 'self' https: 'unsafe-inline' 'unsafe-eval'",
-    ].join('; ')
+    "Content-Security-Policy",
+    `${baseDirectives.join("; ")}; frame-ancestors ${frameAncestors}`
   );
-  res.setHeader('Cache-Control', 'no-store');
+  // Avoid any legacy X-Frame-Options from interfering
+  res.setHeader("X-Frame-Options", "ALLOWALL");
+  res.setHeader("Cache-Control", "no-store");
 
   const cacheBust = `v=${Date.now()}`;
   res.type('html').send(`<!doctype html>
