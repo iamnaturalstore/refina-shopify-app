@@ -108,6 +108,10 @@ export default function Home() {
   const [overview, setOverview] = React.useState(null);
   const [logs, setLogs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  // ADD: live indexer status state + polling cadence
+const [indexerStatus, setIndexerStatus] = React.useState(null);
+const [indexerPollMs, setIndexerPollMs] = React.useState(15000);
+
 
   const refreshAnalytics = React.useCallback(async () => {
     try {
@@ -180,6 +184,48 @@ export default function Home() {
       }
     })();
 
+    // ADD: live indexer-status poller (prefers API over coarse settings/overview)
+React.useEffect(() => {
+  if (!shop) return;
+  let alive = true;
+  let timer = null;
+
+  async function tick(initial = false) {
+    try {
+      const { data } = await api.get(`/api/admin/indexer-status`, { params: { shop } });
+      if (!alive) return;
+      if (data && data.ok) {
+        const s = data.status || data;
+        const phase = String(s.phase || s.status || "").toLowerCase().replace(/\s+/g, "_");
+        const pctNum = Number.isFinite(Number(s.pct)) ? Math.max(0, Math.min(100, Number(s.pct))) : null;
+        setIndexerStatus({
+          phase,
+          pct: pctNum,
+          done: Number(s.done ?? 0) || 0,
+          total: Number(s.total ?? 0) || 0,
+          updatedAt: s.updatedAt || s.ts || null,
+        });
+        // slow down polling once complete
+        if (phase === "complete" || (pctNum !== null && pctNum >= 100)) {
+          setIndexerPollMs(60000);
+        }
+      }
+    } catch (e) {
+      if (initial) console.warn("[Home] indexer-status initial fetch failed:", e?.message || e);
+    } finally {
+      if (!alive) return;
+      timer = setTimeout(() => tick(false), indexerPollMs);
+    }
+  }
+
+  tick(true);
+  return () => {
+    alive = false;
+    if (timer) clearTimeout(timer);
+  };
+}, [shop, indexerPollMs]);
+
+
     window.addEventListener("rf:analytics:ingested", refreshAnalytics);
     return () => {
       on = false;
@@ -207,24 +253,43 @@ export default function Home() {
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
   const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
 
-  // ── Knowledge/indexer: read-only, tolerant of multiple shapes (Home always shows a status card) ──
-  const indexer =
-    (settings && (settings.indexer || settings.indexerStatus)) ||
-    (overview && (overview.indexer || overview.indexerStatus)) ||
-    null;
-  const indexerPhaseRaw = indexer?.phase || indexer?.status || "";
-  const indexerPhase = String(indexerPhaseRaw || "").toLowerCase().replace(/\s+/g, "_");
-  const totalProducts = Number(indexer?.totalProducts ?? indexer?.total ?? 0) || 0;
-  const importedCount = Number(indexer?.importedCount ?? indexer?.imported ?? 0) || 0;
-  const embeddedCount = Number(indexer?.embeddedCount ?? indexer?.embedded ?? 0) || 0;
-  const updatedAtIso = indexer?.updatedAt || indexer?.updated || indexer?.ts || "";
-  const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
-  const coarsePctByPhase = {
-    queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0,
-  };
-  const knowledgePct = knowledgeHasCounts
-    ? pct(embeddedCount || importedCount, totalProducts)
-    : (coarsePctByPhase[indexerPhase] ?? 0);
+  // ── Knowledge/indexer: prefer live status (API), fall back to coarse settings/overview ──
+const fallbackIndexer =
+  (settings && (settings.indexer || settings.indexerStatus)) ||
+  (overview && (overview.indexer || overview.indexerStatus)) ||
+  null;
+
+// derive phase from fallback if needed
+const phaseFromFallback = String(
+  (fallbackIndexer?.phase || fallbackIndexer?.status || "")
+).toLowerCase().replace(/\s+/g, "_");
+
+// live (preferred)
+const idx = indexerStatus || null;
+
+const indexerPhase = (idx?.phase || phaseFromFallback || "preparing");
+const totalProducts =
+  Number(idx?.total ?? fallbackIndexer?.totalProducts ?? fallbackIndexer?.total ?? 0) || 0;
+const doneCount = Number(idx?.done ?? 0) || 0;
+
+// legacy/fallback counts (kept in case you later pipe them)
+const importedCount = Number(fallbackIndexer?.importedCount ?? fallbackIndexer?.imported ?? 0) || 0;
+const embeddedCount = Number(fallbackIndexer?.embeddedCount ?? fallbackIndexer?.embedded ?? 0) || 0;
+
+const updatedAtIso = idx?.updatedAt || fallbackIndexer?.updatedAt || fallbackIndexer?.updated || fallbackIndexer?.ts || "";
+
+const knowledgeHasCounts = totalProducts > 0 && (doneCount > 0 || importedCount > 0 || embeddedCount > 0);
+
+const coarsePctByPhase = {
+  queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0, preparing: 0,
+};
+
+const knowledgePct = (() => {
+  if (Number.isFinite(Number(idx?.pct))) return Math.max(0, Math.min(100, Number(idx.pct)));
+  if (knowledgeHasCounts) return pct(doneCount || embeddedCount || importedCount, totalProducts);
+  return coarsePctByPhase[indexerPhase] ?? 0;
+})();
+
 
 
   if (loading) {
@@ -389,8 +454,8 @@ export default function Home() {
                   <Text as="span" tone="subdued">Progress</Text>
                   <Text as="span" tone="subdued">
                     {knowledgeHasCounts
-                      ? `${fmt(embeddedCount || importedCount)} of ${fmt(totalProducts)}`
-                      : `${Math.round(knowledgePct)}%`}
+  ? `${fmt(doneCount || embeddedCount || importedCount)} of ${fmt(totalProducts)}`
+  : `${Math.round(knowledgePct)}%`}
                   </Text>
                 </InlineStack>
                 <ProgressBar progress={knowledgePct} size="small" />
@@ -399,7 +464,7 @@ export default function Home() {
                     ? `Last update ${new Date(updatedAtIso).toLocaleString()}`
                     : "Waiting for status from the indexer…"}
                 </Text>
-                {!indexer && (
+                {!(idx || fallbackIndexer) && (
                   <Text as="span" tone="subdued">
                     Tip: If you’ve just installed Refina, the importer and indexer start automatically. You can continue setting up — this will reach “complete” when embeddings are ready.
                   </Text>
