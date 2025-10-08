@@ -72,33 +72,40 @@ export default function Home() {
     return s ? `?${s}` : "";
   }, [host, shop]);
 
-  const location = useLocation(); // NEW
-  const navigate = useNavigate(); // NEW
+  // ADD: keep local copy of the hash so tab selection reacts to URL changes
+const [currentHash, setCurrentHash] = React.useState(() => String(window.location.hash || ""));
+React.useEffect(() => {
+  const onHash = () => setCurrentHash(String(window.location.hash || ""));
+  window.addEventListener("hashchange", onHash);
+  return () => window.removeEventListener("hashchange", onHash);
+}, []);
 
-  // ── Tabs (URL-driven) ──────────────────────────────────────────────────
-  const tabs = React.useMemo(
-    () => [
-      { id: "overview", content: "Overview" },
-      { id: "setup", content: "Setup" },
-    ],
-    []
-  );
 
-  const selectedTab = React.useMemo(() => {
-    const path = String(location?.pathname || "/");
-    return path.startsWith("/setup") ? 1 : 0;
-  }, [location?.pathname]);
+  // ── Tabs (URL-driven via hash) ──────────────────────────────────────────
+const tabs = React.useMemo(
+  () => [
+    { id: "overview", content: "Overview" },
+    { id: "setup", content: "Setup" },
+  ],
+  []
+);
 
-  const onTabSelect = React.useCallback(
-    (index) => {
-      if (index === 0) {
-        navigate(`/${qs}`); // Overview → "/"
-      } else {
-        navigate(`/setup${qs}`); // Setup → "/setup"
-      }
-    },
-    [navigate, qs]
-  );
+const selectedTab = React.useMemo(() => {
+  const h = String(currentHash || "");
+  return h.startsWith("#/setup") ? 1 : 0;
+}, [currentHash]);
+
+const onTabSelect = React.useCallback(
+  (index) => {
+    if (index === 0) {
+      window.location.hash = `/${qs}`;        // Overview → "#/"
+    } else {
+      window.location.hash = `/setup${qs}`;   // Setup → "#/setup"
+    }
+  },
+  [qs]
+);
+
 
   // ── data state ─────────────────────────────────────────────────────────
   const [err, setErr] = React.useState("");
@@ -325,10 +332,11 @@ const knowledgePct = (() => {
                 </Text>
               </BlockStack>
               <Button
-                variant="primary"
-                onClick={() => navigate(`/setup${qs}`)}
-                disabled={isSetupComplete}
-              >
+  variant="primary"
+  onClick={() => { window.location.hash = `/setup${qs}`; }}
+  disabled={isSetupComplete}
+>
+
                 {isSetupComplete ? "Setup complete ✓" : "Go to Setup"}
               </Button>
             </InlineStack>
