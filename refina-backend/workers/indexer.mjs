@@ -13,6 +13,20 @@ import { validateExtractionOutput } from "../ai/jsonSchemas.js";
 import { EO_DENYLIST } from "../bff/lib/knowledge.js";
 
 // ─────────────────────────────────────────────────────────────
+// Progress status (UI reads: indexerStatus/<shop>)
+// ─────────────────────────────────────────────────────────────
+const STATUS_THROTTLE_MS = 2000; // only write if pct changes or >= 2s passed
+const statusState = {
+  shop: null,
+  total: 0,
+  done: 0,
+  phase: "preparing",
+  lastPct: -1,
+  lastWrite: 0,
+};
+
+
+// ─────────────────────────────────────────────────────────────
 // CLI args
 // ─────────────────────────────────────────────────────────────
 const ARGS = parseArgs(process.argv.slice(2));
@@ -304,6 +318,72 @@ function salvageEntities(raw = "") {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Indexer status helpers (throttled Firestore writes)
+// ─────────────────────────────────────────────────────────────
+function setStatusShop(shop) {
+  statusState.shop = String(shop || "").toLowerCase().trim();
+}
+function setStatusTotal(n) {
+  const v = Math.max(0, Number(n || 0));
+  statusState.total = v;
+}
+function setStatusDone(n) {
+  const v = Math.max(0, Number(n || 0));
+  statusState.done = v;
+}
+function setStatusPhase(ph) {
+  statusState.phase = ph;
+}
+
+async function writeStatus({ force = false, finish = false, error = "" } = {}) {
+  if (!statusState.shop) return;
+  const total = Math.max(0, statusState.total);
+  const done = Math.max(0, statusState.done);
+  const pct = total > 0 ? Math.min(100, Math.floor((100 * done) / total)) : 0;
+  const now = Date.now();
+
+  const phase = error ? "error" : finish ? "complete" : statusState.phase || "preparing";
+  const phaseChanged = phase !== statusState.phase;
+  const pctChanged = pct !== statusState.lastPct;
+  const timeOk = now - statusState.lastWrite >= STATUS_THROTTLE_MS;
+
+  if (!force && !phaseChanged && !pctChanged && !timeOk) return;
+
+  // assemble doc
+  const base = {
+    phase,
+    total,
+    done,
+    pct,
+    updatedAt: nowTs(),
+  };
+  if (phase === "preparing" && statusState.lastWrite === 0) {
+    base.startedAt = nowTs();
+  }
+  if (finish || error) {
+    base.finishedAt = nowTs();
+  }
+  if (error) {
+    base.error = String(error).slice(0, 300);
+  }
+  // soft debug fields, harmless in prod
+  try { base.workerPid = Number(process.pid); } catch {}
+  base.version = 1;
+
+  await db.doc(`indexerStatus/${statusState.shop}`).set(base, { merge: true }).catch(() => {});
+  statusState.lastPct = pct;
+  statusState.lastWrite = now;
+  statusState.phase = phase; // keep local in sync
+}
+
+function bumpDone(delta = 1) {
+  setStatusDone(statusState.done + Math.max(0, Number(delta || 0)));
+  // schedule a best-effort write (throttled)
+  return writeStatus();
+}
+
+
+// ─────────────────────────────────────────────────────────────
 // KB derivation + write
 // ─────────────────────────────────────────────────────────────
 function deriveKbFromExtraction(product, extraction) {
@@ -556,8 +636,17 @@ function pLimit(n) {
         console.log(JSON.stringify({ ok: true, commit: COMMIT, processed: 0, reason: "no_products" }, null, 2));
         return;
       }
+      // ── Progress: prepare status doc ─────────────────────────
+      setStatusShop(STORE);
+      setStatusTotal(products.length);
+      setStatusDone(0);
+      setStatusPhase("preparing");
+
+      await writeStatus({ force: true }); // first write
       const limit = pLimit(MAX_CONCURRENCY);
       let processed = 0, wrote = 0, failures = 0, llmMsSum = 0;
+      setStatusPhase("indexing");
+      await writeStatus({ force: true }); // visible flip from preparing → indexing
       const reasonCounts = {};
       const failedSamples = [];
       const tasks = products.map((p) => limit(async () => {
@@ -584,6 +673,8 @@ function pLimit(n) {
               });
               await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
               processed++; wrote++;
+              // progress: one more embedded/link write completed
+              await bumpDone(1);
             } else {
               processed++;
             }
@@ -596,11 +687,16 @@ function pLimit(n) {
         if (COMMIT) {
           await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value, product: p });
           await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
+          // progress: one more embedded/link write completed
+          await bumpDone(1);
           wrote++;
         }
       }));
       await Promise.all(tasks);
       const ms = Date.now() - t0;
+      // Ensure we mark completion with 100% if we reached total
+      setStatusDone(Math.max(statusState.done, statusState.total));
+      await writeStatus({ finish: true, force: true });
       console.log(JSON.stringify({
         ok: true, mode: MODE, commit: COMMIT,
         processed, wrote, failures,
@@ -618,6 +714,14 @@ function pLimit(n) {
       const doc = await db.doc(`products/${STORE}/items/${pid}`).get();
       if (!doc.exists) throw new Error(`product not found: ${pid}`);
       const product = { id: doc.id, ...doc.data() };
+      // ── Progress for single-product index ───────────────────
+      setStatusShop(STORE);
+      setStatusTotal(1);
+      setStatusDone(0);
+      setStatusPhase("preparing");
+      await writeStatus({ force: true });
+      setStatusPhase("indexing");
+      await writeStatus({ force: true });
       const r = await extractForProduct({ storeId: STORE, product });
       if (!r.ok) {
         const base = baselineExtractFromText(productToPromptInput(product));
@@ -629,17 +733,22 @@ function pLimit(n) {
             product,
           });
           await upsertKbProduct({ storeId: STORE, product, extraction: base });
+          await bumpDone(1);
+          await writeStatus({ finish: true, force: true });
           console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
           process.exit(0);
         }
         // Keep KB in sync even when not committing entity/link writes
         await upsertKbProduct({ storeId: STORE, product, extraction: base });
         console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
+        await writeStatus({ force: true, error: r.reason || "index_failed" });
         process.exit(2);
       }
       if (COMMIT) {
         await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value, product });
         await upsertKbProduct({ storeId: STORE, product, extraction: r.value });
+        await bumpDone(1);
+        await writeStatus({ finish: true, force: true });
       }
       console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));
     } else {
@@ -647,6 +756,10 @@ function pLimit(n) {
     }
   } catch (e) {
     console.error(JSON.stringify({ ok: false, error: e?.message || String(e) }, null, 2));
+    try {
+      // best-effort: surface the error in UI
+      await writeStatus({ force: true, error: e?.message || "indexer_crash" });
+    } catch {}
     process.exit(1);
   }
 })();
