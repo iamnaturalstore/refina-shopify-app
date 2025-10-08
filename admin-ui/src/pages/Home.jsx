@@ -205,6 +205,22 @@ export default function Home() {
   const hasTone = Boolean(settings?.aiTone);
   const hasCategory = Boolean(settings?.category);
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
+  const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
+
+  // ── Knowledge/indexer: read-only, tolerant of multiple shapes; if absent, we show nothing ──
+  const indexer = (settings && (settings.indexer || settings.indexerStatus)) || (overview && (overview.indexer || overview.indexerStatus)) || null;
+  const indexerPhase = indexer?.phase || indexer?.status || "";
+  const totalProducts = Number(indexer?.totalProducts ?? indexer?.total ?? 0) || 0;
+  const importedCount = Number(indexer?.importedCount ?? indexer?.imported ?? 0) || 0;
+  const embeddedCount = Number(indexer?.embeddedCount ?? indexer?.embedded ?? 0) || 0;
+  const updatedAtIso = indexer?.updatedAt || indexer?.updated || indexer?.ts || "";
+  const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
+  const knowledgePct = knowledgeHasCounts ? pct(embeddedCount || importedCount, totalProducts) : (
+    indexerPhase
+      ? ({ importing:10, indexing:40, embedding:80, building_kb:90, complete:100 }[String(indexerPhase).toLowerCase()] || 0)
+      : 0
+  );
+
 
   if (loading) {
     return (
@@ -225,21 +241,25 @@ export default function Home() {
         <Tabs tabs={tabs} selected={selectedTab} onSelect={onTabSelect} />
       </Box>
 
-      {/* “Finish setup” callout — deep-links to /setup with host/shop preserved */}
+      {/* Setup callout — flips to a read-only success state when both quick settings are done */}
       <Box paddingBlockEnd="400">
         <Card>
           <Box padding="400">
             <InlineStack align="space-between" blockAlign="center">
               <BlockStack gap="100">
                 <Text as="h3" variant="headingSm">
-                  Finish setup
+                  {isSetupComplete ? "Setup complete" : "Finish setup"}
                 </Text>
                 <Text as="p" tone="subdued">
                   Enable app embed • Choose category • Verify launcher visible
                 </Text>
               </BlockStack>
-              <Button variant="primary" onClick={() => navigate(`/setup${qs}`)}>
-                Go to Setup
+              <Button
+                variant="primary"
+                onClick={() => navigate(`/setup${qs}`)}
+                disabled={isSetupComplete}
+              >
+                {isSetupComplete ? "Setup complete ✓" : "Go to Setup"}
               </Button>
             </InlineStack>
           </Box>
@@ -341,6 +361,43 @@ export default function Home() {
           </Banner>
         </Box>
       )}
+
+      {/* ───────────────── Knowledge / Indexer Status (read-only; hidden if no data) ───────────────── */}
+      {indexerPhase || knowledgeHasCounts ? (
+        <Box paddingBlockStart="400">
+          <Card>
+            <Box padding="400">
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
+                  <Badge tone={
+                    String(indexerPhase).toLowerCase() === "complete" ? "success"
+                    : String(indexerPhase).toLowerCase() === "error" ? "critical"
+                    : "attention"
+                  }>
+                    {indexerPhase ? String(indexerPhase).replace(/_/g," ") : "In progress"}
+                  </Badge>
+                </InlineStack>
+                <BlockStack gap="150">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" tone="subdued">Progress</Text>
+                    <Text as="span" tone="subdued">
+                      {knowledgeHasCounts
+                        ? `${fmt(embeddedCount || importedCount)} of ${fmt(totalProducts)}`
+                        : `${Math.round(knowledgePct)}%`}
+                    </Text>
+                  </InlineStack>
+                  <ProgressBar progress={knowledgePct} size="small" />
+                  <Text as="span" tone="subdued">
+                    {updatedAtIso ? `Last update ${new Date(updatedAtIso).toLocaleString()}` : ""}
+                  </Text>
+                </BlockStack>
+              </BlockStack>
+            </Box>
+          </Card>
+        </Box>
+      ) : null}
+
 
       <Box paddingBlockStart="400">
         <Card>

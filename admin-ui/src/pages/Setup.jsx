@@ -197,7 +197,7 @@ export default function Setup() {
   }
 
   return (
-    <Page title="Set up Refina" subtitle="3 quick steps to get your app live">
+    <Page title="Set up Refina" subtitle="4 quick steps to get your app live">
       <Layout>
         <Layout.Section>
           {err && (
@@ -205,14 +205,38 @@ export default function Setup() {
               <p>{err}</p>
             </Banner>
           )}
+          {saveOk && (
+            <Banner tone="success" title="Saved">
+              <p>Your category has been saved.</p>
+            </Banner>
+          )}
         </Layout.Section>
 
-        {/* Step 1: Enable Theme App Embed */}
+        {/* Step 1: Choose your plan (copy/link only; no billing logic changes) */}
++        <Layout.Section>
++          <Card>
++            <BlockStack gap="400">
++              <InlineStack align="space-between" blockAlign="center">
++                <Text as="h3" variant="headingSm">1) Choose your plan</Text>
++                <Badge tone="subdued">Recommended</Badge>
++              </InlineStack>
++              <Text as="p" tone="subdued">
++                Free works out of the box. Pro & Premium enable AI answers, analytics, and styling controls.
++              </Text>
++              <InlineStack gap="300" wrap={false}>
++                <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
++              </InlineStack>
++            </BlockStack>
++          </Card>
++        </Layout.Section>
++
+
+        {/* Step 2: Enable Theme App Embed */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
               <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">1) Enable the Theme App Embed</Text>
+                <Text as="h3" variant="headingSm">2) Enable the Theme App Embed</Text>
                 <Badge tone="subdued">Required</Badge>
               </InlineStack>
               <Text as="p">
@@ -225,12 +249,12 @@ export default function Setup() {
           </Card>
         </Layout.Section>
 
-        {/* Step 2: Choose your Category */}
+        {/* Step 3: Choose your Category */}
 <Layout.Section>
   <Card>
     <BlockStack gap="400">
       <InlineStack align="space-between" blockAlign="center">
-        <Text as="h3" variant="headingSm">2) Choose your store category</Text>
+        <Text as="h3" variant="headingSm">3) Choose your store category</Text>
         {String(category || "").trim().length > 0 ? (
           <Badge tone="success">Complete</Badge>
         ) : (
@@ -261,12 +285,12 @@ export default function Setup() {
 </Layout.Section>
 
 
-        {/* Step 3: Verify launcher */}
+        {/* Step 4: Verify launcher */}
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
               <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">3) Verify the launcher is visible</Text>
+                <Text as="h3" variant="headingSm">4) Verify the launcher is visible</Text>
                 <Badge tone="subdued">Check</Badge>
               </InlineStack>
               <Text as="p" tone="subdued">
@@ -274,7 +298,7 @@ export default function Setup() {
               </Text>
               <InlineStack gap="300" wrap={false}>
                 <Button url={`https://${shop}/?refina_preview=1`} external>Open storefront preview</Button>
-                <Button url={`#/billing${qs}`} variant="tertiary">Start plan / trial</Button>
+                <Button url={`#/billing${qs}`} variant="tertiary">Manage plan</Button>
               </InlineStack>
             </BlockStack>
           </Card>

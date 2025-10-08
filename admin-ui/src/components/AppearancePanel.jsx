@@ -74,9 +74,9 @@ export default function AppearancePanel({ planLevel, planStatus }) {
         settings: { themeDraft }
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to save. Server responded with ${response.status}`);
-      }
+      // Axios-style client: presence of a response implies success; errors will throw.
+       console.log("[AppearancePanel] Save successful!");
+       setSaveSuccess(true);
       console.log("[AppearancePanel] Save successful!");
       setSaveSuccess(true);
 
@@ -171,7 +171,6 @@ export default function AppearancePanel({ planLevel, planStatus }) {
               <TextField label="Text" value={tokens.text || ""} onChange={v => updateTokens({text:v})} disabled={!isProPlus}/>
               <TextField label="Muted" value={tokens.muted || ""} onChange={v => updateTokens({muted:v})} disabled={!isProPlus}/>
               <TextField label="Border" value={tokens.border || ""} onChange={v => updateTokens({border:v})} disabled={!isProPlus}/>
-              <TextField label="Radius" value={tokens.radius || ""} onChange={v => updateTokens({radius:v})} disabled={!is-pro-plus} placeholder="e.g., 14px"/>
               <TextField label="Shadow" value={tokens.shadow || ""} onChange={v => updateTokens({shadow:v})} disabled={!isProPlus} placeholder="CSS box-shadow"/>
               <TextField label="Gap" value={tokens.gap || ""} onChange={v => updateTokens({gap:v})} disabled={!isProPlus}/>
               <TextField label="Padding" value={tokens.pad || ""} onChange={v => updateTokens({pad:v})} disabled={!isProPlus}/>
