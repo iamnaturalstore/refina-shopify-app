@@ -204,7 +204,6 @@ export default function Analytics() {
       <BlockStack gap="400">
         <Text as="h1" variant="headingLg" className={styles.pageTitle}>Analytics</Text>
         <Text as="p" tone="subdued">See what your customers are asking for and how Refina is helping them find the perfect product.</Text>
-        <Text as="p" tone="subdued">Data source: <code>conversations/{shop}/logs</code></Text>
 
         {/* ─────────────── Usage Banner (safe: renders only if usage present) ─────────────── */}
 {summary?.usage && typeof summary.usage.limit === "number" && summary.usage.limit > 0 && (

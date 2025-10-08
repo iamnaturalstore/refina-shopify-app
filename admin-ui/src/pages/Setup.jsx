@@ -212,24 +212,51 @@ export default function Setup() {
           )}
         </Layout.Section>
 
+        {/* Knowledge / Indexer status (read-only mirror of Home; tolerant of missing fields) */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              {(() => {
+                const ix = (typeof window !== "undefined" && window.__RF_INDEXER__) || null; // placeholder hook (no logic change)
+                // We’ll prefer store-settings payload if available (page already fetched it for category),
+                // but since Setup.jsx currently only loads settings for category, keep this neutral card.
+                return (
+                  <>
+                    <InlineStack align="space-between" blockAlign="center" padding="300">
+                      <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
+                      <Badge tone="subdued">status</Badge>
+                    </InlineStack>
+                    <BlockStack gap="150" paddingInline="300" paddingBlockEnd="300">
+                      <Text tone="subdued">
+                        Indexing and embeddings run in the background. You can continue setup — this will reach “complete”
+                        when your catalog is fully processed.
+                      </Text>
+                    </BlockStack>
+                  </>
+                );
+              })()}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
         {/* Step 1: Choose your plan (copy/link only; no billing logic changes) */}
-+        <Layout.Section>
-+          <Card>
-+            <BlockStack gap="400">
-+              <InlineStack align="space-between" blockAlign="center">
-+                <Text as="h3" variant="headingSm">1) Choose your plan</Text>
-+                <Badge tone="subdued">Recommended</Badge>
-+              </InlineStack>
-+              <Text as="p" tone="subdued">
-+                Free works out of the box. Pro & Premium enable AI answers, analytics, and styling controls.
-+              </Text>
-+              <InlineStack gap="300" wrap={false}>
-+                <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
-+              </InlineStack>
-+            </BlockStack>
-+          </Card>
-+        </Layout.Section>
-+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h3" variant="headingSm">1) Choose your plan</Text>
+                <Badge tone="subdued">Recommended</Badge>
+              </InlineStack>
+              <Text as="p" tone="subdued">
+                Free works out of the box. Pro & Premium enable AI answers, analytics, and styling controls.
+              </Text>
+              <InlineStack gap="300" wrap={false}>
+                <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
 
         {/* Step 2: Enable Theme App Embed */}
         <Layout.Section>
