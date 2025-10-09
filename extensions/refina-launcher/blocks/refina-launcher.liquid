@@ -11,14 +11,35 @@ Refina Theme App Embed (Launcher, production)
 <script type="module" src="{{ 'concierge.js' | asset_url }}" defer></script>
 
 {%- assign page_type = template.name | downcase -%}
+
+{%- comment -%}
+Map border-radius select → pixel value for the LAUNCHER ONLY.
+{%- endcomment -%}
+{%- assign rkey = block.settings.border_radius | default: 'lg' -%}
+{%- case rkey -%}
+  {%- when 'sm' -%}{% assign radius_px = 6 %}
+  {%- when 'md' -%}{% assign radius_px = 8 %}
+  {%- when 'lg' -%}{% assign radius_px = 12 %}
+  {%- when '2xl' -%}{% assign radius_px = 20 %}
+  {%- else -%}{% assign radius_px = 12 %}
+{%- endcase -%}
+
 <div
   data-refina-launcher
   data-heading="{{ block.settings.heading }}"
   data-subheading="{{ block.settings.subheading }}"
+
+  {# legacy single-text (kept as fallback) #}
   data-cta-text="{{ block.settings.cta_text }}"
+
+  {# NEW: separate labels #}
+  data-launcher-text="{{ block.settings.launcher_text }}"
+  data-ask-text="{{ block.settings.widget_button_text }}"
+
   data-primary-color="{{ block.settings.primary_color }}"
   data-accent-color="{{ block.settings.accent_color }}"
   data-border-radius="{{ block.settings.border_radius }}"
+  data-launcher-radius-px="{{ radius_px }}"
   data-button-style="{{ block.settings.button_style }}"
   data-grid-columns="{{ block.settings.grid_columns }}"
   data-side="{{ block.settings.side }}"
@@ -33,6 +54,53 @@ Refina Theme App Embed (Launcher, production)
   data-page-type="{{ page_type }}"
 ></div>
 
+{%- comment -%}
+DOM patcher (no-rebuild approach):
+- Sets launcher button text and inline border-radius.
+- Sets in-widget primary button text.
+Tries for ~5s in case concierge.js mounts asynchronously.
+{%- endcomment -%}
+<script>
+  (function () {
+    var root = document.querySelector('[data-refina-launcher]');
+    if (!root) return;
+
+    var launcherLabel = root.getAttribute('data-launcher-text') || root.getAttribute('data-cta-text');
+    var askLabel = root.getAttribute('data-ask-text') || root.getAttribute('data-cta-text');
+    var radiusPx = parseInt(root.getAttribute('data-launcher-radius-px'), 10);
+
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+
+      // Launcher button label + radius
+      var launcherBtn = document.querySelector('.refina-launcher-btn');
+      if (launcherBtn) {
+        if (radiusPx && radiusPx > 0) {
+          launcherBtn.style.borderRadius = radiusPx + 'px';
+        }
+        if (launcherLabel) {
+          var span = launcherBtn.querySelector('span') || launcherBtn;
+          if (span) span.textContent = launcherLabel;
+        }
+      }
+
+      // In-widget primary CTA (ask button) label
+      // Prefer a stable data hook if present; otherwise fall back to known classes.
+      var askBtn =
+        document.querySelector('[data-refina-ask-btn]') ||
+        document.querySelector('.askButton') ||
+        document.querySelector('button._askButton_1gq9f_67');
+      if (askBtn && askLabel) {
+        askBtn.textContent = askLabel;
+      }
+
+      // Stop when we’ve likely applied everything, or after ~5s.
+      if ((launcherBtn && askBtn) || tries > 50) clearInterval(timer);
+    }, 100);
+  })();
+</script>
+
 {% schema %}
 {
   "name": "Refina Launcher",
@@ -41,12 +109,17 @@ Refina Theme App Embed (Launcher, production)
     { "type": "header", "content": "Content" },
     { "type": "text", "id": "heading", "label": "Heading", "default": "Find the perfect routine" },
     { "type": "text", "id": "subheading", "label": "Subheading", "default": "Tell us your concern and we’ll match expert picks." },
-    { "type": "text", "id": "cta_text", "label": "Launcher Button Text", "default": "Ask Refina" },
+
+    { "type": "text", "id": "launcher_text", "label": "Launcher Button Text", "default": "Help Finding Products" },
+    { "type": "text", "id": "widget_button_text", "label": "In-Widget Button Text", "default": "Find My Products" },
+
+    { "type": "paragraph", "content": "If left blank, both will fall back to the legacy “Launcher Button Text” field below." },
+    { "type": "text", "id": "cta_text", "label": "Legacy: Single Button Text (fallback)", "default": "Ask Refina" },
 
     { "type": "header", "content": "Appearance" },
     { "type": "color", "id": "primary_color", "label": "Primary Color (Buttons)", "default": "#111827" },
     { "type": "color", "id": "accent_color", "label": "Accent Color (Highlights)", "default": "#10B981" },
-    { "type": "select", "id": "border_radius", "label": "Border Radius", "options": [
+    { "type": "select", "id": "border_radius", "label": "Launcher Border Radius", "options": [
         { "value": "sm", "label": "Small" },
         { "value": "md", "label": "Medium" },
         { "value": "lg", "label": "Large" },
