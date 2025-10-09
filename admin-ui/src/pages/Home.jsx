@@ -72,40 +72,33 @@ export default function Home() {
     return s ? `?${s}` : "";
   }, [host, shop]);
 
-  // ADD: keep local copy of the hash so tab selection reacts to URL changes
-const [currentHash, setCurrentHash] = React.useState(() => String(window.location.hash || ""));
-React.useEffect(() => {
-  const onHash = () => setCurrentHash(String(window.location.hash || ""));
-  window.addEventListener("hashchange", onHash);
-  return () => window.removeEventListener("hashchange", onHash);
-}, []);
+  const location = useLocation(); // NEW
+  const navigate = useNavigate(); // NEW
 
+  // ── Tabs (URL-driven) ──────────────────────────────────────────────────
+  const tabs = React.useMemo(
+    () => [
+      { id: "overview", content: "Overview" },
+      { id: "setup", content: "Setup" },
+    ],
+    []
+  );
 
-  // ── Tabs (URL-driven via hash) ──────────────────────────────────────────
-const tabs = React.useMemo(
-  () => [
-    { id: "overview", content: "Overview" },
-    { id: "setup", content: "Setup" },
-  ],
-  []
-);
+  const selectedTab = React.useMemo(() => {
+    const path = String(location?.pathname || "/");
+    return path.startsWith("/setup") ? 1 : 0;
+  }, [location?.pathname]);
 
-const selectedTab = React.useMemo(() => {
-  const h = String(currentHash || "");
-  return h.startsWith("#/setup") ? 1 : 0;
-}, [currentHash]);
-
-const onTabSelect = React.useCallback(
-  (index) => {
-    if (index === 0) {
-      window.location.hash = `/${qs}`;        // Overview → "#/"
-    } else {
-      window.location.hash = `/setup${qs}`;   // Setup → "#/setup"
-    }
-  },
-  [qs]
-);
-
+  const onTabSelect = React.useCallback(
+    (index) => {
+      if (index === 0) {
+        navigate(`/${qs}`); // Overview → "/"
+      } else {
+        navigate(`/setup${qs}`); // Setup → "/setup"
+      }
+    },
+    [navigate, qs]
+  );
 
   // ── data state ─────────────────────────────────────────────────────────
   const [err, setErr] = React.useState("");
@@ -115,10 +108,10 @@ const onTabSelect = React.useCallback(
   const [overview, setOverview] = React.useState(null);
   const [logs, setLogs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  // ADD: live indexer status state + polling cadence
-const [indexerStatus, setIndexerStatus] = React.useState(null);
-const [indexerPollMs, setIndexerPollMs] = React.useState(15000);
 
+  // NEW: live indexer status state
+  const [indexer, setIndexer] = React.useState(null);
+  const [indexerErr, setIndexerErr] = React.useState("");
 
   const refreshAnalytics = React.useCallback(async () => {
     try {
@@ -191,54 +184,50 @@ const [indexerPollMs, setIndexerPollMs] = React.useState(15000);
       }
     })();
 
-    // ADD: live indexer-status poller (prefers API over coarse settings/overview)
-React.useEffect(() => {
-  if (!shop) return;
-  let alive = true;
-  let timer = null;
-
-  async function tick(initial = false) {
-    try {
-      const { data } = await api.get(`/api/admin/indexer-status`, { params: { shop } });
-      if (!alive) return;
-      if (data && data.ok) {
-        const s = data.status || data;
-        const phase = String(s.phase || s.status || "").toLowerCase().replace(/\s+/g, "_");
-        const pctNum = Number.isFinite(Number(s.pct)) ? Math.max(0, Math.min(100, Number(s.pct))) : null;
-        setIndexerStatus({
-          phase,
-          pct: pctNum,
-          done: Number(s.done ?? 0) || 0,
-          total: Number(s.total ?? 0) || 0,
-          updatedAt: s.updatedAt || s.ts || null,
-        });
-        // slow down polling once complete
-        if (phase === "complete" || (pctNum !== null && pctNum >= 100)) {
-          setIndexerPollMs(60000);
-        }
-      }
-    } catch (e) {
-      if (initial) console.warn("[Home] indexer-status initial fetch failed:", e?.message || e);
-    } finally {
-      if (!alive) return;
-      timer = setTimeout(() => tick(false), indexerPollMs);
-    }
-  }
-
-  tick(true);
-  return () => {
-    alive = false;
-    if (timer) clearTimeout(timer);
-  };
-}, [shop, indexerPollMs]);
-
-
     window.addEventListener("rf:analytics:ingested", refreshAnalytics);
     return () => {
       on = false;
       window.removeEventListener("rf:analytics:ingested", refreshAnalytics);
     };
   }, [shop, refreshAnalytics]);
+
+  // NEW: polling for indexer status
+  React.useEffect(() => {
+    let alive = true;
+    let timer;
+
+    async function fetchIndexerStatus() {
+      try {
+        const { data } = await api.get(
+          `/api/admin/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
+        );
+        if (!alive) return;
+        const j = data || {};
+        const phase = (j.phase || j.status || "").toString().toLowerCase();
+        const totalProducts = Number(j.totalProducts ?? j.total ?? 0) || 0;
+        const importedCount = Number(j.importedCount ?? j.imported ?? 0) || 0;
+        const embeddedCount = Number(j.embeddedCount ?? j.embedded ?? 0) || 0;
+        const updatedAt = j.updatedAt || j.updated || j.ts || null;
+
+        setIndexer({ phase, totalProducts, importedCount, embeddedCount, updatedAt });
+        setIndexerErr("");
+
+        const done = phase === "complete" || phase === "error";
+        timer = window.setTimeout(fetchIndexerStatus, done ? 20000 : 10000);
+      } catch (e) {
+        if (!alive) return;
+        setIndexerErr(e?.message || "Failed to load indexer status");
+        timer = window.setTimeout(fetchIndexerStatus, 20000);
+      }
+    }
+
+    if (shop) fetchIndexerStatus();
+
+    return () => {
+      alive = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [shop]);
 
   // derived values
   const level = normalizeLevel(plan?.level);
@@ -260,44 +249,24 @@ React.useEffect(() => {
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
   const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
 
-  // ── Knowledge/indexer: prefer live status (API), fall back to coarse settings/overview ──
-const fallbackIndexer =
-  (settings && (settings.indexer || settings.indexerStatus)) ||
-  (overview && (overview.indexer || overview.indexerStatus)) ||
-  null;
-
-// derive phase from fallback if needed
-const phaseFromFallback = String(
-  (fallbackIndexer?.phase || fallbackIndexer?.status || "")
-).toLowerCase().replace(/\s+/g, "_");
-
-// live (preferred)
-const idx = indexerStatus || null;
-
-const indexerPhase = (idx?.phase || phaseFromFallback || "preparing");
-const totalProducts =
-  Number(idx?.total ?? fallbackIndexer?.totalProducts ?? fallbackIndexer?.total ?? 0) || 0;
-const doneCount = Number(idx?.done ?? 0) || 0;
-
-// legacy/fallback counts (kept in case you later pipe them)
-const importedCount = Number(fallbackIndexer?.importedCount ?? fallbackIndexer?.imported ?? 0) || 0;
-const embeddedCount = Number(fallbackIndexer?.embeddedCount ?? fallbackIndexer?.embedded ?? 0) || 0;
-
-const updatedAtIso = idx?.updatedAt || fallbackIndexer?.updatedAt || fallbackIndexer?.updated || fallbackIndexer?.ts || "";
-
-const knowledgeHasCounts = totalProducts > 0 && (doneCount > 0 || importedCount > 0 || embeddedCount > 0);
-
-const coarsePctByPhase = {
-  queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0, preparing: 0,
-};
-
-const knowledgePct = (() => {
-  if (Number.isFinite(Number(idx?.pct))) return Math.max(0, Math.min(100, Number(idx.pct)));
-  if (knowledgeHasCounts) return pct(doneCount || embeddedCount || importedCount, totalProducts);
-  return coarsePctByPhase[indexerPhase] ?? 0;
-})();
-
-
+  // ── Knowledge/indexer: legacy derived (kept; panel below uses live `indexer`) ──
+  const legacyIndexer =
+    (settings && (settings.indexer || settings.indexerStatus)) ||
+    (overview && (overview.indexer || overview.indexerStatus)) ||
+    null;
+  const indexerPhaseRaw = legacyIndexer?.phase || legacyIndexer?.status || "";
+  const indexerPhase = String(indexerPhaseRaw || "").toLowerCase().replace(/\s+/g, "_");
+  const totalProducts = Number(legacyIndexer?.totalProducts ?? legacyIndexer?.total ?? 0) || 0;
+  const importedCount = Number(legacyIndexer?.importedCount ?? legacyIndexer?.imported ?? 0) || 0;
+  const embeddedCount = Number(legacyIndexer?.embeddedCount ?? legacyIndexer?.embedded ?? 0) || 0;
+  const updatedAtIso = legacyIndexer?.updatedAt || legacyIndexer?.updated || legacyIndexer?.ts || "";
+  const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
+  const coarsePctByPhase = {
+    queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0,
+  };
+  const knowledgePct = knowledgeHasCounts
+    ? pct(embeddedCount || importedCount, totalProducts)
+    : (coarsePctByPhase[indexerPhase] ?? 0);
 
   if (loading) {
     return (
@@ -332,11 +301,10 @@ const knowledgePct = (() => {
                 </Text>
               </BlockStack>
               <Button
-  variant="primary"
-  onClick={() => { window.location.hash = `/setup${qs}`; }}
-  disabled={isSetupComplete}
->
-
+                variant="primary"
+                onClick={() => navigate(`/setup${qs}`)}
+                disabled={isSetupComplete}
+              >
                 {isSetupComplete ? "Setup complete ✓" : "Go to Setup"}
               </Button>
             </InlineStack>
@@ -373,48 +341,47 @@ const knowledgePct = (() => {
       </Card>
 
       {/* ───────────────── Plan + Usage Banners ───────────────── */}
-<Box paddingBlockStart="400">
-  {/* FREE → Upsell to Pro */}
-  {level === "free" && (
-    <Banner
-      tone="info"
-      title="Turn on AI answers with Pro — 2,000 AI requests/mo. 7-day free trial."
-      action={{ content: "Upgrade to Pro", url: `#/billing${qs}` }}
-    >
-      <p>Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your storefront theme required.</p>
-    </Banner>
-  )}
+      <Box paddingBlockStart="400">
+        {/* FREE → Upsell to Pro */}
+        {level === "free" && (
+          <Banner
+            tone="info"
+            title="Turn on AI answers with Pro — 2,000 AI requests/mo. 7-day free trial."
+            action={{ content: "Upgrade to Pro", url: `#/billing${qs}` }}
+          >
+            <p>Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your storefront theme required.</p>
+          </Banner>
+        )}
 
-  {/* PRO → Usage near cap */}
-  {level === "pro" && limit > 0 && pct(used, limit) >= 85 && (
-    <Banner
-      tone="warning"
-      title={`You're at ${Math.round(pct(used, limit))}% of your monthly AI allowance`}
-      action={{ content: "Manage billing", url: `#/billing${qs}` }}
-    >
-      <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Consider upgrading to Premium for higher limits.`}</p>
-    </Banner>
-  )}
+        {/* PRO → Usage near cap */}
+        {level === "pro" && limit > 0 && pct(used, limit) >= 85 && (
+          <Banner
+            tone="warning"
+            title={`You're at ${Math.round(pct(used, limit))}% of your monthly AI allowance`}
+            action={{ content: "Manage billing", url: `#/billing${qs}` }}
+          >
+            <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Consider upgrading to Premium for higher limits.`}</p>
+          </Banner>
+        )}
 
-  {/* PRO → Light heads-up when not near cap */}
-  {level === "pro" && limit > 0 && pct(used, limit) < 85 && (
-    <Banner
-      tone="info"
-      title="Pro plan active — AI answers enabled"
-      action={{ content: "Manage billing", url: `#/billing${qs}` }}
-    >
-      <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Premium unlocks higher limits and advanced analytics.`}</p>
-    </Banner>
-  )}
+        {/* PRO → Light heads-up when not near cap */}
+        {level === "pro" && limit > 0 && pct(used, limit) < 85 && (
+          <Banner
+            tone="info"
+            title="Pro plan active — AI answers enabled"
+            action={{ content: "Manage billing", url: `#/billing${qs}` }}
+          >
+            <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Premium unlocks higher limits and advanced analytics.`}</p>
+          </Banner>
+        )}
 
-  {/* PREMIUM → simple confirmation */}
-  {level === "premium" && (
-    <Banner tone="success" title="Premium active — higher limits & advanced analytics">
-      <p>Thanks for being on Premium. You’re getting the highest-quality answers and expanded analytics.</p>
-    </Banner>
-  )}
-</Box>
-
+        {/* PREMIUM → simple confirmation */}
+        {level === "premium" && (
+          <Banner tone="success" title="Premium active — higher limits & advanced analytics">
+            <p>Thanks for being on Premium. You’re getting the highest-quality answers and expanded analytics.</p>
+          </Banner>
+        )}
+      </Box>
 
       {reauthHint && (
         <Box paddingBlockStart="400">
@@ -440,7 +407,7 @@ const knowledgePct = (() => {
         </Box>
       )}
 
-      {/* ───────────────── Knowledge / Indexer Status (always visible; read-only) ───────────────── */}
+      {/* ───────────────── Knowledge / Indexer Status (live, minimal) ───────────────── */}
       <Box paddingBlockStart="400">
         <Card>
           <Box padding="400">
@@ -449,33 +416,62 @@ const knowledgePct = (() => {
                 <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
                 <Badge
                   tone={
-                    indexerPhase === "complete" ? "success"
-                    : indexerPhase === "error" ? "critical"
-                    : (indexerPhase ? "attention" : "subdued")
+                    (indexer?.phase === "complete") ? "success"
+                    : (indexer?.phase === "error") ? "critical"
+                    : (indexer ? "attention" : "subdued")
                   }
                 >
-                  {indexerPhase ? indexerPhase.replace(/_/g, " ") : "preparing"}
+                  {indexer?.phase ? indexer.phase.replace(/_/g, " ") : "preparing"}
                 </Badge>
               </InlineStack>
+
               <BlockStack gap="150">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="span" tone="subdued">Progress</Text>
-                  <Text as="span" tone="subdued">
-                    {knowledgeHasCounts
-  ? `${fmt(doneCount || embeddedCount || importedCount)} of ${fmt(totalProducts)}`
-  : `${Math.round(knowledgePct)}%`}
-                  </Text>
-                </InlineStack>
-                <ProgressBar progress={knowledgePct} size="small" />
-                <Text as="span" tone="subdued">
-                  {updatedAtIso
-                    ? `Last update ${new Date(updatedAtIso).toLocaleString()}`
-                    : "Waiting for status from the indexer…"}
-                </Text>
-                {!(idx || fallbackIndexer) && (
-                  <Text as="span" tone="subdued">
-                    Tip: If you’ve just installed Refina, the importer and indexer start automatically. You can continue setting up — this will reach “complete” when embeddings are ready.
-                  </Text>
+                {indexerErr ? (
+                  <Text as="span" tone="critical">{indexerErr}</Text>
+                ) : (
+                  <>
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="span" tone="subdued">Progress</Text>
+                      <Text as="span" tone="subdued">
+                        {(() => {
+                          const t = Number(indexer?.totalProducts || 0);
+                          const d = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
+                          if (t > 0) return `${d.toLocaleString()} of ${t.toLocaleString()}`;
+                          const coarse = {
+                            queued: 5, importing: 10, indexing: 40,
+                            embedding: 80, building_kb: 90, complete: 100, error: 0,
+                          };
+                          const ph = (indexer?.phase || "").toLowerCase();
+                          const p = coarse[ph] ?? 0;
+                          return `${Math.round(p)}%`;
+                        })()}
+                      </Text>
+                    </InlineStack>
+
+                    {(() => {
+                      const t = Number(indexer?.totalProducts || 0);
+                      const d = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
+                      const coarse = {
+                        queued: 5, importing: 10, indexing: 40,
+                        embedding: 80, building_kb: 90, complete: 100, error: 0,
+                      };
+                      const ph = (indexer?.phase || "").toLowerCase();
+                      const p = t > 0 ? pct(d, t) : (coarse[ph] ?? 0);
+                      return <ProgressBar progress={Number.isFinite(p) ? p : 0} size="small" />;
+                    })()}
+
+                    <Text as="span" tone="subdued">
+                      {indexer?.updatedAt
+                        ? `Last update ${new Date(indexer.updatedAt).toLocaleString()}`
+                        : "Waiting for status from the indexer…"}
+                    </Text>
+
+                    {!indexer && !indexerErr && (
+                      <Text as="span" tone="subdued">
+                        Tip: If you’ve just installed Refina, the importer and indexer start automatically. You can continue setting up — this will reach “complete” when embeddings are ready.
+                      </Text>
+                    )}
+                  </>
                 )}
               </BlockStack>
             </BlockStack>
