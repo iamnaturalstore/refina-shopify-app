@@ -264,5 +264,48 @@ export default function mountBackfillRoutes(app) {
     }
   });
 
+    // ───────────────────────────────────────────────────────────
+  // READ-ONLY: /api/indexer/status?shop=<full-domain>&fresh=1
+  // Returns normalized shape for the Admin UI progress panel.
+  // Auth: none (read-only progress).
+  // ───────────────────────────────────────────────────────────
+  app.get("/api/indexer/status", async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const rawShop = String(req.query.shop || "").toLowerCase().trim();
+      const shop = toMyshopifyDomain(rawShop);
+      if (!shop) {
+        return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
+      }
+
+      // Read top-level Firestore doc: indexerStatus/<shop>
+      const ref = dbAdmin.doc(`indexerStatus/${shop}`);
+      const snap = await ref.get();
+      if (!snap.exists) {
+        return res.json({ ok: true, shop, indexer: null });
+      }
+
+      const d = snap.data() || {};
+      // Normalize to what the UI expects
+      const updatedAtIso =
+        d.updatedAt?.toDate?.() ? d.updatedAt.toDate().toISOString() : (d.updatedAt || null);
+
+      const indexer = {
+        phase: String(d.phase || "preparing"),
+        // prefer embedded/imported if you later split them; for now mirror done→both
+        totalProducts: Number(d.total || 0),
+        importedCount: Number((d.imported ?? d.done) || 0),
+        embeddedCount: Number((d.embedded ?? d.done) || 0),
+        pct: Number(d.pct || 0),
+        updatedAt: updatedAtIso,
+      };
+
+      return res.json({ ok: true, shop, indexer });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: "status_read_failed" });
+    }
+  });
+
+
   app.use("/api/backfill", queueRouter);
 }

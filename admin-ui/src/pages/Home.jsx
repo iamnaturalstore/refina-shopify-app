@@ -106,6 +106,7 @@ export default function Home() {
   const [plan, setPlan] = React.useState({ level: "free", status: "unknown" });
   const [settings, setSettings] = React.useState(null);
   const [overview, setOverview] = React.useState(null);
+  const [indexerApi, setIndexerApi] = React.useState(null);
   const [logs, setLogs] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
 
@@ -143,17 +144,20 @@ export default function Home() {
       try {
         console.log("[Home] Fetching initial data...");
         // NOTE: NO fresh=1 here — Home reads cached Firestore plan only.
-        const [
+                const [
           { data: planData },
           { data: settingsData },
           { data: overviewData },
           { data: logsData },
+          { data: idxData },
         ] = await Promise.all([
           api.get(`/api/billing/plan`),
           api.get(`/api/admin/store-settings`),
           adminApi.getAnalyticsSummary({ days: 30 }),
           adminApi.getAnalyticsEvents({ limit: 5 }),
+          api.get(`/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`),
         ]);
+
 
         console.log("[Home] Fetched Plan:", planData);
         console.log("[Home] Fetched Settings:", settingsData);
@@ -174,6 +178,8 @@ export default function Home() {
             ? logsData
             : [];
           setLogs(items.slice(0, 5));
+          setIndexerApi(idxData?.indexer || null);
+
         }
         console.log("[Home] Initial data load successful.");
       } catch (e) {
@@ -191,47 +197,50 @@ export default function Home() {
     };
   }, [shop, refreshAnalytics]);
 
-  // NEW: polling for indexer status
-  React.useEffect(() => {
-    let alive = true;
-    let timer;
-
-    async function fetchIndexerStatus() {
-      try {
-        const { data } = await api.get(
-          `/api/admin/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
-        );
-        if (!alive) return;
-        const j = data || {};
-        const phase = (j.phase || j.status || "").toString().toLowerCase();
-        const totalProducts = Number(j.totalProducts ?? j.total ?? 0) || 0;
-        const importedCount = Number(j.importedCount ?? j.imported ?? 0) || 0;
-        const embeddedCount = Number(j.embeddedCount ?? j.embedded ?? 0) || 0;
-        const updatedAt = j.updatedAt || j.updated || j.ts || null;
-
-        setIndexer({ phase, totalProducts, importedCount, embeddedCount, updatedAt });
-        setIndexerErr("");
-
-        const done = phase === "complete" || phase === "error";
-        timer = window.setTimeout(fetchIndexerStatus, done ? 20000 : 10000);
-      } catch (e) {
-        if (!alive) return;
-        setIndexerErr(e?.message || "Failed to load indexer status");
-        timer = window.setTimeout(fetchIndexerStatus, 20000);
-      }
-    }
-
-    if (shop) fetchIndexerStatus();
-
-    return () => {
-      alive = false;
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [shop]);
+  
 
   // derived values
   const level = normalizeLevel(plan?.level);
-  const levelLabel = labelFromLevel(level);
+  const levelLabel = labelFromLevel(level);// Live indexer status loader + light polling (stops at complete)
+React.useEffect(() => {
+  let timer = null;
+  let cancelled = false;
+
+  async function fetchStatusOnce() {
+    if (!shop) return;
+    try {
+      const { data } = await api.get(`/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`);
+      // Expected shape: { ok, shop, indexer: { phase, totalProducts, importedCount, embeddedCount, pct, updatedAt } }
+      if (!cancelled) {
+        setIndexer(data?.indexer ?? null);
+        setIxErr("");
+      }
+      // Stop polling when complete (or explicit pct >= 100)
+      const phase = String(data?.indexer?.phase || "").toLowerCase();
+      const pct = Number(data?.indexer?.pct ?? 0);
+      const done = phase === "complete" || pct >= 100;
+      // If not done, schedule another read
+      if (!done && !cancelled) {
+        timer = setTimeout(fetchStatusOnce, 8000);
+      }
+    } catch (e) {
+      if (!cancelled) {
+        setIxErr(e?.message || "status_failed");
+        // Back off a little and try again
+        timer = setTimeout(fetchStatusOnce, 12000);
+      }
+    }
+  }
+
+  // Kick off immediately
+  fetchStatusOnce();
+
+  return () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+  };
+}, [shop]);
+
   const badgeTone = level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
 
   const totals = overview?.totals || overview || {};
@@ -249,24 +258,34 @@ export default function Home() {
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
   const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
 
-  // ── Knowledge/indexer: legacy derived (kept; panel below uses live `indexer`) ──
-  const legacyIndexer =
+  // ── Knowledge/indexer: prefer live status; fall back to legacy shapes (settings/overview) ──
+const liveOrLegacy = (
+  indexer ??
+  (
     (settings && (settings.indexer || settings.indexerStatus)) ||
     (overview && (overview.indexer || overview.indexerStatus)) ||
-    null;
-  const indexerPhaseRaw = legacyIndexer?.phase || legacyIndexer?.status || "";
-  const indexerPhase = String(indexerPhaseRaw || "").toLowerCase().replace(/\s+/g, "_");
-  const totalProducts = Number(legacyIndexer?.totalProducts ?? legacyIndexer?.total ?? 0) || 0;
-  const importedCount = Number(legacyIndexer?.importedCount ?? legacyIndexer?.imported ?? 0) || 0;
-  const embeddedCount = Number(legacyIndexer?.embeddedCount ?? legacyIndexer?.embedded ?? 0) || 0;
-  const updatedAtIso = legacyIndexer?.updatedAt || legacyIndexer?.updated || legacyIndexer?.ts || "";
-  const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
-  const coarsePctByPhase = {
-    queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0,
-  };
-  const knowledgePct = knowledgeHasCounts
-    ? pct(embeddedCount || importedCount, totalProducts)
-    : (coarsePctByPhase[indexerPhase] ?? 0);
+    null
+  )
+);
+
+const indexerPhaseRaw = liveOrLegacy?.phase || liveOrLegacy?.status || "";
+const indexerPhase = String(indexerPhaseRaw || "").toLowerCase().replace(/\s+/g, "_");
+
+const totalProducts = Number(liveOrLegacy?.totalProducts ?? liveOrLegacy?.total ?? 0) || 0;
+const importedCount = Number(liveOrLegacy?.importedCount ?? liveOrLegacy?.imported ?? 0) || 0;
+const embeddedCount = Number(liveOrLegacy?.embeddedCount ?? liveOrLegacy?.embedded ?? 0) || 0;
+const updatedAtIso = liveOrLegacy?.updatedAt || liveOrLegacy?.updated || liveOrLegacy?.ts || "";
+
+const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
+const coarsePctByPhase = {
+  queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0,
+};
+const pctFromDoc = Number(liveOrLegacy?.pct ?? 0);
+
+const knowledgePct = knowledgeHasCounts
+  ? pct(embeddedCount || importedCount, totalProducts)
+  : (pctFromDoc ? Math.max(0, Math.min(100, pctFromDoc)) : (coarsePctByPhase[indexerPhase] ?? 0));
+
 
   if (loading) {
     return (
