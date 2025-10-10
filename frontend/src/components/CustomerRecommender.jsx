@@ -19,6 +19,31 @@ function teaserFromHtml(html = "", max = 140) {
   );
   return txt.length > max ? `${txt.slice(0, max)}…` : txt;
 }
+// Extract the first N real paragraphs from an HTML description.
+// Falls back to a clean teaser if no <p> tags exist.
+function extractFirstParagraphsFromHtml(html = "", maxParas = 2) {
+  const s = String(html || "");
+  const matches = s.match(/<p\b[^>]*>(.*?)<\/p>/gis);
+  let paras = [];
+
+  if (matches && matches.length) {
+    paras = matches
+      .map(p => decodeEntities(p.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()))
+      .filter(Boolean)
+      .slice(0, maxParas);
+  } else {
+    // fallback: split by sentence if there are no <p> tags
+    const flat = decodeEntities(s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    if (flat) {
+      const sentences = flat.split(/(?<=[.!?])\s+/).filter(Boolean);
+      const first = sentences.slice(0, Math.max(1, maxParas)).join(" ");
+      if (first) paras = [first];
+    }
+  }
+
+  return paras;
+}
+
 function formatPrice(val) {
   if (val == null || val === "") return null;
   const n = Number(val);
@@ -403,25 +428,38 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
   {(() => {
-    // Build a product-specific reason string (fallback to description teaser)
-    const rawReason =
-      reasonsById?.[selectedProduct.id] ||
-      teaserFromHtml(selectedProduct.description || "") ||
-      "A solid match for your request.";
+    // 1–2 opening paragraphs from the product description (preferred)
+    const paras = extractFirstParagraphsFromHtml(selectedProduct.description || "", 2);
 
-    const { lead, rest } = splitFirstSentence(rawReason);
+    if (paras.length) {
+      return (
+        <>
+          <p>{paras[0]}</p>
+          {paras[1] ? <p style={{ marginTop: 8 }}>{paras[1]}</p> : null}
 
+          {/* Optional: a subtle, single-line "why this fits" if you still want it */}
+          {reasonsById?.[selectedProduct.id] ? (
+            <p style={{ opacity: 0.8, marginTop: 10 }}>
+              <em>Why this fits:</em> {reasonsById[selectedProduct.id]}
+            </p>
+          ) : null}
+        </>
+      );
+    }
+
+    // Fallback: if no description, show reason or generic teaser
     return (
       <>
-        {/* 1) Short per-product reason */}
-        <p>{lead || rawReason}</p>
-
-        {/* 2) Deeper product-specific rationale (if there’s more after the first sentence) */}
-        {rest ? <p style={{ opacity: 0.9, marginTop: 8 }}>{rest}</p> : null}
+        <p>
+          {reasonsById?.[selectedProduct.id] ||
+            teaserFromHtml(selectedProduct.description || "") ||
+            "A solid match for your request."}
+        </p>
       </>
     );
   })()}
 </div>
+
 
             <a
               href={selectedProduct.url || selectedProduct.link || "#"}
