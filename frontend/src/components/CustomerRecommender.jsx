@@ -71,14 +71,28 @@ function useUrlSettings() {
 
 // --- Local helpers for Awesome/copy fallbacks ---
 function normalizeProducts(list = []) {
-  // Backend sends {id,title,price,image,url} (no `name`, no `description`).
   // Map to the UI’s expected shape and keep original fields.
-  return list.map((p) => ({
-    ...p,
-    name: p.name || p.title || "", // UI expects `name`
-    description: p.description || "", // may be empty; UI has a fallback
-  }));
+  return list.map((p) => {
+    // Try common description fields from current/older payloads or Firebase mirrors
+    const desc =
+      p.description ||
+      p.descriptionHtml ||
+      p.description_html ||
+      p.bodyHtml ||
+      p.body_html ||
+      p.body ||
+      p.details ||
+      p.longDescription ||
+      "";
+
+    return {
+      ...p,
+      name: p.name || p.title || "",  // UI expects `name`
+      description: desc,              // ensure modal has HTML to render
+    };
+  });
 }
+
 function buildReasonsMapFromAwesome(awesome) {
   const map = {};
   if (!awesome) return map;
