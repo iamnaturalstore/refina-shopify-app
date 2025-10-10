@@ -2,7 +2,7 @@
 // refina-backend/workers/indexer.mjs
 // Builds/maintains a store-native entity graph by extracting entities from product text.
 // Modes:
-//   bootstrap: node workers/indexer.mjs bootstrap --store <storeId> [--limit 1000] [--commit] [--verbose]
+//   bootstrap: node workers/indexer.mjs bootstrap --store <storeId> [--limit 5000] [--commit] [--verbose]
 //   index:     node workers/indexer.mjs index --store <storeId> --product <productId> [--commit]
 
 import { db, nowTs } from "../bff/lib/firestore.js";
@@ -33,12 +33,12 @@ const ARGS = parseArgs(process.argv.slice(2));
 const MODE = ARGS._[0]; // 'bootstrap' | 'index'
 const VERBOSE = !!ARGS.verbose;
 const STORE = ARGS.store || ARGS.s || "";
-const LIMIT = Number(ARGS.limit || 1000);
+const LIMIT = Number(ARGS.limit || 5000);
 const COMMIT = !!ARGS.commit;
 if (!MODE || !STORE) {
   console.log(
     "Usage:\n" +
-      "  node workers/indexer.mjs bootstrap --store <storeId> [--limit 1000] [--commit] [--verbose]\n" +
+      "  node workers/indexer.mjs bootstrap --store <storeId> [--limit 5000] [--commit] [--verbose]\n" +
       "  node workers/indexer.mjs index --store <storeId> --product <productId> [--commit]"
   );
   process.exit(1);
@@ -213,7 +213,7 @@ function productToPromptInput(p, cap = 900) {
 }
 
 // Read products from Firestore
-async function fetchProductsFromFirestore(storeId, limit = 1000) {
+async function fetchProductsFromFirestore(storeId, limit = 5000) {
   const snap = await db.collection(`products/${storeId}/items`).limit(limit).get();
   const out = [];
   snap.forEach((doc) => {
