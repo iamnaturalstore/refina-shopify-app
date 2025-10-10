@@ -12,11 +12,9 @@
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
   const kebab = (s) => String(s || "").replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
-
   const isMobile = () => window.matchMedia("(max-width: 640px)").matches;
 
-  // Theme Editor flag is the only one we strictly need.
-  // Avoid reading window.top.* (cross-origin). Use document.referrer if you also want to infer Admin.
+  // Editor/Admin hints (no cross-origin access to window.top)
   const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
   let IN_ADMIN = false;
   try {
@@ -27,19 +25,21 @@
   }
 
   function initAll() {
-    $("[data-refina-launcher]") // ensure at least one exists before running forEach
     $$("[data-refina-launcher]").forEach(initOne);
   }
 
   function initOne(root) {
     if (!root || root.dataset.initialized === "true") return;
 
-    // Read all settings from data attributes
     const settings = root.dataset;
-    // Map embed select → px for launcher button only
+
+    // Text: prefer new fields, fall back to legacy
+    const launcherText = settings.launcherText || settings.ctaText || "Ask Refina";
+    const widgetCtaText = settings.widgetButtonText || settings.ctaText || "";
+
+    // Radius mapping for the **launcher bubble only**
     const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
     const launcherRadius = radiusMap[settings.borderRadius] || "16px";
-
 
     const side = settings.side === "left" ? "left" : "right";
     const offset = Math.max(0, parseInt(settings.offset || "24", 10));
@@ -47,10 +47,12 @@
     const pageType = String(settings.pageType || "").toLowerCase();
     const hideOnProduct = String(settings.hideOnProduct).toLowerCase() === "true";
     const hideOnCart = String(settings.hideOnCart).toLowerCase() === "true";
-    const shopDomain = settings.shop || (window.Shopify && window.Shopify.shop) || "";
+    const shopDomain =
+      settings.shop ||
+      (window.Shopify && (window.Shopify.shop || window.Shopify.permanent_domain)) ||
+      "";
     const openOnLoad = String(settings.openOnLoad).toLowerCase() === "true";
 
-    const ctaText = settings.ctaText || "Ask Refina";
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
@@ -105,9 +107,10 @@
     btn.className = "refina-launcher-btn";
     btn.type = "button";
     btn.setAttribute("aria-label", "Open shopping concierge");
-    btn.innerHTML = `<span>${ctaText}</span>`;
+    btn.innerHTML = `<span>${launcherText}</span>`;
     document.body.appendChild(btn);
-    // Apply theme-selected radius to the launcher bubble only
+
+    // Apply theme-selected radius to the launcher bubble only (override 9999px)
     btn.style.borderRadius = launcherRadius;
 
     // Positioning & visibility on resize
@@ -124,11 +127,19 @@
 
     function buildIframeUrl() {
       const base = new URL(`https://${shopDomain}/apps/refina`);
-      // Pass all theme settings as URL params (camelCase -> kebab-case)
+
+      // Pass all theme settings as URL params (camelCase dataset → kebab-case query)
       for (const key in settings) {
         if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
         base.searchParams.set(kebab(key), settings[key]);
       }
+
+      // Explicit params for back-compat / clarity
+      if (widgetCtaText) base.searchParams.set("widget-cta-text", widgetCtaText); // new, in-widget
+      if (launcherText)  base.searchParams.set("launcher-text", launcherText);    // optional (if iframe wants to display)
+      // Legacy param many widgets already read:
+      if (launcherText)  base.searchParams.set("cta-text", launcherText);
+
       base.searchParams.set("source", "launcher");
       try {
         if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1");
@@ -168,7 +179,7 @@
 
       setTimeout(() => close.focus(), 0);
 
-      // Tiny focus loop to keep tabbing within modal
+      // Trivial focus loop
       overlay.addEventListener("keydown", (e) => {
         if (e.key !== "Tab") return;
         const focusables = [close, iframe];
