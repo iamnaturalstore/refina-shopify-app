@@ -13,12 +13,14 @@ function decodeEntities(str = "") {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 }
+
 function teaserFromHtml(html = "", max = 140) {
   const txt = decodeEntities(
     String(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
   );
   return txt.length > max ? `${txt.slice(0, max)}…` : txt;
 }
+
 // Extract the first N real paragraphs from an HTML description.
 // Falls back to a clean teaser if no <p> tags exist.
 function extractFirstParagraphsFromHtml(html = "", maxParas = 2) {
@@ -28,7 +30,9 @@ function extractFirstParagraphsFromHtml(html = "", maxParas = 2) {
 
   if (matches && matches.length) {
     paras = matches
-      .map(p => decodeEntities(p.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()))
+      .map((p) =>
+        decodeEntities(p.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim())
+      )
       .filter(Boolean)
       .slice(0, maxParas);
   } else {
@@ -51,7 +55,7 @@ function formatPrice(val) {
   return `$${n.toFixed(2)}`;
 }
 
-// New helper hook to read settings from URL parameters
+// Read Theme App Embed settings from URL parameters
 function useUrlSettings() {
   const [settings, setSettings] = useState({});
 
@@ -72,8 +76,8 @@ function useUrlSettings() {
 // --- Local helpers for Awesome/copy fallbacks ---
 function normalizeProducts(list = []) {
   // Map to the UI’s expected shape and keep original fields.
+  // IMPORTANT: ensure `description` is populated from common aliases so the modal can render product paragraphs.
   return list.map((p) => {
-    // Try common description fields from current/older payloads or Firebase mirrors
     const desc =
       p.description ||
       p.descriptionHtml ||
@@ -87,8 +91,8 @@ function normalizeProducts(list = []) {
 
     return {
       ...p,
-      name: p.name || p.title || "",  // UI expects `name`
-      description: desc,              // ensure modal has HTML to render
+      name: p.name || p.title || "", // UI expects `name`
+      description: desc, // used by modal (extractFirstParagraphsFromHtml)
     };
   });
 }
@@ -108,6 +112,7 @@ function buildReasonsMapFromAwesome(awesome) {
   }
   return map;
 }
+
 function buildCopyFromAwesome(awesome, fallbackExplanation = "") {
   if (!awesome) {
     return {
@@ -131,23 +136,12 @@ function buildCopyFromAwesome(awesome, fallbackExplanation = "") {
 
   return { why, rationale, extras };
 }
+
 function teaserForCard(product, reasonsById) {
   const reason = reasonsById?.[product.id] || "";
   if (reason) return decodeEntities(reason);
-  // Backend does not send `description`; if empty after decode, show a safe line.
   const fromDesc = teaserFromHtml(product.description || "");
   return fromDesc || "A solid match for your request.";
-}
-// Split a reason into a short lead sentence + the remaining rationale.
-function splitFirstSentence(text = "") {
-  const s = String(text).trim();
-  if (!s) return { lead: "", rest: "" };
-  // First sentence ends at ., !, or ? followed by space/end
-  const m = s.match(/^(.+?[.!?])(\s+|$)([\s\S]*)$/);
-  if (!m) return { lead: s, rest: "" };
-  const lead = m[1].trim();
-  const rest = (m[3] || "").trim();
-  return { lead, rest };
 }
 
 export default function CustomerRecommender() {
@@ -163,16 +157,14 @@ export default function CustomerRecommender() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // useEffect to apply theme settings from URL
+  // Apply theme settings from URL
   useEffect(() => {
     const root = document.documentElement;
     if (!root || !settings) return;
 
-    // Map URL settings to CSS variables
     const stylesToApply = {
       "--rf-primary-color": settings.primaryColor,
       "--rf-accent-color": settings.accentColor,
-      // Simple mapping for border-radius. Assumes you have CSS classes/vars for sm, md, lg, 2xl.
       "--rf-border-radius": settings.borderRadius?.replace(
         /^(sm|md|lg|2xl)$/,
         "var(--rf-radius-$1)"
@@ -180,13 +172,11 @@ export default function CustomerRecommender() {
     };
 
     for (const [key, value] of Object.entries(stylesToApply)) {
-      if (value) {
-        root.style.setProperty(key, value);
-      }
+      if (value) root.style.setProperty(key, value);
     }
   }, [settings]);
 
-  // useEffect to load chips (common concerns)
+  // Load common concerns (chips)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -225,14 +215,13 @@ export default function CustomerRecommender() {
         const resp = await fetch(`${API_PREFIX}/recommend`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          // include { storeId, concern } in body
           body: JSON.stringify({ storeId, concern: q }),
         });
         if (!resp.ok) throw new Error(`recommend ${resp.status}`);
 
         const data = await resp.json();
 
-        // 1) Normalize products to have `name`
+        // 1) Normalize products (ensure name + description)
         const products = normalizeProducts(
           Array.isArray(data?.products) ? data.products : []
         );
@@ -241,7 +230,10 @@ export default function CustomerRecommender() {
         const reasonsMap = buildReasonsMapFromAwesome(data?.awesome);
 
         // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
-        const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
+        const copyOut = buildCopyFromAwesome(
+          data?.awesome,
+          data?.explanation || ""
+        );
 
         setMatchedProducts(products);
         setCopy({
@@ -253,14 +245,13 @@ export default function CustomerRecommender() {
 
         // Analytics (best-effort)
         try {
-          // Resolve storeId again the same way as for /recommend
           const storeId2 =
             new URLSearchParams(location.search).get("shop") ||
             document.getElementById("root")?.dataset.shop ||
             "";
 
           const analyticsPayload = {
-            storeId: storeId2, // ✅ include canonical shop id
+            storeId: storeId2,
             type: "concern",
             event: "recommendation_received",
             concern: q,
@@ -305,19 +296,18 @@ export default function CustomerRecommender() {
 
   const headingText = settings.heading || "Let’s find your perfect pick";
   const subheadingText =
-    settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
+    settings.subheading ||
+    "Tell me what you’re after and I’ll fetch the best fits.";
+
   // === Ask button label wiring (Theme Editor: "In-Widget Button Text") ===
-// useUrlSettings() converts ?widget-cta-text=... → settings.widgetCtaText
-const widgetCtaOverride = (settings.widgetCtaText || "").trim();
+  // useUrlSettings() converts ?widget-cta-text=... → settings.widgetCtaText
+  const widgetCtaOverride = (settings.widgetCtaText || "").trim();
 
-// Optional soft fallback if you still want to accept any legacy param
-// coming through as `ctaText` (safe to keep, harmless if absent).
-const legacyCta = (settings.ctaText || "").trim();
+  // Optional soft fallback for legacy param as `ctaText`
+  const legacyCta = (settings.ctaText || "").trim();
 
-// Final label priority: URL override → legacy → safe default.
-// (Change the default if you prefer another phrase.)
-const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
-
+  // Final label priority: URL override → legacy → safe default.
+  const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
 
   return (
     <div className={styles.container}>
@@ -351,28 +341,31 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
       />
 
       <button
-  data-refina-ask-btn
-  className={styles.askButton}
-  onClick={() => handleRecommend(concern)}
-  disabled={loading}
-  aria-busy={loading}
->
-  {loading ? (
-    <>
-      Researching<span className={styles.dots} aria-hidden="true" />
-    </>
-  ) : (
-    askLabel
-  )}
-</button>
-
+        data-refina-ask-btn
+        className={styles.askButton}
+        onClick={() => handleRecommend(concern)}
+        disabled={loading}
+        aria-busy={loading}
+      >
+        {loading ? (
+          <>
+            Researching<span className={styles.dots} aria-hidden="true" />
+          </>
+        ) : (
+          askLabel
+        )}
+      </button>
 
       {(copy.why || copy.rationale || copy.extras) && (
         <div className={styles.responseBox} aria-live="polite">
           <h2>Here’s what I’d pick</h2>
           {copy.why ? <p className={styles.opener}>{copy.why}</p> : null}
-          {copy.rationale ? <p className={styles.blurb}>{copy.rationale}</p> : null}
-          {copy.extras ? <p className={styles.usageNote}>{copy.extras}</p> : null}
+          {copy.rationale ? (
+            <p className={styles.blurb}>{copy.rationale}</p>
+          ) : null}
+          {copy.extras ? (
+            <p className={styles.usageNote}>{copy.extras}</p>
+          ) : null}
         </div>
       )}
 
@@ -441,39 +434,41 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
               style={{ marginTop: 12 }}
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-  {(() => {
-    // 1–2 opening paragraphs from the product description (preferred)
-    const paras = extractFirstParagraphsFromHtml(selectedProduct.description || "", 2);
+              {(() => {
+                // Use the description delivered by /v1/recommend
+                const paras = extractFirstParagraphsFromHtml(
+                  selectedProduct.description || "",
+                  2
+                );
 
-    if (paras.length) {
-      return (
-        <>
-          <p>{paras[0]}</p>
-          {paras[1] ? <p style={{ marginTop: 8 }}>{paras[1]}</p> : null}
+                if (paras.length) {
+                  return (
+                    <>
+                      <p>{paras[0]}</p>
+                      {paras[1] ? (
+                        <p style={{ marginTop: 8 }}>{paras[1]}</p>
+                      ) : null}
 
-          {/* Optional: a subtle, single-line "why this fits" if you still want it */}
-          {reasonsById?.[selectedProduct.id] ? (
-            <p style={{ opacity: 0.8, marginTop: 10 }}>
-              <em>Why this fits:</em> {reasonsById[selectedProduct.id]}
-            </p>
-          ) : null}
-        </>
-      );
-    }
+                      {/* Optional: subtle per-product reason after description */}
+                      {reasonsById?.[selectedProduct.id] ? (
+                        <p style={{ opacity: 0.8, marginTop: 10 }}>
+                          <em>Why this fits:</em>{" "}
+                          {reasonsById[selectedProduct.id]}
+                        </p>
+                      ) : null}
+                    </>
+                  );
+                }
 
-    // Fallback: if no description, show reason or generic teaser
-    return (
-      <>
-        <p>
-          {reasonsById?.[selectedProduct.id] ||
-            teaserFromHtml(selectedProduct.description || "") ||
-            "A solid match for your request."}
-        </p>
-      </>
-    );
-  })()}
-</div>
+                // Fallback if description is missing
+                const fallback =
+                  reasonsById?.[selectedProduct.id] ||
+                  teaserFromHtml(selectedProduct.description || "") ||
+                  "A solid match for your request.";
 
+                return <p>{fallback}</p>;
+              })()}
+            </div>
 
             <a
               href={selectedProduct.url || selectedProduct.link || "#"}

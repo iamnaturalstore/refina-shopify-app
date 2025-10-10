@@ -868,21 +868,34 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
 
     const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const hydrate = used.map((id) => {
-      const p = allProducts.find((x) => x.id === id) || {};
-      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-      return {
-        id: p.id,
-        title: p.title || p.name || '',
-        name: p.title || p.name || '',
-        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-        description: p.description || '',
-        productType: p.productType || '',
-        tags: p.tags || [],
-        url: productUrl,
-        price: p.price ?? null,
-      };
-    });
+  const p = allProducts.find((x) => x.id === id) || {};
+  const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+  const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+
+  // Prefer rich HTML description if present; fall back to common aliases.
+  const description =
+    p.description ||
+    p.descriptionHtml ||
+    p.description_html ||
+    p.bodyHtml ||
+    p.body_html ||
+    p.body ||
+    p.details ||
+    p.longDescription ||
+    '';
+
+  return {
+    id: p.id,
+    title: p.title || p.name || '',
+    name: p.title || p.name || '',
+    image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+    description,
+    productType: p.productType || '',
+    tags: p.tags || [],
+    url: productUrl,
+    price: p.price ?? null,
+  };
+});
 
     let copy = shapeCopy({ products: hydrate, concern: normalizedConcern, tone, category });
     if (enriched && meta.source === 'gemini') {
@@ -1084,23 +1097,35 @@ app.post('/v1/recommend', async (req, res) => {
       : '';
 
     // hydrate product objects for the UI
-    const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    const hydrate = used.map((id) => {
-      const p = allProducts.find((x) => x.id === id) || {};
-      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-      return {
-        id: p.id,
-        title: p.title || p.name || '',
-        name: p.title || p.name || '',
-        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-        description: p.description || '',
-        productType: p.productType || '',
-        tags: p.tags || [],
-        url: productUrl,
-        price: p.price ?? null,
-      };
-    });
+const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+const hydrate = used.map((id) => {
+  const p = allProducts.find((x) => x.id === id) || {};
+  const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+  const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+
+  const description =
+    p.description ||
+    p.descriptionHtml ||
+    p.description_html ||
+    p.bodyHtml ||
+    p.body_html ||
+    p.body ||
+    p.details ||
+    p.longDescription ||
+    '';
+
+  return {
+    id: p.id,
+    title: p.title || p.name || '',
+    name: p.title || p.name || '',
+    image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+    description,
+    productType: p.productType || '',
+    tags: p.tags || [],
+    url: productUrl,
+    price: p.price ?? null,
+  };
+});
 
     // friendly copy from what we actually send back
     const copy = shapeCopy({
