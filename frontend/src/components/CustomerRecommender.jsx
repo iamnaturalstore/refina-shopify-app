@@ -256,7 +256,18 @@ export default function CustomerRecommender() {
   const headingText = settings.heading || "Let’s find your perfect pick";
   const subheadingText =
     settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
-  const ctaText = settings.ctaText || "Get picks";
+  // === Ask button label wiring (Theme Editor: "In-Widget Button Text") ===
+// useUrlSettings() converts ?widget-cta-text=... → settings.widgetCtaText
+const widgetCtaOverride = (settings.widgetCtaText || "").trim();
+
+// Optional soft fallback if you still want to accept any legacy param
+// coming through as `ctaText` (safe to keep, harmless if absent).
+const legacyCta = (settings.ctaText || "").trim();
+
+// Final label priority: URL override → legacy → safe default.
+// (Change the default if you prefer another phrase.)
+const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
+
 
   return (
     <div className={styles.container}>
@@ -290,19 +301,21 @@ export default function CustomerRecommender() {
       />
 
       <button
-        className={styles.askButton}
-        onClick={() => handleRecommend(concern)}
-        disabled={loading}
-        aria-busy={loading}
-      >
-        {loading ? (
-          <>
-            Researching<span className={styles.dots} aria-hidden="true" />
-          </>
-        ) : (
-          ctaText
-        )}
-      </button>
+  data-refina-ask-btn
+  className={styles.askButton}
+  onClick={() => handleRecommend(concern)}
+  disabled={loading}
+  aria-busy={loading}
+>
+  {loading ? (
+    <>
+      Researching<span className={styles.dots} aria-hidden="true" />
+    </>
+  ) : (
+    askLabel
+  )}
+</button>
+
 
       {(copy.why || copy.rationale || copy.extras) && (
         <div className={styles.responseBox} aria-live="polite">
