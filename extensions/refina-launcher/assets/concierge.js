@@ -36,6 +36,10 @@
 
     // Read all settings from data attributes
     const settings = root.dataset;
+    // Map embed select → px for launcher button only
+    const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
+    const launcherRadius = radiusMap[settings.borderRadius] || "16px";
+
 
     const side = settings.side === "left" ? "left" : "right";
     const offset = Math.max(0, parseInt(settings.offset || "24", 10));
@@ -103,6 +107,8 @@
     btn.setAttribute("aria-label", "Open shopping concierge");
     btn.innerHTML = `<span>${ctaText}</span>`;
     document.body.appendChild(btn);
+    // Apply theme-selected radius to the launcher bubble only
+    btn.style.borderRadius = launcherRadius;
 
     // Positioning & visibility on resize
     const applyPos = () => {
@@ -117,7 +123,7 @@
     let lastFocus = null;
 
     function buildIframeUrl() {
-      const base = new URL(`https://${shopDomain}/apps/refina`);get
+      const base = new URL(`https://${shopDomain}/apps/refina`);
       // Pass all theme settings as URL params (camelCase -> kebab-case)
       for (const key in settings) {
         if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
