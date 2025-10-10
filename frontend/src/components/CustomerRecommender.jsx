@@ -99,6 +99,17 @@ function teaserForCard(product, reasonsById) {
   const fromDesc = teaserFromHtml(product.description || "");
   return fromDesc || "A solid match for your request.";
 }
+// Split a reason into a short lead sentence + the remaining rationale.
+function splitFirstSentence(text = "") {
+  const s = String(text).trim();
+  if (!s) return { lead: "", rest: "" };
+  // First sentence ends at ., !, or ? followed by space/end
+  const m = s.match(/^(.+?[.!?])(\s+|$)([\s\S]*)$/);
+  if (!m) return { lead: s, rest: "" };
+  const lead = m[1].trim();
+  const rest = (m[3] || "").trim();
+  return { lead, rest };
+}
 
 export default function CustomerRecommender() {
   const settings = useUrlSettings();
@@ -391,21 +402,25 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
               style={{ marginTop: 12 }}
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-  {/* Per-product rationale (specific reason for this item) */}
-  {reasonsById?.[selectedProduct.id] ? (
-    <p>{reasonsById[selectedProduct.id]}</p>
-  ) : (
-    <p>{teaserFromHtml(selectedProduct.description || "") || "A solid match for your request."}</p>
-  )}
+  {(() => {
+    // Build a product-specific reason string (fallback to description teaser)
+    const rawReason =
+      reasonsById?.[selectedProduct.id] ||
+      teaserFromHtml(selectedProduct.description || "") ||
+      "A solid match for your request.";
 
-  {/* Overall selection rationale (ingredients/benefits summary) */}
-  {copy.rationale ? (
-    <p style={{ opacity: 0.9, marginTop: 8 }}>
-      {copy.rationale}
-    </p>
-  ) : null}
+    const { lead, rest } = splitFirstSentence(rawReason);
 
-  {/* Removed usage tips (copy.extras) from the modal */}
+    return (
+      <>
+        {/* 1) Short per-product reason */}
+        <p>{lead || rawReason}</p>
+
+        {/* 2) Deeper product-specific rationale (if there’s more after the first sentence) */}
+        {rest ? <p style={{ opacity: 0.9, marginTop: 8 }}>{rest}</p> : null}
+      </>
+    );
+  })()}
 </div>
 
             <a
