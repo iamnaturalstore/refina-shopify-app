@@ -391,13 +391,23 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
               style={{ marginTop: 12 }}
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-              {reasonsById?.[selectedProduct.id] ? (
-                <p>{reasonsById[selectedProduct.id]}</p>
-              ) : (
-                <p>{teaserFromHtml(selectedProduct.description || "") || "A solid match for your request."}</p>
-              )}
-              {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null}
-            </div>
+  {/* Per-product rationale (specific reason for this item) */}
+  {reasonsById?.[selectedProduct.id] ? (
+    <p>{reasonsById[selectedProduct.id]}</p>
+  ) : (
+    <p>{teaserFromHtml(selectedProduct.description || "") || "A solid match for your request."}</p>
+  )}
+
+  {/* Overall selection rationale (ingredients/benefits summary) */}
+  {copy.rationale ? (
+    <p style={{ opacity: 0.9, marginTop: 8 }}>
+      {copy.rationale}
+    </p>
+  ) : null}
+
+  {/* Removed usage tips (copy.extras) from the modal */}
+</div>
+
             <a
               href={selectedProduct.url || selectedProduct.link || "#"}
               target="_blank"
