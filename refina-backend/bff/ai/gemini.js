@@ -1,17 +1,22 @@
 // refina-backend/bff/ai/gemini.js
-// SDK-only generateContent helper using @google/generative-ai.
+// SDK-only generateContent helper using Vertex AI (Application Default Credentials).
 // Returns model text (STRICT JSON per your prompt) or null.
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// CHANGED: import Vertex AI SDK (ADC-based)
+import { VertexAI } from '@google-cloud/vertexai';
 
 // ─────────────────────────────────────────────────────────────
 // Env & defaults
 // ─────────────────────────────────────────────────────────────
-const API_KEY =
-  process.env.GEMINI_API_KEY ||
-  process.env.GOOGLE_API_KEY ||
-  "";
+// CHANGED: set project/region for Vertex; credentials come from GOOGLE_APPLICATION_CREDENTIALS
+const PROJECT =
+  process.env.GCP_PROJECT ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  'productrecommenderapp';
 
+const LOCATION = process.env.GCP_LOCATION || 'us-central1';
+
+// (unchanged behavior) prefer env override for primary model
 const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
 
 const MODEL_FALLBACKS = [
@@ -23,6 +28,9 @@ const MODEL_FALLBACKS = [
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// CHANGED: single Vertex client (replaces GoogleGenerativeAI(API_KEY))
+const vertex = new VertexAI({ project: PROJECT, location: LOCATION });
 
 // ─────────────────────────────────────────────────────────────
 // Core: SDK generateContent with contract + optional schema
@@ -38,9 +46,7 @@ export async function callGeminiStructured({
   responseSchema, // optional JSON schema (SDK supports this)
   system,         // optional system instruction text
 } = {}) {
-  if (!API_KEY) return null;
-
-  const genAI = new GoogleGenerativeAI(API_KEY);
+  // (removed API key check; Vertex uses ADC)
 
   // Candidate routing (primary → fallbacks)
   const candidates = Array.from(
@@ -63,7 +69,8 @@ export async function callGeminiStructured({
 
   for (const mdl of candidates) {
     try {
-      const modelClient = genAI.getGenerativeModel({
+      // CHANGED: use Vertex client to get the model
+      const modelClient = vertex.getGenerativeModel({
         model: mdl,
         ...(systemInstr ? { systemInstruction: systemInstr } : {}),
       });
