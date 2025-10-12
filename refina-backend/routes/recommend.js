@@ -1,4 +1,4 @@
-// refina-backend/routes/recommend.js
+// refina-backend/routes/recommend.js (B)
 // Retrieval-augmented concierge:
 // 1) Embed concern → take Top-60 by cosine
 // 2) Deterministic KB filter/boost (EO deny, type/step, concerns, audience, age)
@@ -278,6 +278,7 @@ async function deterministicFallback(guard) {
       source: guard?.state === "off" ? "ai-off" : "limit-exceeded",
       tookMs: Date.now() - started,
       limitMessage: guard?.message || null,
+      description: p.description || p.body_html || p.description_html || "",
     });
   }
 
@@ -502,19 +503,18 @@ function transformToBasicIfNeeded(payload, guard) {
     const cached = await readCache(storeId, ck, cacheEpoch);
     
     if (cached) {
-  // Ensure cached responses respect current plan. First clamp,
-  // then down-convert to "basic" for Pro (no `awesome`, concise rationale).
-  let shaped = clampCachedPayload(cached, guard);
-  shaped = transformToBasicIfNeeded(shaped, guard);
+  // Respect current plan limits without stripping `awesome`
+  const shaped = clampCachedPayload(cached, guard);
 
   return res.json({
     ...shaped,
     source: "cache",
     cacheHit: true,
-    limitMessage: guard?.message || null, // keep friendly gating note visible
+    limitMessage: guard?.message || null,
     tookMs: Date.now() - started,
   });
 }
+
 
     // Embedding retrieval
     const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
@@ -729,6 +729,7 @@ const prompt2 = needWiden
           image,
           image_url: image,
           url,
+          description: p.description || p.body_html || p.description_html || "",
         };
       });
       return res.json({
@@ -778,6 +779,7 @@ const prompt2 = needWiden
         image,
         image_url: image,
         url,
+        description: p.description || p.body_html || p.description_html || "",
       };
     });
 
@@ -827,11 +829,6 @@ const prompt2 = needWiden
     // Cache on success
     // Cache the full (rich) payload
 try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}
-
-// Down-convert to Pro "basic" response if needed (no `awesome`)
-const responsePayload = transformToBasicIfNeeded(payload, guard);
-
-// Return to client (limitMessage already included above; preserved)
 return res.json(responsePayload);
 
   } catch (err) {
