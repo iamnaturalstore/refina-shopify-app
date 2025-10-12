@@ -35,10 +35,11 @@ const VERBOSE = !!ARGS.verbose;
 const STORE = ARGS.store || ARGS.s || "";
 const LIMIT = Number(ARGS.limit || 5000);
 const COMMIT = !!ARGS.commit;
+const FORCE = !!ARGS.force;
 if (!MODE || !STORE) {
   console.log(
     "Usage:\n" +
-      "  node workers/indexer.mjs bootstrap --store <storeId> [--limit 5000] [--commit] [--verbose]\n" +
+      "  node workers/indexer.mjs bootstrap --store <storeId> [--limit 5000] [--commit] [--force] [--verbose]\n" +
       "  node workers/indexer.mjs index --store <storeId> --product <productId> [--commit]"
   );
   process.exit(1);
@@ -231,10 +232,32 @@ async function fetchProductsFromFirestore(storeId, limit = 5000) {
       usageStep: d.usageStep || d.step || "",
       image: d.image || d.images?.[0]?.src || "",
       handle: d.handle || d.url || "",
+      updatedAt: d.updatedAt || d.updated_at || d.updated_at_ms || 0,
+      kbLastEnrichedAt: d.kbLastEnrichedAt || 0,
     });
   });
   return out;
 }
+
+// Return a Set of product IDs that already have KB docs (i.e., previously indexed).
+// If you want to require BOTH KB and embeddings to exist before skipping, see the
+// alternative version further below.
+async function fetchAlreadyIndexedIds(storeId) {
+  const out = new Set();
+
+  // KB docs present?
+  const kbSnap = await db.collection(`kb/${storeId}/products`).select().get();
+  kbSnap.forEach((d) => out.add(d.id));
+
+  // --- Alternative (intersection with embeddings) ---
+  // const embSnap = await db.collection(`productEmbeddings/${storeId}/items`).select().get();
+  // const embIds = new Set();
+  // embSnap.forEach(d => embIds.add(d.id));
+  // return new Set([...out].filter(id => embIds.has(id)));
+
+  return out;
+}
+
 
 async function triggerEnrichment(storeId) {
   const origin = process.env.PUBLIC_BACKEND_ORIGIN || process.env.BACKEND_ORIGIN || "";
@@ -629,92 +652,138 @@ function pLimit(n) {
 (async function main() {
   console.log(`[Indexer] start mode=${MODE} store=${STORE} commit=${COMMIT} limit=${LIMIT}`);
   const t0 = Date.now();
+
   try {
     if (MODE === "bootstrap") {
       const products = await fetchProductsFromFirestore(STORE, LIMIT);
       if (!products.length) {
-        console.log(JSON.stringify({ ok: true, commit: COMMIT, processed: 0, reason: "no_products" }, null, 2));
+        console.log(JSON.stringify(
+          { ok: true, commit: COMMIT, processed: 0, reason: "no_products" },
+          null, 2
+        ));
         return;
       }
+
+      // Optional force flag (cmd: --force or env: REFINA_INDEXER_FORCE=1)
+      const FORCE = !!ARGS.force || String(process.env.REFINA_INDEXER_FORCE || "") === "1";
+
       // ── Progress: prepare status doc ─────────────────────────
       setStatusShop(STORE);
       setStatusTotal(products.length);
       setStatusDone(0);
       setStatusPhase("preparing");
-
       await writeStatus({ force: true }); // first write
+
       const limit = pLimit(MAX_CONCURRENCY);
-      let processed = 0, wrote = 0, failures = 0, llmMsSum = 0;
+      let processed = 0;
+      let wrote = 0;
+      let failures = 0;
+      let llmMsSum = 0;
+
       setStatusPhase("indexing");
       await writeStatus({ force: true }); // visible flip from preparing → indexing
+
       const reasonCounts = {};
       const failedSamples = [];
-      const tasks = products.map((p) => limit(async () => {
-        const r = await extractForProduct({ storeId: STORE, product: p });
-        llmMsSum += r.ms || 0;
-        if (!r.ok) {
-          failures++;
-          reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1;
-          if (failedSamples.length < 10) {
-            failedSamples.push({
-              id: p.id,
-              reason: r.reason,
-              raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined,
-            });
-          }
-          if (COMMIT) {
-            const base = baselineExtractFromText(productToPromptInput(p));
-            if (base.entities.length || base.specs.length) {
-              await upsertEntitiesAndLinks({
-                storeId: STORE,
-                productId: p.id,
-                extraction: { product: { id: String(p.id) }, ...base },
-                product: p,
-              });
-              await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
-              processed++; wrote++;
-              // progress: one more embedded/link write completed
-              await bumpDone(1);
-            } else {
-              processed++;
-            }
-          } else {
+
+      const tasks = products.map((p) =>
+        limit(async () => {
+          // 🔒 Inner guard: skip if product already enriched and not forced
+          const alreadyFresh =
+            p.kbLastEnrichedAt &&
+            (!p.updatedAt || p.kbLastEnrichedAt >= p.updatedAt);
+
+          if (alreadyFresh && !FORCE) {
             processed++;
+            await bumpDone(1);
+            return;
           }
-          return;
-        }
-        processed++;
-        if (COMMIT) {
-          await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value, product: p });
-          await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
-          // progress: one more embedded/link write completed
-          await bumpDone(1);
-          wrote++;
-        }
-      }));
+
+          // Only call the LLM if we actually need to process this product
+          const r = await extractForProduct({ storeId: STORE, product: p });
+          if (r && typeof r.ms === "number") llmMsSum += r.ms;
+
+          if (!r.ok) {
+            failures++;
+            reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1;
+
+            if (failedSamples.length < 10) {
+              failedSamples.push({
+                id: p.id,
+                reason: r.reason,
+                raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined,
+              });
+            }
+
+            if (COMMIT) {
+              const base = baselineExtractFromText(productToPromptInput(p));
+              if (base.entities.length || base.specs.length) {
+                await upsertEntitiesAndLinks({
+                  storeId: STORE,
+                  productId: p.id,
+                  extraction: { product: { id: String(p.id) }, ...base },
+                  product: p,
+                });
+                await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
+                wrote++;
+                processed++;
+                await bumpDone(1);
+                return;
+              }
+            }
+
+            processed++;
+            return;
+          }
+
+          processed++;
+          if (COMMIT) {
+            await upsertEntitiesAndLinks({
+              storeId: STORE,
+              productId: p.id,
+              extraction: r.value,
+              product: p,
+            });
+            await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
+            wrote++;
+            await bumpDone(1);
+          }
+        })
+      );
+
       await Promise.all(tasks);
+
       const ms = Date.now() - t0;
+
       // Ensure we mark completion with 100% if we reached total
       setStatusDone(Math.max(statusState.done, statusState.total));
       await writeStatus({ finish: true, force: true });
+
       console.log(JSON.stringify({
-        ok: true, mode: MODE, commit: COMMIT,
-        processed, wrote, failures,
+        ok: true,
+        mode: MODE,
+        commit: COMMIT,
+        processed,
+        wrote,
+        failures,
         reasons: reasonCounts,
         samples: VERBOSE ? failedSamples : undefined,
         avgLlmMs: processed ? Math.round(llmMsSum / processed) : 0,
         totalMs: ms,
       }, null, 2));
+
       if (COMMIT && wrote > 0) {
         await triggerEnrichment(STORE);
       }
     } else if (MODE === "index") {
+      // (unchanged single-product branch)
       const pid = ARGS.product || ARGS.p;
       if (!pid) throw new Error("product id required for index mode");
       const doc = await db.doc(`products/${STORE}/items/${pid}`).get();
       if (!doc.exists) throw new Error(`product not found: ${pid}`);
       const product = { id: doc.id, ...doc.data() };
-      // ── Progress for single-product index ───────────────────
+
+      // Progress for single-product index
       setStatusShop(STORE);
       setStatusTotal(1);
       setStatusDone(0);
@@ -722,6 +791,7 @@ function pLimit(n) {
       await writeStatus({ force: true });
       setStatusPhase("indexing");
       await writeStatus({ force: true });
+
       const r = await extractForProduct({ storeId: STORE, product });
       if (!r.ok) {
         const base = baselineExtractFromText(productToPromptInput(product));
@@ -735,34 +805,53 @@ function pLimit(n) {
           await upsertKbProduct({ storeId: STORE, product, extraction: base });
           await bumpDone(1);
           await writeStatus({ finish: true, force: true });
-          console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
-          process.exit(0);
+          console.log(JSON.stringify({
+            ok: true,
+            mode: MODE,
+            commit: COMMIT,
+            productId: product.id,
+            llmMs: r.ms || 0,
+            fallback: true,
+            reason: r.reason
+          }, null, 2));
+          return;
         }
-        // Keep KB in sync even when not committing entity/link writes
         await upsertKbProduct({ storeId: STORE, product, extraction: base });
-        console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
+        console.log(JSON.stringify({
+          ok: false,
+          mode: MODE,
+          reason: r.reason,
+          errors: r.errors || [],
+          llmMs: r.ms
+        }, null, 2));
         await writeStatus({ force: true, error: r.reason || "index_failed" });
         process.exit(2);
       }
+
       if (COMMIT) {
         await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value, product });
         await upsertKbProduct({ storeId: STORE, product, extraction: r.value });
         await bumpDone(1);
         await writeStatus({ finish: true, force: true });
       }
-      console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));
+
+      console.log(JSON.stringify({
+        ok: true,
+        mode: MODE,
+        commit: COMMIT,
+        productId: product.id,
+        llmMs: r.ms
+      }, null, 2));
     } else {
       throw new Error(`unknown mode: ${MODE}`);
     }
   } catch (e) {
     console.error(JSON.stringify({ ok: false, error: e?.message || String(e) }, null, 2));
-    try {
-      // best-effort: surface the error in UI
-      await writeStatus({ force: true, error: e?.message || "indexer_crash" });
-    } catch {}
+    try { await writeStatus({ force: true, error: e?.message || "indexer_crash" }); } catch {}
     process.exit(1);
   }
 })();
+
 
 // ─────────────────────────────────────────────────────────────
 // mini arg parser (no deps)
