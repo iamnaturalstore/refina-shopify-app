@@ -32,7 +32,7 @@
     "node": "^18.20 || ^20.10 || >=21.0.0"
   },
   "dependencies": {
-    "@google/generative-ai": "^<latest>",
+    "@google-cloud/vertexai": "^1.7.0",
     "@prisma/client": "^6.2.1",
     "@remix-run/fs-routes": "^2.16.1",
     "@remix-run/node": "^2.16.1",
@@ -83,7 +83,8 @@
   },
   "resolutions": {
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "raw-body": "^2.5.2"
   },
   "overrides": {
     "react": "18.3.1",
