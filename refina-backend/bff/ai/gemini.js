@@ -2,7 +2,7 @@
 // SDK-only generateContent helper using @google/generative-ai.
 // Returns model text (STRICT JSON per your prompt) or null.
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { VertexAI } from '@google-cloud/vertexai';
 
 // ─────────────────────────────────────────────────────────────
 // Env & defaults
@@ -40,7 +40,7 @@ export async function callGeminiStructured({
 } = {}) {
   if (!API_KEY) return null;
 
-  const genAI = new GoogleGenerativeAI(API_KEY);
+  const genAI = new VertexAI({ project: process.env.GCP_PROJECT, location: process.env.GCP_LOCATION });
 
   // Candidate routing (primary → fallbacks)
   const candidates = Array.from(
