@@ -685,6 +685,8 @@ const prompt2 = needWiden
         model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
         temperature: 0.3,
         topP: 0.8,
+        responseSchema: ConciergeResponseSchema, // <-- restore schema so validator passes
+        // following notes now ignored.
         // Note: We no longer pass responseSchema here.
         // Our gemini.js file handles the JSON mode for us.
       });
