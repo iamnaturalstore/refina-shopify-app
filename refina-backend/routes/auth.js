@@ -240,6 +240,18 @@ router.get("/callback", async (req, res) => {
       }
     })();
 
+    // --- fire-and-forget: kick importer + indexer after OAuth ---
+try {
+  const url = new URL("/api/backfill/queue", baseUrl(req));
+  url.searchParams.set("shop", shop);
+  fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "" },
+    keepalive: true,
+  }).catch(() => {});
+} catch {}
+
+
     // Redirect to embedded Admin app
     const adminUrl = new URL(`/store/${store}/apps/${process.env.SHOPIFY_APP_HANDLE || "refina"}`, "https://admin.shopify.com");
     return res.redirect(302, adminUrl.toString());

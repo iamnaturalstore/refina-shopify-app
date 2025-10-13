@@ -14,29 +14,49 @@ import { toMyshopifyDomain } from "../utils/resolveStore.js";
 
 /** Shape a minimal product doc for Firestore (subcollection). */
 function productShapeFromShopify(raw, shop) {
-  const price = Number(raw?.variants?.[0]?.price ?? NaN);
-  const image = raw?.image?.src || raw?.images?.[0]?.src || "";
-  const tags = String(raw?.tags || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  // Accept REST and GraphQL shapes
+const price = (() => {
+  // REST: variants[0].price
+  const rest = raw?.variants?.[0]?.price;
+  // GQL: variants.nodes[0].price.amount   ⟵ your query uses nodes, not edges
+  const gql = raw?.variants?.nodes?.[0]?.price?.amount;
+  const v = rest ?? gql;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+})();
 
-  return {
-    id: String(raw.id),
-    storeId: shop, // full <shop>.myshopify.com
-    name: raw.title || "",
-    title: raw.title || "",
-    description: raw.body_html || "",
-    tags,
-    productType: raw.product_type || "",
-    category: raw.product_type || "",
-    ingredients: [], // filled by later enrichment
-    image,
-    price: Number.isFinite(price) ? price : null,
-    handle: raw.handle || "",
-    link: raw.handle ? `/products/${raw.handle}` : "#",
-    updatedAt: FieldValue.serverTimestamp(),
-  };
+const image =
+  // REST
+  raw?.image?.src || raw?.images?.[0]?.src ||
+  // GQL (your query: images { nodes { url } })
+  raw?.featuredImage?.url || raw?.images?.nodes?.[0]?.url || "";
+
+const tags = String(raw?.tags || "")
+  .split(",")
+  .map((t) => t.trim())
+  .filter(Boolean);
+
+return {
+  id: String(
+    typeof raw.id === "string" && raw.id.startsWith("gid://")
+      ? raw.id.split("/").pop()
+      : raw.id
+  ),
+  storeId: shop, // full <shop>.myshopify.com
+  name: raw.title || "",
+  title: raw.title || "",
+  description: raw.body_html || raw.bodyHtml || "",
+  tags,
+  // Accept both REST and GQL for product type
+  productType: raw.product_type || raw.productType || "",
+  category: raw.product_type || raw.productType || "",
+  ingredients: [], // filled by later enrichment
+  image,
+  price, // already null-or-number from the IIFE above
+  handle: raw.handle || "",
+  link: raw.handle ? `/products/${raw.handle}` : "#",
+  updatedAt: FieldValue.serverTimestamp(),
+};
 }
 
 /** Load OFFLINE session token (SDK-shape compatible). */
@@ -83,9 +103,10 @@ async function* iterateProductsGraphQL(session) {
             productType
             tags
             bodyHtml
+            featuredImage { url }
             images(first: 10) { nodes { url } }
             variants(first: 100) {
-              nodes { id title price }
+              nodes { id title price { amount currencyCode } }
               pageInfo { hasNextPage endCursor }
             }
           }
