@@ -313,23 +313,26 @@ async function deterministicFallback(guard) {
   const enriched = await loadProductsByIds(storeId, outIds);
 
   const products = enriched.map((p) => {
-    const title = p.title || p.name || "";
-    const price = p.price != null ? p.price : undefined;
-    const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-    let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-    if (!urlCandidate && p.path) urlCandidate = p.path;
-    const url = ensureAbsolute(urlCandidate, storeId);
-    const image = pickPrimaryImage(p, storeId);
-    return {
-      id: p.id,
-      title,
-      price,
-      ...(price_formatted ? { price_formatted } : {}),
-      image,
-      image_url: image,
-      url,
-    };
-  });
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  const description = p.description || p.body_html || ""; // NEW
+  return {
+    id: p.id,
+    title,
+    price,
+    ...(price_formatted ? { price_formatted } : {}),
+    image,
+    image_url: image,
+    url,
+    description, // NEW
+  };
+});
+
 
   return res.json({
     productIds: outIds,
@@ -714,23 +717,25 @@ const prompt2 = needWiden
       const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
       const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
       const products = enrichedFallback.map((p) => {
-        const title = p.title || p.name || "";
-        const price = p.price != null ? p.price : undefined;
-        const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-        let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-        if (!urlCandidate && p.path) urlCandidate = p.path;
-        const url = ensureAbsolute(urlCandidate, storeId);
-        const image = pickPrimaryImage(p, storeId);
-        return {
-          id: p.id,
-          title,
-          price,
-          ...(price_formatted ? { price_formatted } : {}),
-          image,
-          image_url: image,
-          url,
-        };
-      });
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  const description = p.description || p.body_html || ""; // NEW
+  return {
+    id: p.id,
+    title,
+    price,
+    ...(price_formatted ? { price_formatted } : {}),
+    image,
+    image_url: image,
+    url,
+    description, // NEW
+  };
+});
       return res.json({
   productIds: fallbackIds,
   products,
@@ -763,23 +768,25 @@ const prompt2 = needWiden
     // Enrich product docs for UI
     const enrichedDocs = await loadProductsByIds(storeId, outIds);
     const products = enrichedDocs.map((p) => {
-      const title = p.title || p.name || "";
-      const price = p.price != null ? p.price : undefined;
-      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-      if (!urlCandidate && p.path) urlCandidate = p.path;
-      const url = ensureAbsolute(urlCandidate, storeId);
-      const image = pickPrimaryImage(p, storeId);
-      return {
-        id: p.id,
-        title,
-        price,
-        ...(price_formatted ? { price_formatted } : {}),
-        image,
-        image_url: image,
-        url,
-      };
-    });
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  const description = p.description || p.body_html || ""; // NEW
+  return {
+    id: p.id,
+    title,
+    price,
+    ...(price_formatted ? { price_formatted } : {}),
+    image,
+    image_url: image,
+    url,
+    description, // NEW
+  };
+});
 
     // Build reasonsById for the widget (from awesome.primary/alternatives)
     const reasonsById = {};
