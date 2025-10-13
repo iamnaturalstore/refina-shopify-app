@@ -21,6 +21,28 @@ const MODEL_FALLBACKS = [
   "gemini-2.0-flash",
 ];
 
+// Vertex client (indexer only; recommend stays on Studio)
+const vertex = new VertexAI({
+  project: process.env.GCP_PROJECT,
+  location: process.env.GCP_LOCATION,
+});
+
+// Minimal Vertex-backed helper for indexer (matches your current call shape)
+export async function callGeminiIndex(prompt, cfg = {}) {
+  const modelId = (cfg.model || MODEL_PRIMARY);
+  const model = vertex.getGenerativeModel({ model: modelId });
+  const resp = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
+    generationConfig: {
+      temperature: cfg.temperature ?? 0,
+      topP: cfg.topP ?? 0.3,
+      maxOutputTokens: cfg.maxOutputTokens ?? 1024,
+    },
+    responseMimeType: "application/json",
+  });
+  return resp;
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -42,8 +64,6 @@ export async function callGeminiStructured({
   if (!API_KEY) return null;
 
   const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-  const vertex = new VertexAI({ project: process.env.GCP_PROJECT, location: process.env.GCP_LOCATION });
-
 
   // Candidate routing (primary → fallbacks)
   const candidates = Array.from(
@@ -131,12 +151,5 @@ export function callGemini(prompt, cfg = {}) {
     system: cfg?.system,
   });
 }
-
-// 2) Export two tiny helpers so callers don’t change
-export const getStudioModel = (modelId) =>
-  studio.getGenerativeModel({ model: modelId });
-
-export const getVertexModel = (modelId) =>
-  vertex.getGenerativeModel({ model: modelId });
 
 export default { callGeminiStructured, callGemini };

@@ -6,7 +6,7 @@
 //   index:     node workers/indexer.mjs index --store <storeId> --product <productId> [--commit]
 
 import { db, nowTs } from "../bff/lib/firestore.js";
-import { callGemini } from "../bff/ai/gemini.js";
+import { callGeminiIndex as callGemini } from "../bff/ai/gemini.js";
 import { buildExtractEntitiesPrompt } from "../ai/prompts/extractEntities.js";
 import { validateExtractionOutput } from "../ai/jsonSchemas.js";
 // NEW: EO denylist for the product-level EO flag
