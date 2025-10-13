@@ -38,6 +38,7 @@ import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 
 // Product Indexing on Install
 import mountBackfillRoutes from './routes/backfill.js';
+import enrichmentRouter from './routes/enrichment.js';
 
 // ─────────────────────────────────────────────────────────────
 // Config
@@ -410,6 +411,7 @@ app.use(
 // Index on Install 
 mountBackfillRoutes(app);
 console.log("[backfill] mounted admin+queue routes");
+app.use('/api/admin/enrichment', enrichmentRouter);
 
 // Minimal CSP for pages that Shopify iframes (Admin UI)
 const setAdminCsp = (_req, res, next) => {
