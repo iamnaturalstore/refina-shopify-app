@@ -26,6 +26,31 @@ function formatPrice(val) {
   return `$${n.toFixed(2)}`;
 }
 
+// --- SAFE catalog HTML sanitizer (UI-only) ---
+function sanitizeCatalogHtml(html = "") {
+  try {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = String(html);
+    tmp.querySelectorAll("script, style, iframe, object, embed, link").forEach(n => n.remove());
+    tmp.querySelectorAll("*").forEach(el => {
+      [...el.attributes].forEach(attr => {
+        const name = attr.name.toLowerCase();
+        const val = String(attr.value || "");
+        if (name.startsWith("on")) el.removeAttribute(attr.name);
+        if (name === "href" || name === "src") {
+          const lower = val.trim().toLowerCase();
+          if (lower.startsWith("javascript:") || lower.startsWith("data:text/html")) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+    });
+    return tmp.innerHTML;
+  } catch {
+    return "";
+  }
+}
+
 // New helper hook to read settings from URL parameters
 function useUrlSettings() {
   const [settings, setSettings] = useState({});
@@ -110,6 +135,7 @@ export default function CustomerRecommender() {
   const [matchedProducts, setMatchedProducts] = useState([]);
   const [copy, setCopy] = useState({ why: "", rationale: "", extras: "" });
   const [reasonsById, setReasonsById] = useState({});
+  const [catalogHtmlById, setCatalogHtmlById] = useState({});
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
@@ -153,6 +179,44 @@ export default function CustomerRecommender() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+  let cancelled = false;
+  (async () => {
+    if (!matchedProducts || matchedProducts.length === 0) {
+      if (!cancelled) setCatalogHtmlById({});
+      return;
+    }
+    try {
+      const ids = matchedProducts.map(p => String(p.id || "")).filter(Boolean);
+      const haveAll = ids.every(id => catalogHtmlById[id]);
+      if (haveAll) return;
+
+      const r = await fetch(`${API_PREFIX}/products?ids=${encodeURIComponent(ids.join(","))}`);
+      if (!r.ok) return;
+
+      const j = await r.json();
+      const list = Array.isArray(j?.products) ? j.products : [];
+
+      const next = {};
+      for (const p of list) {
+        const id = String(p.id || "");
+        if (!id) continue;
+        const raw = p.description || p.body_html || p.bodyHtml || "";
+        if (raw) next[id] = sanitizeCatalogHtml(raw);
+      }
+      if (!cancelled && Object.keys(next).length) {
+        setCatalogHtmlById(prev => ({ ...prev, ...next }));
+      }
+    } catch {
+      // best-effort only
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
+}, [matchedProducts]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const handleRecommend = useCallback(
     async (nextConcern) => {
@@ -391,13 +455,26 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
               style={{ marginTop: 12 }}
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-              {reasonsById?.[selectedProduct.id] ? (
-                <p>{reasonsById[selectedProduct.id]}</p>
-              ) : (
-                <p>{teaserFromHtml(selectedProduct.description || "") || "A solid match for your request."}</p>
-              )}
-              {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null}
-            </div>
+  {catalogHtmlById[selectedProduct.id] ? (
+    <div
+      style={{ marginBottom: 8 }}
+      dangerouslySetInnerHTML={{ __html: catalogHtmlById[selectedProduct.id] }}
+    />
+  ) : (
+    <>
+      {reasonsById?.[selectedProduct.id] ? (
+        <p>{reasonsById[selectedProduct.id]}</p>
+      ) : (
+        <p>
+          {teaserFromHtml(selectedProduct.description || "") ||
+            "A solid match for your request."}
+        </p>
+      )}
+    </>
+  )}
+  {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null}
+</div>
+
             <a
               href={selectedProduct.url || selectedProduct.link || "#"}
               target="_blank"
