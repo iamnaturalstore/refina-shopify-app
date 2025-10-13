@@ -51,19 +51,23 @@ function sanitizeCatalogHtml(html = "") {
   }
 }
 
-// Return only the first N <p>/<ul>/<ol> blocks from sanitized catalog HTML.
-function firstParagraphs(html = "", n = 2) {
+// Keep only the first N paragraph/list blocks; fallback to ~200 words if needed.
+function firstParagraphsOrWords(html = "", n = 2, wordCap = 200) {
   try {
     const tmp = document.createElement("div");
-    tmp.innerHTML = html; // already sanitized upstream
+    tmp.innerHTML = html; // already sanitized
     const blocks = [...tmp.querySelectorAll("p, ul, ol")].slice(0, n);
-    const out = document.createElement("div");
-    blocks.forEach(b => out.appendChild(b.cloneNode(true)));
-    return out.innerHTML || html; // fallback to full if no clear blocks
-  } catch {
-    return html;
-  }
+    if (blocks.length) {
+      const out = document.createElement("div");
+      blocks.forEach(b => out.appendChild(b.cloneNode(true)));
+      return out.innerHTML;
+    }
+  } catch {}
+  const text = String(html).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const words = text.split(" ");
+  return words.length <= wordCap ? text : words.slice(0, wordCap).join(" ") + "…";
 }
+
 
 
 // New helper hook to read settings from URL parameters
@@ -150,7 +154,6 @@ export default function CustomerRecommender() {
   const [matchedProducts, setMatchedProducts] = useState([]);
   const [copy, setCopy] = useState({ why: "", rationale: "", extras: "" });
   const [reasonsById, setReasonsById] = useState({});
-  const [catalogHtmlById, setCatalogHtmlById] = useState({});
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
@@ -194,43 +197,6 @@ export default function CustomerRecommender() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    if (!matchedProducts || matchedProducts.length === 0) {
-      if (!cancelled) setCatalogHtmlById({});
-      return;
-    }
-    try {
-      const ids = matchedProducts.map(p => String(p.id || "")).filter(Boolean);
-      const haveAll = ids.every(id => catalogHtmlById[id]);
-      if (haveAll) return;
-
-      const r = await fetch(`${API_PREFIX}/products?ids=${encodeURIComponent(ids.join(","))}`);
-      if (!r.ok) return;
-
-      const j = await r.json();
-      const list = Array.isArray(j?.products) ? j.products : [];
-
-      const next = {};
-      for (const p of list) {
-        const id = String(p.id || "");
-        if (!id) continue;
-        const raw = p.description || p.body_html || p.bodyHtml || "";
-        if (raw) next[id] = sanitizeCatalogHtml(raw);
-      }
-      if (!cancelled && Object.keys(next).length) {
-        setCatalogHtmlById(prev => ({ ...prev, ...next }));
-      }
-    } catch {
-      // best-effort only
-    }
-  })();
-  return () => {
-    cancelled = true;
-  };
-}, [matchedProducts]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const handleRecommend = useCallback(
@@ -470,23 +436,39 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
               style={{ marginTop: 12 }}
             />
             <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-  {catalogHtmlById[selectedProduct.id] ? (
-    <div
-      style={{ marginBottom: 8 }}
-      // show only the first two paragraphs/lists from the catalog description
-      dangerouslySetInnerHTML={{
-        __html: firstParagraphs(catalogHtmlById[selectedProduct.id], 2)
-      }}
-    />
-  ) : (
-    // if catalog hasn't arrived yet, show a safe teaser from the product itself
-    <p>
-      {teaserFromHtml(selectedProduct.description || "") ||
-        "A solid match for your request."}
-    </p>
-  )}
+  {(() => {
+    const raw =
+      (selectedProduct && (
+        selectedProduct.description ||
+        selectedProduct.body_html ||
+        selectedProduct.bodyHtml ||
+        selectedProduct.body ||
+        ""
+      )) || "";
+
+    const safe = sanitizeCatalogHtml(raw);
+    const short = firstParagraphsOrWords(safe, 2, 200);
+
+    if (!short || short.trim() === "") {
+      return (
+        <p>
+          {teaserFromHtml(selectedProduct?.description || "") ||
+            "A solid match for your request."}
+        </p>
+      );
+    }
+
+    return (
+      <div
+        style={{ marginBottom: 8 }}
+        dangerouslySetInnerHTML={{ __html: short }}
+      />
+    );
+  })()}
+
   {/* No LLM reasons or extras in the modal */}
 </div>
+
 
 
             <a
