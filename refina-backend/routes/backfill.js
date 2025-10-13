@@ -19,7 +19,7 @@ const price = (() => {
   // REST: variants[0].price
   const rest = raw?.variants?.[0]?.price;
   // GQL: variants.nodes[0].price.amount   ⟵ your query uses nodes, not edges
-  const gql = raw?.variants?.nodes?.[0]?.price?.amount;
+  const gql = raw?.variants?.nodes?.[0]?.price;
   const v = rest ?? gql;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -114,7 +114,7 @@ const client = new GraphqlClass({ session });
             featuredImage { url }
             images(first: 10) { nodes { url } }
             variants(first: 100) {
-              nodes { id title price { amount currencyCode } }
+              nodes { id title price }
               pageInfo { hasNextPage endCursor }
             }
           }
