@@ -89,7 +89,15 @@ async function loadOfflineSession(shop) {
 
 /** Iterate all products via GraphQL with cursor paging. */
 async function* iterateProductsGraphQL(session) {
-  const client = new shopify.api.clients.Graphql({ session });
+  const GraphqlClass =
+  (shopify.clients && shopify.clients.Graphql) ||
+  (shopify.api && shopify.api.clients && shopify.api.clients.Graphql);
+
+if (!GraphqlClass) {
+  throw new Error("Shopify GraphQL client not available");
+}
+
+const client = new GraphqlClass({ session });
   let cursor = null;
   for (;;) {
     const query = `
