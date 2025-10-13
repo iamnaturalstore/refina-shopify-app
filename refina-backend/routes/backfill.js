@@ -63,6 +63,100 @@ async function loadOfflineSession(shop) {
   return null;
 }
 
+// ───────────────────────────────────────────────────────────
+// GraphQL helpers (Admin API) — keeps Firestore schema unchanged
+// ───────────────────────────────────────────────────────────
+
+/** Iterate all products via GraphQL with cursor paging. */
+async function* iterateProductsGraphQL(session) {
+  const client = new shopify.api.clients.Graphql({ session });
+  let cursor = null;
+  for (;;) {
+    const query = `
+      query Products($after: String) {
+        products(first: 250, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id
+            title
+            handle
+            productType
+            tags
+            bodyHtml
+            images(first: 10) { nodes { url } }
+            variants(first: 100) {
+              nodes { id title price }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }
+    `;
+    const resp = await client.query({ data: { query, variables: { after: cursor } } });
+    const data = resp.body?.data?.products;
+    if (!data) break;
+
+    for (const node of data.nodes || []) {
+      yield { node, client };
+    }
+
+    if (!data.pageInfo?.hasNextPage) break;
+    cursor = data.pageInfo.endCursor;
+  }
+}
+
+/** If a product has >100 variants, page the rest. Returns an array of {id,title,price}. */
+async function fetchAllVariantsGraphQL(client, productGid, firstPage) {
+  const out = [...(firstPage?.nodes || [])];
+  let cursor = firstPage?.pageInfo?.endCursor || null;
+  let hasNext = !!firstPage?.pageInfo?.hasNextPage;
+
+  while (hasNext) {
+    const q = `
+      query Variants($id: ID!, $after: String) {
+        product(id: $id) {
+          variants(first: 100, after: $after) {
+            nodes { id title price }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    `;
+    const r = await client.query({ data: { query: q, variables: { id: productGid, after: cursor } } });
+    const v = r.body?.data?.product?.variants;
+    if (!v) break;
+    out.push(...(v.nodes || []));
+    hasNext = !!v.pageInfo?.hasNextPage;
+    cursor = v.pageInfo?.endCursor || null;
+  }
+
+  return out;
+}
+
+/** Map a GraphQL product node → "REST-ish" shape expected by productShapeFromShopify */
+function restishFromGraphQLProduct(node, allVariantNodes) {
+  const prodId = String(node.id).replace(/^gid:\/\/shopify\/Product\//, "");
+  const variants = (allVariantNodes || []).map((v) => ({
+    id: String(v.id).replace(/^gid:\/\/shopify\/ProductVariant\//, ""),
+    title: v.title || "",
+    price: v.price, // coerced downstream by productShapeFromShopify
+  }));
+  const images = (node.images?.nodes || []).map((n) => ({ src: n?.url || "" }));
+  const image = images[0] || { src: "" };
+
+  return {
+    id: prodId,
+    title: node.title || "",
+    body_html: node.bodyHtml || "",
+    product_type: node.productType || "",
+    handle: node.handle || "",
+    tags: Array.isArray(node.tags) ? node.tags.join(", ") : String(node.tags || ""),
+    images,
+    image,
+    variants,
+  };
+}
+
 export default function mountBackfillRoutes(app) {
   // ───────────────────────────────────────────────────────────
   // Shared admin guard
@@ -83,7 +177,7 @@ export default function mountBackfillRoutes(app) {
   /**
    * POST /api/admin/backfill-products?shop=<full-domain>
    * Body (optional): { shop: "<full-domain>" }
-   * Uses the OFFLINE session to fetch products via REST and upsert into:
+   * Uses the OFFLINE session to fetch products and upsert into:
    *   products/<shop>/items/<id>
    */
   adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
@@ -101,57 +195,97 @@ export default function mountBackfillRoutes(app) {
         return res.status(401).json({ ok: false, error: "no_offline_session" });
       }
 
-      const apiVersion = shopify.config.apiVersion;
-      let url = `https://${shop}/admin/api/${apiVersion}/products.json?limit=250&fields=id,title,body_html,product_type,handle,tags,images,image,variants`;
+      const mode = String(process.env.SHFY_FETCH_MODE || "rest").toLowerCase();
       let total = 0;
       let pages = 0;
 
-      while (url) {
-        const resp = await fetch(url, {
-          headers: {
-            "X-Shopify-Access-Token": session.accessToken,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-        });
+      if (mode === "gql") {
+        // ── GraphQL path (cursor paging), preserving Firestore schema ──
+        const batchSize = 250;
+        let inBatch = 0;
+        let batch = dbAdmin.batch();
 
-        if (!resp.ok) {
-          return res.status(502).json({ ok: false, error: `shopify_${resp.status}` });
-        }
+        for await (const { node, client } of iterateProductsGraphQL(session)) {
+          // Collect all variants (page if >100)
+          const firstPage = node.variants || { nodes: [], pageInfo: { hasNextPage: false } };
+          const variantNodes = await fetchAllVariantsGraphQL(client, node.id, firstPage);
 
-        const data = await resp.json();
-        const products = Array.isArray(data?.products) ? data.products : [];
+          // Map to REST-ish, then to Firestore doc via existing shaper
+          const restish = restishFromGraphQLProduct(node, variantNodes);
+          const doc = productShapeFromShopify(restish, shop);
 
-        if (products.length) {
-          const batch = dbAdmin.batch();
-          for (const raw of products) {
-            const doc = productShapeFromShopify(raw, shop);
-            const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
-            batch.set(ref, doc, { merge: true });
+          // Write batched (commit every 250)
+          const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
+          batch.set(ref, doc, { merge: true });
+          inBatch += 1;
+          total += 1;
+
+          if (inBatch >= batchSize) {
+            await batch.commit();
+            pages += 1;
+            batch = dbAdmin.batch();
+            inBatch = 0;
           }
+        }
+        // flush any residue
+        if (inBatch > 0) {
           await batch.commit();
+          pages += 1;
         }
 
-        total += products.length;
-        pages += 1;
+        return res.json({ ok: true, shop, synced: total, pages });
+      } else {
+        // ── Original REST path (unchanged for rollback) ──
+        const apiVersion = shopify.config.apiVersion;
+        let url = `https://${shop}/admin/api/${apiVersion}/products.json?limit=250&fields=id,title,body_html,product_type,handle,tags,images,image,variants`;
 
-        // Pagination via Link header (RFC5988)
-        const link = resp.headers.get("link") || resp.headers.get("Link");
-        let nextUrl = null;
-        if (link) {
-          const nextPart = link
-            .split(",")
-            .map((s) => s.trim())
-            .find((s) => /rel="?next"?/i.test(s));
-          if (nextPart) {
-            const m = nextPart.match(/<([^>]+)>/);
-            if (m?.[1]) nextUrl = m[1];
+        while (url) {
+          const resp = await fetch(url, {
+            headers: {
+              "X-Shopify-Access-Token": session.accessToken,
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+          });
+
+          if (!resp.ok) {
+            return res.status(502).json({ ok: false, error: `shopify_${resp.status}` });
           }
-        }
-        url = nextUrl;
-      }
 
-      return res.json({ ok: true, shop, synced: total, pages });
+          const data = await resp.json();
+          const products = Array.isArray(data?.products) ? data.products : [];
+
+          if (products.length) {
+            const batch = dbAdmin.batch();
+            for (const raw of products) {
+              const doc = productShapeFromShopify(raw, shop);
+              const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
+              batch.set(ref, doc, { merge: true });
+            }
+            await batch.commit();
+          }
+
+          total += products.length;
+          pages += 1;
+
+          // Pagination via Link header (RFC5988)
+          const link = resp.headers.get("link") || resp.headers.get("Link");
+          let nextUrl = null;
+          if (link) {
+            const nextPart = link
+              .split(",")
+              .map((s) => s.trim())
+              .find((s) => /rel="?next"?/i.test(s));
+            if (nextPart) {
+              const m = nextPart.match(/<([^>]+)>/);
+              if (m?.[1]) nextUrl = m[1];
+            }
+          }
+          url = nextUrl;
+        }
+
+        return res.json({ ok: true, shop, synced: total, pages });
+      }
     } catch (e) {
       console.error("backfill error:", e);
       return res.status(500).json({ ok: false, error: "backfill_failed" });
@@ -264,7 +398,7 @@ export default function mountBackfillRoutes(app) {
     }
   });
 
-    // ───────────────────────────────────────────────────────────
+  // ───────────────────────────────────────────────────────────
   // READ-ONLY: /api/indexer/status?shop=<full-domain>&fresh=1
   // Returns normalized shape for the Admin UI progress panel.
   // Auth: none (read-only progress).
@@ -305,7 +439,6 @@ export default function mountBackfillRoutes(app) {
       return res.status(500).json({ ok: false, error: "status_read_failed" });
     }
   });
-
 
   app.use("/api/backfill", queueRouter);
 }
