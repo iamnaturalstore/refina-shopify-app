@@ -51,6 +51,21 @@ function sanitizeCatalogHtml(html = "") {
   }
 }
 
+// Return only the first N <p>/<ul>/<ol> blocks from sanitized catalog HTML.
+function firstParagraphs(html = "", n = 2) {
+  try {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html; // already sanitized upstream
+    const blocks = [...tmp.querySelectorAll("p, ul, ol")].slice(0, n);
+    const out = document.createElement("div");
+    blocks.forEach(b => out.appendChild(b.cloneNode(true)));
+    return out.innerHTML || html; // fallback to full if no clear blocks
+  } catch {
+    return html;
+  }
+}
+
+
 // New helper hook to read settings from URL parameters
 function useUrlSettings() {
   const [settings, setSettings] = useState({});
@@ -458,22 +473,21 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
   {catalogHtmlById[selectedProduct.id] ? (
     <div
       style={{ marginBottom: 8 }}
-      dangerouslySetInnerHTML={{ __html: catalogHtmlById[selectedProduct.id] }}
+      // show only the first two paragraphs/lists from the catalog description
+      dangerouslySetInnerHTML={{
+        __html: firstParagraphs(catalogHtmlById[selectedProduct.id], 2)
+      }}
     />
   ) : (
-    <>
-      {reasonsById?.[selectedProduct.id] ? (
-        <p>{reasonsById[selectedProduct.id]}</p>
-      ) : (
-        <p>
-          {teaserFromHtml(selectedProduct.description || "") ||
-            "A solid match for your request."}
-        </p>
-      )}
-    </>
+    // if catalog hasn't arrived yet, show a safe teaser from the product itself
+    <p>
+      {teaserFromHtml(selectedProduct.description || "") ||
+        "A solid match for your request."}
+    </p>
   )}
-  {copy.extras ? <p style={{ opacity: 0.85 }}>{copy.extras}</p> : null}
+  {/* No LLM reasons or extras in the modal */}
 </div>
+
 
             <a
               href={selectedProduct.url || selectedProduct.link || "#"}
