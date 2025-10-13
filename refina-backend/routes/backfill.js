@@ -396,7 +396,7 @@ export default function mountBackfillRoutes(app) {
       try {
         const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
         const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
-        const enrichUrl = `${scheme}://${host}/api/admin/enrichment/run`;
+        const enrichUrl = `${scheme}://${host}/admin/enrichment/run`;
         // Do not await — let it run in the background
         fetch(enrichUrl, {
           method: "POST",
