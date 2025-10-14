@@ -391,9 +391,9 @@ function deriveKbFromExtraction(product, extraction) {
   const getByType = (t) =>
     ents
       .filter((e) => String(e.type || "").toLowerCase().includes(t))
-      .map((e) => e.name)
+      .map((e) => e.name) // CORRECTED
       .filter(Boolean);
-
+  
   // Separate ingredients / benefits / concerns when possible
   const ingredients = uniq(getByType("ingredient")).slice(0, 48);
   const benefits = uniq(
@@ -406,14 +406,13 @@ function deriveKbFromExtraction(product, extraction) {
       .concat(getByType("condition"))
       .concat(getByType("issue"))
   ).slice(0, 32);
-
   const tags = Array.isArray(product.tags)
     ? product.tags
     : typeof product.tags === "string"
       ? product.tags.split(",").map((s) => s.trim())
       : [];
 
-  const keywords = uniq([...tags.slice(0, 16), ...ents.map((e) => e.name)]).slice(0, 32);
+  const keywords = uniq([...tags.slice(0, 16), ...ents.map((e) => e.name)]).slice(0, 32); // CORRECTED
   const productType = product.productType || "";
   const productType_norm =
     product.productType_norm || product.productTypeNormalized || productType.toLowerCase();
