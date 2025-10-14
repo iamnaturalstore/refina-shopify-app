@@ -575,7 +575,6 @@ async function extractForProduct({ storeId, product }) {
     }
     let parsed;
     try { 
-      console.log("--- RAW GEMINI OUTPUT ---:\n", text, "\n--- END RAW ---");
       parsed = extractJson(text); }
     catch { return { ok: false, reason: "invalid_json", ms: Date.now() - started, raw: String(text || "").slice(0, 400) }; }
     const v = validateExtractionOutput(parsed);

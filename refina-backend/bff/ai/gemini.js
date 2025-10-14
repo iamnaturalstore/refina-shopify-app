@@ -48,23 +48,41 @@ function shimTextAccessor(resp) {
 }
 
 // Minimal Vertex-backed helper for indexer (matches your current call shape)
+// Replace the existing callGeminiIndex function with this one
+
 export async function callGeminiIndex(prompt, cfg = {}) {
   const modelId = (cfg.model || INDEXER_MODEL);
   const model = vertex.getGenerativeModel({ model: modelId });
-  const resp = await model.generateContent({
-    contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
-    // IMPORTANT: for Vertex, JSON mode belongs in generationConfig
-    generationConfig: {
-      temperature: cfg.temperature ?? 0,
-      topP: cfg.topP ?? 0.3,
-      // widened default headroom for structured JSON
-      maxOutputTokens: cfg.maxOutputTokens ?? 2048,
-      responseMimeType: cfg.responseMimeType ?? "application/json",
-      ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
-    },
-  });
-  // Make Vertex responses look like Studio for callers that use response.text()
-  return shimTextAccessor(resp);
+  const tStart = Date.now();
+  
+  try {
+    const resp = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
+      generationConfig: {
+        temperature: cfg.temperature ?? 0,
+        topP: cfg.topP ?? 0.3,
+        maxOutputTokens: cfg.maxOutputTokens ?? 2048,
+        responseMimeType: cfg.responseMimeType ?? "application/json",
+        ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
+      },
+    });
+
+    console.warn(`[Vertex AI] ${modelId} ok in ${Date.now() - tStart}ms`);
+
+    // --- THIS IS THE FIX ---
+    // Extract the text from the Vertex AI response and return ONLY the string.
+    const text = resp?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof text === 'string' && text.trim()) {
+      return text.trim();
+    }
+    
+    // If we get here, the response was empty or malformed
+    return null;
+
+  } catch (err) {
+    console.error(`[Vertex AI] ${modelId} failed:`, err.message);
+    return null;
+  }
 }
 
 function sleep(ms) {
