@@ -104,12 +104,12 @@ const TINY_SCHEMA = {
 // ─────────────────────────────────────────────────────────────
 const MAX_CONCURRENCY = Number(process.env.REFINA_INDEXER_CONCURRENCY || 6);
 const GENCFG = {
-  temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0),
-  topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.3),
-  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 1024),
-  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",
+  temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0.2),
+  topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.8),
+  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 2048),
+  model: process.env.REFINA_INDEXER_MODEL || "gemini-1.5-flash-001",
 };
-const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 14000);
+const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 30000);
 const BATCH_SIZE = 400;
 
 // ─────────────────────────────────────────────────────────────

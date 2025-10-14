@@ -54,6 +54,10 @@ export async function callGeminiIndex(prompt, cfg = {}) {
   const modelId = (cfg.model || INDEXER_MODEL);
   const model = vertex.getGenerativeModel({ model: modelId });
   const tStart = Date.now();
+
+  try {
+    // --- CHANGE: Default timeout is now 30000ms ---
+    const timeoutMs = cfg.timeoutMs || 30000;
   
   try {
     const resp = await model.generateContent({
@@ -65,7 +69,8 @@ export async function callGeminiIndex(prompt, cfg = {}) {
         responseMimeType: cfg.responseMimeType ?? "application/json",
         ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
       },
-    });
+    },
+    { timeout: timeoutMs });
 
     console.warn(`[Vertex AI] ${modelId} ok in ${Date.now() - tStart}ms`);
 
