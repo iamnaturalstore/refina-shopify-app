@@ -33,6 +33,8 @@ For each entity, also provide:
 
 Rules:
 - Do not invent. Only extract what is directly suggested by the text/specs/tags.
+- For 'evidence', find the most descriptive sentences that prove the entity exists.
+- For 'fact', provide a rich, insightful sentence that adds value.
 - Keep facts non-technical and safe (no dosages/medical promises unless the text states them).
 - Keep everything concise; trim long wording.
 - If nothing is present, return empty arrays.
@@ -47,16 +49,19 @@ EXPECTED JSON SCHEMA:
     {
       "name": "Hyaluronic Acid",
       "type": "ingredient",
-      "synonyms": ["HA","sodium hyaluronate"],
-      "evidence": ["short snippet 1","short snippet 2"],
-      "fact": "Humectant that draws and holds water.",
-      "cautions": "Layer under a moisturiser."
+      "synonyms": ["HA", "sodium hyaluronate"],
+      "evidence": [
+        "Formulated with multi-molecular weight Hyaluronic Acid to hydrate multiple layers of the skin.",
+        "Our serum draws and holds water for long-lasting hydration."
+      ],
+      "fact": "A powerful humectant that can hold up to 1000 times its weight in water, making it exceptional for moisturizing and plumping the skin.",
+      "cautions": "Most effective when applied to damp skin."
     }
   ],
   "specs": [
-    { "name": "battery", "value": 504, "unit": "Wh" }
+    { "name": "pH", "value": 5.5 }
   ],
-  "flags": ["vegan","fragrance-free"]
+  "flags": ["vegan", "fragrance-free"]
 }
 `.trim();
 }
