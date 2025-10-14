@@ -61,6 +61,7 @@ const MIN_SCHEMA = {
           name: { type: "STRING" },
           type: { type: "STRING" },
           synonyms: { type: "ARRAY", items: { type: "STRING" } },
+          evidence: { type: "ARRAY", items: { type: "STRING" } }, // <-- THE FIX
           fact: { type: "STRING" },
           cautions: { type: "STRING" },
         },
@@ -86,17 +87,41 @@ const MIN_SCHEMA = {
 const TINY_SCHEMA = {
   type: "OBJECT",
   properties: {
-    product: { type: "OBJECT", properties: { id: { type: "STRING" } }, required: ["id"] },
+    product: {
+      type: "OBJECT",
+      properties: { id: { type: "STRING" } },
+      required: ["id"],
+    },
     entities: {
       type: "ARRAY",
       items: {
         type: "OBJECT",
-        properties: { name: { type: "STRING" }, type: { type: "STRING" } },
+        properties: {
+          name: { type: "STRING" },
+          type: { type: "STRING" },
+          synonyms: { type: "ARRAY", items: { type: "STRING" } },
+          evidence: { type: "ARRAY", items: { type: "STRING" } }, // <-- THE FIX
+          fact: { type: "STRING" },
+          cautions: { type: "STRING" },
+        },
         required: ["name", "type"],
       },
     },
+    specs: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          value: { type: "NUMBER" },
+          unit: { type: "STRING" },
+        },
+        required: ["name"],
+      },
+    },
+    flags: { type: "ARRAY", items: { type: "STRING" } },
   },
-  required: ["product", "entities"],
+  required: ["product", "entities", "specs", "flags"],
 };
 
 // ─────────────────────────────────────────────────────────────
