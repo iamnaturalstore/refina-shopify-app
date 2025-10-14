@@ -21,15 +21,35 @@ const MODEL_FALLBACKS = [
   "gemini-2.0-flash",
 ];
 
+// Prefer a dedicated indexer model if provided; otherwise fall back to current primary
+const INDEXER_MODEL = (process.env.REFINA_INDEXER_MODEL || MODEL_PRIMARY).trim();
+
 // Vertex client (indexer only; recommend stays on Studio)
 const vertex = new VertexAI({
   project: process.env.GCP_PROJECT,
   location: process.env.GCP_LOCATION,
 });
 
+// ---- tiny util: ensure resp.response.text() exists (Vertex compatibility) ----
+function shimTextAccessor(resp) {
+  try {
+    if (typeof resp?.response?.text === 'function') return resp;
+    const nested = resp?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof nested === 'string') {
+      Object.defineProperty(resp.response, 'text', {
+        value: () => nested,
+        configurable: true,
+        enumerable: false,
+        writable: false,
+      });
+    }
+  } catch (_) {}
+  return resp;
+}
+
 // Minimal Vertex-backed helper for indexer (matches your current call shape)
 export async function callGeminiIndex(prompt, cfg = {}) {
-  const modelId = (cfg.model || MODEL_PRIMARY);
+  const modelId = (cfg.model || INDEXER_MODEL);
   const model = vertex.getGenerativeModel({ model: modelId });
   const resp = await model.generateContent({
     contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
@@ -37,12 +57,14 @@ export async function callGeminiIndex(prompt, cfg = {}) {
     generationConfig: {
       temperature: cfg.temperature ?? 0,
       topP: cfg.topP ?? 0.3,
-      maxOutputTokens: cfg.maxOutputTokens ?? 1024,
+      // widened default headroom for structured JSON
+      maxOutputTokens: cfg.maxOutputTokens ?? 2048,
       responseMimeType: cfg.responseMimeType ?? "application/json",
       ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
     },
   });
-  return resp;
+  // Make Vertex responses look like Studio for callers that use response.text()
+  return shimTextAccessor(resp);
 }
 
 function sleep(ms) {
@@ -107,8 +129,17 @@ export async function callGeminiStructured({
           console.warn(`[Gemini SDK] ${mdl} ok in ${Date.now() - tStart}ms`);
           clearTimeout(to);
 
-          const text = res?.response?.text?.();
+          // ---- dual extractor: Studio .text() or Vertex-like nested shape ----
+          let text;
+          if (typeof res?.response?.text === 'function') {
+            // Google AI Studio response
+            text = res.response.text();
+          } else {
+            // Vertex-like nested structure
+            text = res?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+          }
           if (typeof text === "string" && text.trim()) return text.trim();
+
           // Empty output → try next model
           break;
         } catch (err) {
@@ -154,4 +185,4 @@ export function callGemini(prompt, cfg = {}) {
   });
 }
 
-export default { callGeminiStructured, callGemini };
+export default { callGeminiStructured, callGemini, callGeminiIndex };
