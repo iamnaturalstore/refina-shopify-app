@@ -61,7 +61,7 @@ function toMyshopifyDomain(id = "") {
 async function enrichProductsBootstrap({ storeId, limit = 5000, commit = true }) {
   const args = ["bootstrap", "--store", storeId, "--limit", String(limit)];
   if (commit) args.push("--commit");
-  return runNode(INDEXER_PATH, args);
+  return runNode(INDEXER_PATH, args, { INDEXER_VERBOSE: "1", INDEXER_LOG_ERRORS: "1" });
 }
 
 async function enrichProductsSubset({ storeId, productIds = [], commit = true }) {
@@ -72,7 +72,7 @@ async function enrichProductsSubset({ storeId, productIds = [], commit = true })
     // run sequentially to avoid hammering quotas for ad-hoc re-enrich
     // (indexer has its own concurrency when bootstrapping)
     // eslint-disable-next-line no-await-in-loop
-    const r = await runNode(INDEXER_PATH, args);
+    const r = await runNode(INDEXER_PATH, args, { INDEXER_VERBOSE: "1", INDEXER_LOG_ERRORS: "1" });
     results.push({ productId: pid, ok: true, parsed: r.parsed });
   }
   return { ok: true, results };
