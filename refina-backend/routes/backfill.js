@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import shopify from "../shopify.js";
 import { dbAdmin, FieldValue } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
+import { enrichmentRouter } from "./enrichment.js";
 
 /** Shape a minimal product doc for Firestore (subcollection). */
 function productShapeFromShopify(raw, shop) {
@@ -158,6 +159,7 @@ export default function mountBackfillRoutes(app) {
     }
   });
 
+  adminRouter.use("/enrichment", requireAdmin, enrichmentRouter);
   app.use("/api/admin", adminRouter);
 
   // ───────────────────────────────────────────────────────────
