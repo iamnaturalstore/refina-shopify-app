@@ -1,7 +1,3 @@
-// refina-backend/ai/prompts/extractEntities.js
-// Prompt used by the Indexer worker to extract store-native entities from product text.
-// Domain-agnostic: works for skincare, bikes, coffee, supplements, etc.
-
 export function buildExtractEntitiesPrompt({ product }) {
   const compact = {
     id: String(product.id || ""),
@@ -11,14 +7,14 @@ export function buildExtractEntitiesPrompt({ product }) {
   };
 
   return `
-You are an expert system that extracts structured data from product text.
-Use ONLY the information in the provided PRODUCT INPUT. Do not use outside knowledge.
+You are an expert system that extracts structured data from product text and enriches it with general knowledge.
 You MUST return STRICT JSON only. Do not add any text, markdown, or backticks outside of the single JSON object.
 
 Rules:
-- For 'evidence', find the 2 most descriptive sentences proving the entity exists.
-- For 'fact', provide a rich, insightful sentence that adds value.
-- If no entities, specs, or flags are found, return empty arrays.
+- For 'entities', only extract ingredients and features explicitly mentioned in the PRODUCT INPUT.
+- For 'evidence', find the 2 most descriptive sentences from the PRODUCT INPUT that prove the entity exists.
+- For 'fact', use your global knowledge to provide a rich, insightful, one-sentence fact about the entity. Do not reference the specific product.
+- If no entities are found, return empty arrays.
 
 PRODUCT INPUT:
 ${JSON.stringify(compact, null, 2)}
@@ -28,19 +24,19 @@ ${JSON.stringify({
   "product": { "id": compact.id },
   "entities": [
     {
-      "name": "Hyaluronic Acid",
+      "name": "Kakadu Plum",
       "type": "ingredient",
-      "synonyms": ["HA", "sodium hyaluronate"],
+      "synonyms": ["Terminalia ferdinandiana"],
       "evidence": [
-        "Formulated with multi-molecular weight Hyaluronic Acid to hydrate multiple layers of the skin.",
-        "Our serum draws and holds water for long-lasting hydration."
+        "Infused with native Australian Kakadu Plum.",
+        "A powerful source of antioxidants to protect your skin."
       ],
-      "fact": "A powerful humactant that can hold up to 1000 times its weight in water, making it exceptional for moisturizing and plumping the skin.",
-      "cautions": "Most effective when applied to damp skin."
+      "fact": "The Kakadu Plum is an Australian superfruit known to have the highest recorded natural concentration of Vitamin C in the world.",
+      "cautions": "Always patch test new ingredients."
     }
   ],
-  "specs": [ { "name": "pH", "value": 5.5 } ],
-  "flags": ["vegan", "fragrance-free"]
+  "specs": [],
+  "flags": ["organic", "vegan"]
 }, null, 2)}
 `.trim();
 }
