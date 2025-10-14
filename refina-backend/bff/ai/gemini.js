@@ -58,8 +58,7 @@ export async function callGeminiIndex(prompt, cfg = {}) {
   try {
     // --- CHANGE: Default timeout is now 30000ms ---
     const timeoutMs = cfg.timeoutMs || 30000;
-  
-  try {
+
     const resp = await model.generateContent({
       contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
       generationConfig: {
