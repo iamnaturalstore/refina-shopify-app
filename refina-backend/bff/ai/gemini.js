@@ -33,12 +33,14 @@ export async function callGeminiIndex(prompt, cfg = {}) {
   const model = vertex.getGenerativeModel({ model: modelId });
   const resp = await model.generateContent({
     contents: [{ role: "user", parts: [{ text: String(prompt || "") }]}],
+    // IMPORTANT: for Vertex, JSON mode belongs in generationConfig
     generationConfig: {
       temperature: cfg.temperature ?? 0,
       topP: cfg.topP ?? 0.3,
       maxOutputTokens: cfg.maxOutputTokens ?? 1024,
+      responseMimeType: cfg.responseMimeType ?? "application/json",
+      ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
     },
-    responseMimeType: "application/json",
   });
   return resp;
 }
