@@ -12,6 +12,8 @@ import shopify from "../shopify.js";
 import { dbAdmin, FieldValue } from "../lib/firestore.js";
 import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import { enrichmentRouter } from "./enrichment.js";
+import { resolveAdminSession } from "../utils/shopSession.js";
+import { nowTs } from "../bff/lib/firestore.js";
 
 /** Shape a minimal product doc for Firestore (subcollection). */
 function productShapeFromShopify(raw, shop) {
@@ -310,4 +312,86 @@ export default function mountBackfillRoutes(app) {
 
 
   app.use("/api/backfill", queueRouter);
-}
+
+// ───────────────────────────────────────────────────────────
+  // NEW: Session-based starter for embedded Admin
+  // POST /api/sync/start
+  // - derives shop from ONLINE embedded session (no secrets in browser)
+  // - enforces single-active & cooldown using indexerStatus/<shop>
+  // - internally calls existing /api/backfill/queue?shop=...
+  // Response: { ok, queued, reason?, shop }
+  // ───────────────────────────────────────────────────────────
+  app.post("/api/sync/start", express.json(), async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      // 1) Resolve embedded ONLINE session → shop
+      const session = await resolveAdminSession(req, res);
+      const shop = toMyshopifyDomain(session?.shop || "");
+      if (!shop) {
+        return res.status(401).json({ ok: false, error: "no_embedded_session" });
+      }
+
+      // 2) Read current indexer status for guards
+      const statusRef = dbAdmin.doc(`indexerStatus/${shop}`);
+      const snap = await statusRef.get();
+      const d = snap.exists ? (snap.data() || {}) : {};
+      const phase = String(d.phase || "");
+      const now = Date.now();
+      const updatedMs =
+        typeof d.updatedAt?.toMillis === "function"
+          ? d.updatedAt.toMillis()
+          : typeof d.updatedAt === "number"
+          ? d.updatedAt
+          : 0;
+      const finishedMs =
+        typeof d.finishedAt?.toMillis === "function"
+          ? d.finishedAt.toMillis()
+          : typeof d.finishedAt === "number"
+          ? d.finishedAt
+          : 0;
+
+      // Guard A: already running (phase not terminal & recently updated)
+      const TERMINAL = new Set(["complete", "error"]);
+      const ACTIVE_WINDOW_MS = 90_000; // 90s
+      const isActive = !TERMINAL.has(phase) && updatedMs && now - updatedMs < ACTIVE_WINDOW_MS;
+      if (isActive) {
+        return res.json({ ok: true, queued: false, reason: "already_running", shop });
+      }
+
+      // Guard B: cooldown after finish/fail
+      const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+      const inCooldown = finishedMs && now - finishedMs < COOLDOWN_MS;
+      if (inCooldown) {
+        return res.json({ ok: true, queued: false, reason: "cooldown", shop, retryAfterSec: Math.max(0, Math.ceil((COOLDOWN_MS - (now - finishedMs)) / 1000)) });
+      }
+
+      // 3) Internal call to existing queue endpoint (admin-secret server-to-server)
+      const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+      const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
+      const url = `${scheme}://${host}/api/backfill/queue?shop=${encodeURIComponent(shop)}`;
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "",
+          "content-type": "application/json",
+        },
+        keepalive: true,
+      });
+      if (!r.ok) {
+        const body = await r.text().catch(() => "");
+        return res.status(502).json({ ok: false, error: `queue_failed_${r.status}`, detail: body.slice(0, 300) });
+      }
+
+      // 4) Optionally mark "queued at" for troubleshootability
+      try {
+        await statusRef.set({ phase: "queued", updatedAt: nowTs() }, { merge: true });
+      } catch {}
+
+      return res.status(202).json({ ok: true, queued: true, shop });
+    } catch (e) {
+      const msg = e?.message || "sync_start_failed";
+      const code = e?.status || 500;
+      return res.status(code).json({ ok: false, error: msg });
+    }
+  });
+ }

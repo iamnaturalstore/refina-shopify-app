@@ -79,6 +79,10 @@ export default function Setup() {
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveOk, setSaveOk] = useState(false);
   const [err, setErr] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [ix, setIx] = useState(null); // live indexer status
+  const [polling, setPolling] = useState(false);
 
   // Diffs 1) — normalize helper (case-insensitive handling)
   const normalize = (s) => String(s || "").trim().toLowerCase();
@@ -160,6 +164,76 @@ export default function Setup() {
     }
   }, [category]);
 
+  // ───────────────────────────────────────────────────────────
+  // Indexer status polling (authenticated fetch + cache-buster)
+  // ───────────────────────────────────────────────────────────
+  const fetchStatus = useCallback(async () => {
+    if (!shop) return null;
+    try {
+      const ts = Date.now();
+      const url = `/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1&ts=${ts}`;
+      const { data } = await api.get(url);
+      return data?.indexer || null;
+    } catch {
+      return null;
+    }
+  }, [shop]);
+
+  useEffect(() => {
+    let timer = null;
+    let cancelled = false;
+    async function loop() {
+      if (cancelled) return;
+      const data = await fetchStatus();
+      if (!cancelled && data) setIx(data);
+      // keep polling only while active (non-terminal)
+      const phase = String(data?.phase || "");
+      const terminal = phase === "complete" || phase === "error";
+      const nextIn = terminal ? 0 : 8000; // 8s while running
+      if (!cancelled && nextIn > 0) {
+        timer = setTimeout(loop, nextIn);
+      } else {
+        setPolling(false);
+      }
+    }
+    // Start polling on mount for live status, then continue if active
+    setPolling(true);
+    loop();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [fetchStatus]);
+
+  const startSync = useCallback(async () => {
+    setErr("");
+    setSyncMsg("");
+    setSyncBusy(true);
+    try {
+      const { data, status } = await api.post(`/api/sync/start`, {});
+      if (data?.queued) {
+        setSyncMsg("Sync queued. We’ll update progress below.");
+        // kick polling immediately
+        setPolling(true);
+        // force one immediate refresh
+        const now = await fetchStatus();
+        if (now) setIx(now);
+      } else if (data?.reason === "already_running") {
+        setSyncMsg("A sync is already in progress.");
+        setPolling(true);
+      } else if (data?.reason === "cooldown") {
+        const sec = data?.retryAfterSec != null ? ` Try again in ~${data.retryAfterSec}s.` : "";
+        setSyncMsg(`Recently finished. Cooling down.${sec}`);
+      } else {
+        setSyncMsg("Nothing queued.");
+      }
+    } catch (e) {
+      setErr(e?.message || "Failed to start sync");
+    } finally {
+      setSyncBusy(false);
+    }
+  }, [fetchStatus]);
+
   // Guardrails for missing config (use Theme Extension ID as the gate)
   if (!themeExtId) {
     return (
@@ -216,25 +290,32 @@ export default function Setup() {
         <Layout.Section>
           <Card>
             <BlockStack gap="300">
-              {(() => {
-                const ix = (typeof window !== "undefined" && window.__RF_INDEXER__) || null; // placeholder hook (no logic change)
-                // We’ll prefer store-settings payload if available (page already fetched it for category),
-                // but since Setup.jsx currently only loads settings for category, keep this neutral card.
-                return (
-                  <>
-                    <InlineStack align="space-between" blockAlign="center" padding="300">
-                      <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
-                      <Badge tone="subdued">status</Badge>
-                    </InlineStack>
-                    <BlockStack gap="150" paddingInline="300" paddingBlockEnd="300">
-                      <Text tone="subdued">
-                        Indexing and embeddings run in the background. You can continue setup — this will reach “complete”
-                        when your catalog is fully processed.
-                      </Text>
-                    </BlockStack>
-                  </>
-                );
-              })()}
+              <InlineStack align="space-between" blockAlign="center" padding="300">
+                <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
+                <Badge tone={ix?.phase === "complete" ? "success" : ix?.phase === "error" ? "critical" : "subdued"}>
+                  {ix?.phase || "preparing"}
+                </Badge>
+              </InlineStack>
+              <BlockStack gap="200" paddingInline="300" paddingBlockEnd="300">
+                <Text tone="subdued">
+                  Sync imports products, builds embeddings, and triggers enrichment. You can continue setup — progress will update here.
+                </Text>
+                {syncMsg && <Text tone="subdued">{syncMsg}</Text>}
+                {ix && (
+                  <Text tone="subdued">
+                    {`Progress: ${ix.pct ?? 0}%`}{" "}
+                    {typeof ix.importedCount === "number" && typeof ix.totalProducts === "number"
+                      ? `(${ix.importedCount}/${ix.totalProducts})`
+                      : ""}
+                    {ix.updatedAt ? ` • Last updated: ${new Date(ix.updatedAt).toLocaleTimeString()}` : ""}
+                  </Text>
+                )}
+                <InlineStack gap="200">
+                  <Button variant="primary" onClick={startSync} loading={syncBusy} disabled={syncBusy || (ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error")}>
+                    {ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error" ? "Sync in progress…" : "Sync products & build KB"}
+                  </Button>
+                </InlineStack>
+              </BlockStack>
             </BlockStack>
           </Card>
         </Layout.Section>
