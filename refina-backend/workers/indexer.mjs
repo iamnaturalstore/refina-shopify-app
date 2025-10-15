@@ -93,7 +93,7 @@ const TINY_SCHEMA = FULL_SCHEMA;
 // ─────────────────────────────────────────────────────────────
 // Tunables & guards
 // ─────────────────────────────────────────────────────────────
-const MAX_CONCURRENCY = Number(process.env.REFINA_INDEXER_CONCURRENCY || 6);
+const MAX_CONCURRENCY = Number(process.env.REFINA_INDEXER_CONCURRENCY || 1);
 const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0.2),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.8),
