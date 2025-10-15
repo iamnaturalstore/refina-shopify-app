@@ -487,8 +487,12 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction, product 
   // Canonical embedding doc path
   const linkRef = db.doc(`productEmbeddings/${storeId}/items/${productId}`);
 
-  const slugs = uniq(extraction.entities.map(e => slugify(e.name)));
-  const evidence = (extraction.entities || []).map(e => ({
+  // Correctly map entities to their full names first, then slugify for links
+  const entities = Array.isArray(extraction.entities) ? extraction.entities : [];
+  const slugs = uniq(entities.map(e => slugify(e.name)));
+
+  // Ensure evidence is properly structured
+  const evidence = entities.map(e => ({
     slug: slugify(e.name),
     evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
   }));
