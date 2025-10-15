@@ -43,6 +43,19 @@ function storeFromShop(shop) {
   return String(shop || "").toLowerCase().replace(/\.myshopify\.com$/, "");
 }
 
+/* ── NEW: decide if this shop needs bootstrap (idempotent) ── */
+async function needsBootstrap(shop) {
+  try {
+    const anyProduct = await dbAdmin.collection(`products/${shop}/items`).limit(1).get();
+    if (anyProduct.empty) return true;
+    const anyKB = await dbAdmin.collection(`kb/${shop}/products`).limit(1).get();
+    return anyKB.empty;
+  } catch {
+    // On any read error, err on the side of bootstrapping (safe)
+    return true;
+  }
+}
+
 /* ── register APP_UNINSTALLED webhook (idempotent) ──────────── */
 async function registerAppUninstalledWebhook(client, webhookUrl) {
   if (!webhookUrl) {
@@ -239,6 +252,29 @@ router.get("/callback", async (req, res) => {
         console.warn("[install] storeSettings seed skipped:", se?.message || se);
       }
     })();
+
+    /* ── NEW: fire-and-forget bootstrap if shop is empty ── */
+    (async () => {
+      try {
+        if (await needsBootstrap(shop)) {
+          const origin =
+            (process.env.PUBLIC_BACKEND_ORIGIN && process.env.PUBLIC_BACKEND_ORIGIN.replace(/\/$/, "")) ||
+            baseUrl(req);
+          const url = `${origin}/api/backfill/queue?shop=${encodeURIComponent(shop)}&force=1`;
+          const adminSecret = process.env.ADMIN_SHARED_SECRET || process.env.ADMIN_SECRET || "";
+          // don’t await; keep OAuth snappy
+          fetch(url, {
+            method: "POST",
+            headers: { "x-admin-secret": adminSecret },
+          })
+            .then(r => console.log(`[bootstrap] queued ${shop}: ${r.status}`))
+            .catch(() => {});
+        }
+      } catch (e) {
+        console.warn("[bootstrap] auto-queue check failed:", e?.message || e);
+      }
+    })();
+    /* ───────────────────────────────────────────────────── */
 
     // Redirect to embedded Admin app
     const adminUrl = new URL(`/store/${store}/apps/${process.env.SHOPIFY_APP_HANDLE || "refina"}`, "https://admin.shopify.com");
