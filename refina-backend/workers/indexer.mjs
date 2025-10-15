@@ -557,8 +557,8 @@ const evidence = entities
   });
 }
 
-// ─────────────────────────────────────────────────────────────
 async function extractForProduct({ storeId, product }) {
+  // This internal helper remains the same
   async function tryOnce(cap, schema, systemHint) {
     const started = Date.now();
     const prompt = buildExtractEntitiesPrompt({ product: productToPromptInput(product, cap) });
@@ -571,10 +571,12 @@ async function extractForProduct({ storeId, product }) {
       return { ok: false, reason, ms: Date.now() - started, raw: "" };
     }
     let parsed;
-    try { 
-      console.log("--- RAW GEMINI OUTPUT FOR EVIDENCE ---:\n", JSON.stringify(text, null, 2))
-      parsed = extractJson(text); }
-    catch { return { ok: false, reason: "invalid_json", ms: Date.now() - started, raw: String(text || "").slice(0, 400) }; }
+    try {
+      // We can remove the console.log now that we are fixing the logic
+      parsed = extractJson(text);
+    } catch {
+      return { ok: false, reason: "invalid_json", ms: Date.now() - started, raw: String(text || "").slice(0, 400) };
+    }
     const v = validateExtractionOutput(parsed);
     if (!v.ok) return { ok: false, reason: "schema_invalid", errors: v.errors, ms: Date.now() - started, raw: "" };
     if (v.value.product.id !== String(product.id)) v.value.product.id = String(product.id);
@@ -582,27 +584,48 @@ async function extractForProduct({ storeId, product }) {
     v.value.flags = Array.isArray(v.value.flags) ? v.value.flags : [];
     return { ok: true, value: v.value, ms: Date.now() - started };
   }
+
+  // --- Main Logic with New Fallback ---
+
+  // Attempt 1: Full "awesome" response
   let r = await tryOnce(900, null, null);
   if (r.ok) return r;
-  if (["invalid_json","timeout","error","schema_invalid"].includes(r.reason)) {
-    await new Promise(res => setTimeout(res, 400));
-    const r2 = await tryOnce(600, MIN_SCHEMA, 'Output STRICT JSON matching the provided schema. Use double quotes, no comments, no trailing commas.');
-    if (r2.ok) return r2;
-    await new Promise(res => setTimeout(res, 400));
-    const r3 = await tryOnce(450, TINY_SCHEMA, 'Output STRICT JSON matching the schema only. No extra fields.');
-    if (r3.ok) return r3;
-    const raw = r3.raw || r2.raw || r.raw || "";
-    const ents = salvageEntities(raw);
-    if (ents.length) {
-      return {
-        ok: true,
-        value: { product: { id: String(product.id) }, entities: ents, specs: [], flags: [] },
-        ms: (r3.ms || r2.ms || r.ms || 0),
+
+  // Attempt 2: Fallback with smaller context and stricter prompt
+  await new Promise(res => setTimeout(res, 400));
+  const r2 = await tryOnce(600, MIN_SCHEMA, 'Output STRICT JSON matching the provided schema.');
+  if (r2.ok) return r2;
+
+  // --- START OF FIX ---
+  // Attempt 3 (NEW): Final fallback with a simple "facts only" prompt
+  await new Promise(res => setTimeout(res, 400));
+  console.log(`[Indexer] Attempting final 'facts-only' fallback for product ${product.id}`);
+  const simplePrompt = `
+    For the following product, list up to 5 key ingredients or features mentioned in the text.
+    For each, provide a simple, one-sentence fact using your general knowledge.
+    Return STRICT JSON using this exact schema: {"entities": [{"name": "string", "type": "string", "fact": "string"}]}
+    PRODUCT: ${JSON.stringify(productToPromptInput(product, 450), null, 2)}
+  `;
+  try {
+    const text = await callGeminiWithRetry(simplePrompt, { ...GENCFG, responseSchema: TINY_SCHEMA }, LLM_TIMEOUT_MS);
+    const parsed = extractJson(text);
+    if (parsed && Array.isArray(parsed.entities) && parsed.entities.length > 0) {
+      // Success! Reconstruct the full object so the rest of the script works.
+      const finalValue = {
+        product: { id: String(product.id) },
+        entities: parsed.entities,
+        specs: [],
+        flags: [],
       };
+      return { ok: true, value: finalValue };
     }
-    return r3.ms ? r3 : r2.ms ? r2 : r;
+  } catch (err) {
+    console.error(`[Indexer] Final fallback failed for ${product.id}:`, err.message);
   }
-  return r;
+  // --- END OF FIX ---
+
+  // If all attempts fail, return the last known error
+  return r2.ms ? r2 : r;
 }
 
 // ─────────────────────────────────────────────────────────────
