@@ -492,10 +492,12 @@ async function upsertEntitiesAndLinks({ storeId, productId, extraction, product 
   const slugs = uniq(entities.map(e => slugify(e.name)));
 
   // Ensure evidence is properly structured
-  const evidence = entities.map(e => ({
+const evidence = entities
+  .filter(e => Array.isArray(e.evidence) && e.evidence.length > 0)
+  .map(e => ({
     slug: slugify(e.name),
-    evidence: (Array.isArray(e.evidence) ? e.evidence : []).slice(0, 2),
-  }));
+    evidence: e.evidence.slice(0, 2),
+}));
 
   // Compute & store embedding vector
   const textForEmb = productEmbedText(product);
