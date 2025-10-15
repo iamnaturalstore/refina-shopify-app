@@ -64,7 +64,7 @@ export async function callGeminiIndex(prompt, cfg = {}) {
       generationConfig: {
         temperature: cfg.temperature ?? 0,
         topP: cfg.topP ?? 0.3,
-        maxOutputTokens: cfg.maxOutputTokens ?? 2048,
+        maxOutputTokens: cfg.maxOutputTokens ?? 8192,
         responseMimeType: cfg.responseMimeType ?? "application/json",
         ...(cfg.responseSchema ? { responseSchema: cfg.responseSchema } : {}),
       },
