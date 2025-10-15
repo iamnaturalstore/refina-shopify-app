@@ -97,7 +97,7 @@ const MAX_CONCURRENCY = Number(process.env.REFINA_INDEXER_CONCURRENCY || 1);
 const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0.2),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.8),
-  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 2048),
+  maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 8192),
   model: process.env.REFINA_INDEXER_MODEL || "gemini-1.5-flash-001",
 };
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 30000);
