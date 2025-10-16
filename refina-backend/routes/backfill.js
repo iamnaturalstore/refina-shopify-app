@@ -137,30 +137,34 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
 
     // GraphQL: fetch products in pages of 250, mirroring your REST selection
     // NOTE: We use legacyResourceId to preserve your numeric id.
+    // drop priceV2 from the query after 502 error
     const QUERY = `
-      query ProductsPage($after: String) {
-        products(first: 250, after: $after, sortKey: ID) {
-          pageInfo { hasNextPage endCursor }
+  query ProductsPage($after: String) {
+    products(first: 250, after: $after, sortKey: ID) {
+      pageInfo { hasNextPage }
+      edges { cursor }
+      nodes {
+        id
+        legacyResourceId
+        title
+        descriptionHtml
+        productType
+        tags
+        handle
+        featuredImage { url }
+        images(first: 1) { nodes { url } }
+        variants(first: 1) {
           nodes {
-            id
-            legacyResourceId
-            title
-            descriptionHtml
-            productType
-            tags
-            handle
-            featuredImage { url }
-            images(first: 1) { nodes { url } }
-            variants(first: 1) {
-              nodes {
-                price        # Decimal (string) in recent API versions
-                priceV2 { amount }  # fallback for older versions
-              }
-            }
+            # In recent API versions, "price" is either Money-like ({amount})
+            # or a decimal string. We handle both in JS.
+            price
           }
         }
       }
-    `;
+    }
+  }
+`;
+
 
     let after = null;
     let total = 0;
@@ -169,6 +173,7 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
     while (true) {
       const data = await gqlFetch(QUERY, { after });
       const nodes = data?.products?.nodes || [];
+      const edges  = data?.products?.edges  || [];
       const pageInfo = data?.products?.pageInfo || {};
       pages += 1;
 
@@ -190,9 +195,16 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
             "";
 
           // price: prefer decimal string in price, fallback to priceV2.amount
+          // price: handle both Money-like object { amount } and plain decimal string
           const var0 = Array.isArray(p?.variants?.nodes) ? p.variants.nodes[0] : null;
-          const priceStr = var0?.price ?? var0?.priceV2?.amount ?? null;
-          const priceNum = priceStr != null ? Number(priceStr) : NaN;
+          let priceNum = null;
+          if (var0 && var0.price != null) {
+            if (typeof var0.price === "object" && var0.price.amount != null) {
+              priceNum = Number(var0.price.amount);
+            } else {
+              priceNum = Number(var0.price); // decimal string → number
+            }
+          }
           const price = Number.isFinite(priceNum) ? priceNum : null;
 
           const doc = {
@@ -221,7 +233,7 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
       }
 
       if (!pageInfo?.hasNextPage) break;
-      after = pageInfo.endCursor || null;
+      after = edges.length ? edges[edges.length - 1].cursor : null;
       if (!after) break;
     }
 
