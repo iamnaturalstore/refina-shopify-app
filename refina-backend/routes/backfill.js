@@ -316,7 +316,7 @@ export default function mountBackfillRoutes(app) {
 // ───────────────────────────────────────────────────────────
   // NEW: Session-based starter for embedded Admin
   // POST /api/sync/start
-  // - derives shop from ONLINE embedded session (no secrets in browser)
+  // - derives shop from OFFLINE (changed from previously incorrect ONLINE session call)
   // - enforces single-active & cooldown using indexerStatus/<shop>
   // - internally calls existing /api/backfill/queue?shop=...
   // Response: { ok, queued, reason?, shop }
@@ -324,11 +324,17 @@ export default function mountBackfillRoutes(app) {
   app.post("/api/sync/start", express.json(), async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {
-      // 1) Resolve embedded ONLINE session → shop
-      const session = await resolveAdminSession(req, res);
-      const shop = toMyshopifyDomain(session?.shop || "");
+      // 1) Resolve shop from query (?shop=) — no ONLINE dependency
+      const rawShop = String(req.query.shop || "").toLowerCase().trim();
+      const shop = toMyshopifyDomain(rawShop);
       if (!shop) {
-        return res.status(401).json({ ok: false, error: "no_embedded_session" });
+        return res.status(401).json({ ok: false, error: "no_shop_context" });
+      }
+
+      // 1.5) OFFLINE token preflight (importer relies on this)
+      const offline = await loadOfflineSession(shop);
+      if (!offline?.accessToken) {
+        return res.status(401).json({ ok: false, error: "no_offline_session", shop });
       }
 
       // 2) Read current indexer status for guards
