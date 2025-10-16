@@ -89,77 +89,148 @@ export default function mountBackfillRoutes(app) {
    * Uses the OFFLINE session to fetch products via REST and upsert into:
    *   products/<shop>/items/<id>
    */
-  adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
-    res.set("Cache-Control", "no-store");
-    res.set("X-RF-Handler", "admin-backfill-products");
-    try {
-      const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
-      const shop = toMyshopifyDomain(rawShop);
-      if (!shop) {
-        return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
-      }
-
-      const session = await loadOfflineSession(shop);
-      if (!session?.accessToken) {
-        return res.status(401).json({ ok: false, error: "no_offline_session" });
-      }
-
-      const apiVersion = shopify.config.apiVersion;
-      let url = `https://${shop}/admin/api/${apiVersion}/products.json?limit=250&fields=id,title,body_html,product_type,handle,tags,images,image,variants`;
-      let total = 0;
-      let pages = 0;
-
-      while (url) {
-        const resp = await fetch(url, {
-          headers: {
-            "X-Shopify-Access-Token": session.accessToken,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-        });
-
-        if (!resp.ok) {
-          return res.status(502).json({ ok: false, error: `shopify_${resp.status}` });
-        }
-
-        const data = await resp.json();
-        const products = Array.isArray(data?.products) ? data.products : [];
-
-        if (products.length) {
-          const batch = dbAdmin.batch();
-          for (const raw of products) {
-            const doc = productShapeFromShopify(raw, shop);
-            const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
-            batch.set(ref, doc, { merge: true });
-          }
-          await batch.commit();
-        }
-
-        total += products.length;
-        pages += 1;
-
-        // Pagination via Link header (RFC5988)
-        const link = resp.headers.get("link") || resp.headers.get("Link");
-        let nextUrl = null;
-        if (link) {
-          const nextPart = link
-            .split(",")
-            .map((s) => s.trim())
-            .find((s) => /rel="?next"?/i.test(s));
-          if (nextPart) {
-            const m = nextPart.match(/<([^>]+)>/);
-            if (m?.[1]) nextUrl = m[1];
-          }
-        }
-        url = nextUrl;
-      }
-
-      return res.json({ ok: true, shop, synced: total, pages });
-    } catch (e) {
-      console.error("backfill error:", e);
-      return res.status(500).json({ ok: false, error: "backfill_failed" });
+  // REPLACE the whole REST importer handler with this GraphQL version
+adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("X-RF-Handler", "admin-backfill-products-gql");
+  try {
+    const rawShop = String(req.query.shop || req.body?.shop || "").toLowerCase().trim();
+    const shop = toMyshopifyDomain(rawShop);
+    if (!shop) {
+      return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
     }
-  });
+
+    const session = await loadOfflineSession(shop);
+    if (!session?.accessToken) {
+      return res.status(401).json({ ok: false, error: "no_offline_session" });
+    }
+
+    const apiVersion = shopify.config.apiVersion;
+    const gqlUrl = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+
+    // Small helper for Admin GraphQL calls (cursor-paginated)
+    async function gqlFetch(query, variables) {
+      const r = await fetch(gqlUrl, {
+        method: "POST",
+        headers: {
+          "X-Shopify-Access-Token": session.accessToken,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        const err = new Error(`shopify_graphql_${r.status}: ${txt.slice(0, 300)}`);
+        err.statusCode = 502;
+        throw err;
+      }
+      const payload = await r.json();
+      if (payload.errors) {
+        const txt = JSON.stringify(payload.errors).slice(0, 300);
+        const err = new Error(`shopify_graphql_errors: ${txt}`);
+        err.statusCode = 502;
+        throw err;
+      }
+      return payload.data;
+    }
+
+    // GraphQL: fetch products in pages of 250, mirroring your REST selection
+    // NOTE: We use legacyResourceId to preserve your numeric id.
+    const QUERY = `
+      query ProductsPage($after: String) {
+        products(first: 250, after: $after, sortKey: ID) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id
+            legacyResourceId
+            title
+            descriptionHtml
+            productType
+            tags
+            handle
+            featuredImage { url }
+            images(first: 1) { nodes { url } }
+            variants(first: 1) {
+              nodes {
+                price        # Decimal (string) in recent API versions
+                priceV2 { amount }  # fallback for older versions
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    let after = null;
+    let total = 0;
+    let pages = 0;
+
+    while (true) {
+      const data = await gqlFetch(QUERY, { after });
+      const nodes = data?.products?.nodes || [];
+      const pageInfo = data?.products?.pageInfo || {};
+      pages += 1;
+
+      if (nodes.length) {
+        const batch = dbAdmin.batch();
+
+        for (const p of nodes) {
+          // Preserve your existing Firestore shape
+          const numericId =
+            p?.legacyResourceId != null
+              ? String(p.legacyResourceId)
+              : // ultra-safe fallback: extract trailing digits from gid
+                String((p?.id || "").match(/\d+$/)?.[0] || "");
+
+          // image: prefer featuredImage, fall back to first image node
+          const imgUrl =
+            p?.featuredImage?.url ||
+            (Array.isArray(p?.images?.nodes) && p.images.nodes[0]?.url) ||
+            "";
+
+          // price: prefer decimal string in price, fallback to priceV2.amount
+          const var0 = Array.isArray(p?.variants?.nodes) ? p.variants.nodes[0] : null;
+          const priceStr = var0?.price ?? var0?.priceV2?.amount ?? null;
+          const priceNum = priceStr != null ? Number(priceStr) : NaN;
+          const price = Number.isFinite(priceNum) ? priceNum : null;
+
+          const doc = {
+            id: numericId,                       // ← same as before
+            storeId: shop,
+            name: p?.title || "",
+            title: p?.title || "",
+            description: p?.descriptionHtml || "",
+            tags: Array.isArray(p?.tags) ? p.tags.filter(Boolean) : [],
+            productType: p?.productType || "",
+            category: p?.productType || "",
+            ingredients: [],                     // filled by later enrichment
+            image: imgUrl,
+            price,
+            handle: p?.handle || "",
+            link: p?.handle ? `/products/${p.handle}` : "#",
+            updatedAt: FieldValue.serverTimestamp(),
+          };
+
+          const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
+          batch.set(ref, doc, { merge: true });
+        }
+
+        await batch.commit();
+        total += nodes.length;
+      }
+
+      if (!pageInfo?.hasNextPage) break;
+      after = pageInfo.endCursor || null;
+      if (!after) break;
+    }
+
+    return res.json({ ok: true, shop, synced: total, pages });
+  } catch (e) {
+    console.error("backfill (gql) error:", e);
+    return res.status(500).json({ ok: false, error: "backfill_failed" });
+  }
+});
 
   adminRouter.use("/enrichment", requireAdmin, enrichmentRouter);
   app.use("/api/admin", adminRouter);
