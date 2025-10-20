@@ -341,7 +341,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     trialDays: Number(
     process.env.BILLING_TRIAL_DAYS ||
     (/[?&]shop=(?:refina-app-demo\.myshopify\.com|jqr0b0-je\.myshopify\.com)/i.test(String(returnUrl))
-      ? (process.env.DEMO_TRIAL_DAYS || 1095)
+      ? (process.env.DEMO_TRIAL_DAYS || 365)
       : 7
     )
   ),
