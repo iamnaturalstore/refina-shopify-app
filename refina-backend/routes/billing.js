@@ -342,6 +342,110 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
 
+  async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
+  let mutation = `
+    mutation AppSubscribe(
+      $name: String!,
+      $returnUrl: URL!,
+      $test: Boolean,
+      $amount: Decimal!,
+      $currency: CurrencyCode!,
+      $replacementBehavior: AppSubscriptionReplacementBehavior,
+      $trialDays: Int!
+    ) {
+      appSubscriptionCreate(
+        name: $name
+        returnUrl: $returnUrl
+        test: $test
+        trialDays: $trialDays
+        replacementBehavior: $replacementBehavior
+        lineItems: [{
+          plan: {
+            appRecurringPricingDetails: {
+              price: { amount: $amount, currencyCode: $currency }
+              interval: EVERY_30_DAYS
+            }
+          }
+        }]
+      ) {
+        userErrors { field message }
+        confirmationUrl
+        appSubscription { id }
+      }
+    }
+  `;
+  if (String(interval).toUpperCase() === "ANNUAL") {
+    mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
+  }
+
+  const variables = {
+    name,
+    returnUrl,
+    test: !!test,
+    amount: typeof amount === "number" ? amount : Number(amount),
+    currency,
+    trialDays: Number(process.env.BILLING_TRIAL_DAYS || 7),
+    replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
+  };
+
+  if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
+    console.log("[Billing] appSubscriptionCreate vars", {
+      name: variables.name,
+      amount: variables.amount,
+      currency: variables.currency,
+      returnUrl: variables.returnUrl,
+      test: variables.test,
+      trialDays: variables.trialDays,
+      replacementBehavior: variables.replacementBehavior,
+    });
+  }
+
+  // --- DEMO TRIAL OVERRIDE (no shop resolution touched) ---
+try {
+  const allow = String(process.env.DEMO_TRIAL_SHOPS || "")
+    .split(",")
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  const longTrial = Number(process.env.DEMO_TRIAL_DAYS || 1095);
+
+  // extract ?shop=foo.myshopify.com from returnUrl
+  let shopFromUrl = null;
+  const m = /[?&]shop=([^&]+)/i.exec(String(returnUrl));
+  if (m && m[1]) shopFromUrl = decodeURIComponent(m[1]).toLowerCase();
+
+  // match exactly against allowlist
+  if (shopFromUrl && allow.includes(shopFromUrl)) {
+    variables.trialDays = longTrial;
+  }
+} catch (_) {
+  // ignore; fall back to default trialDays
+}
+// --- END OVERRIDE ---
+
+
+  const data = await gql(client, mutation, variables);
+  const payload = data?.appSubscriptionCreate || {};
+  return {
+    confirmationUrl: payload?.confirmationUrl || null,
+    userErrors: payload?.userErrors || [],
+  };
+}
+
+async function cancelSubscription(client, id, prorate = true) {
+  const mutation = `
+    mutation CancelSub($id: ID!, $prorate: Boolean!) {
+      appSubscriptionCancel(id: $id, prorate: $prorate) {
+        appSubscription { id status }
+        userErrors { field message }
+      }
+    }
+  `;
+  const data = await gql(client, mutation, { id, prorate });
+  const payload = data?.appSubscriptionCancel || {};
+  return { canceled: payload?.appSubscription || null, userErrors: payload?.userErrors || [] };
+}
+
   if (String(process.env.BILLING_DEBUG || "").toLowerCase() === "true") {
     console.log("[Billing] appSubscriptionCreate vars", {
       name: variables.name,
