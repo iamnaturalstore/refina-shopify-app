@@ -16,10 +16,9 @@ Rules:
 - Allowed type values: ingredient, material, component, benefit, concern, solution, feature, skinType, safetyFlag. Do not invent new types.
 - Canonicalize and merge near-duplicates: output one entity with a canonical name; put alternates in synonyms. Do not split inflections or close synonyms into separate entities (e.g., "brighten"/"illuminate"; "vitamin c"/"vitamin-c").
 - Skip vague adjectives (e.g., "creamy", "easy-to-blend", "youthful", "high-pigmented") unless that exact phrase is central to the product and appears verbatim with clear context.
-- For each entity, provide one evidence item: the shortest exact quote from PRODUCT INPUT that contains the entity phrase (or an unambiguous synonym).
-- Do not reuse the same sentence/quote as evidence across entities unless the quote contains all entity phrases being evidenced.
+- For each entity, provide 1–2 evidence items: prefer one shortest exact quote from PRODUCT INPUT that contains the entity phrase (or an unambiguous synonym). If a second is necessary, it must be distinct (not a paraphrase) and also anchored in the PRODUCT INPUT.
+- Do not reuse the same sentence/quote as evidence across different entities unless the quote contains all entity phrases being evidenced.
 - Provide fact only for ingredient, material, or component. Omit fact for benefit, concern, solution, feature, skinType, safetyFlag.
-- Include confidence (0–1) and sourceField ("title" | "description" | "tags") for each entity. Favor outputs with confidence ≥ 0.5.
 - If no entities are found, return empty arrays.
 - STRICT JSON only; no extra text/markdown/backticks.
 
@@ -31,18 +30,19 @@ ${JSON.stringify({
   "product": { "id": compact.id },
   "entities": [
     {
-      "name": "Cordura Fabric",
-      "type": "material",
-      "synonyms": ["ballistic nylon"],
-      "evidence": ["Constructed from highly durable Cordura fabric."],
-      "fact": "Cordura is a family of high-tenacity nylon fabrics known for exceptional abrasion and tear resistance.",
-      "cautions": "Water-resistant but not fully waterproof.",
-      "confidence": 0.92,
-      "sourceField": "description"
+      "name": "Kakadu Plum",
+      "type": "ingredient",
+      "synonyms": ["Terminalia ferdinandiana"],
+      "evidence": [
+        "Infused with native Australian Kakadu Plum.",
+        "A powerful source of antioxidants to protect your skin."
+      ],
+      "fact": "The Kakadu Plum is an Australian superfruit known to have the highest recorded natural concentration of Vitamin C in the world.",
+      "cautions": "Always patch test new ingredients."
     }
   ],
   "specs": [],
-  "flags": []
+  "flags": ["organic", "vegan"]
 }, null, 2)}
 `.trim();
 }
