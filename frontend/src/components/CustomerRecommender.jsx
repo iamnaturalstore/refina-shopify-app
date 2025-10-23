@@ -1,5 +1,5 @@
 // frontend/src/components/CustomerRecommender.jsx
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import styles from "./CustomerRecommender.module.css";
 
 const API_PREFIX = "/apps/refina/v1";
@@ -157,6 +157,42 @@ export default function CustomerRecommender() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // ===== Staged progress label (diffs only) =====
+  const [progressLabel, setProgressLabel] = useState("Thinking…");
+  const progressTimers = useRef([]);
+
+  const PROGRESS_PHASES = [
+    { at: 0,       text: "Thinking…" },
+    { at: 10_000,  text: "Researching…" },
+    { at: 20_000,  text: "Shortlisting products…" },
+    { at: 30_000,  text: "Analyzing matches…" },
+    { at: 40_000,  text: "Finalizing your Top 3…" },
+  ];
+
+  function startProgressCycle() {
+    progressTimers.current.forEach(clearTimeout);
+    progressTimers.current = [];
+    setProgressLabel(PROGRESS_PHASES[0].text);
+
+    PROGRESS_PHASES.slice(1).forEach((p) => {
+      const id = setTimeout(() => setProgressLabel(p.text), p.at);
+      progressTimers.current.push(id);
+    });
+
+    const idLast = setTimeout(() => setProgressLabel("Still working… almost there"), 55_000);
+    progressTimers.current.push(idLast);
+  }
+
+  function stopProgressCycle() {
+    progressTimers.current.forEach(clearTimeout);
+    progressTimers.current = [];
+  }
+
+  useEffect(() => {
+    return () => progressTimers.current.forEach(clearTimeout);
+  }, []);
+  // ===== end staged progress =====
+
   // useEffect to apply theme settings from URL
   useEffect(() => {
     const root = document.documentElement;
@@ -205,6 +241,7 @@ export default function CustomerRecommender() {
       if (!q) return;
 
       setLoading(true);
+      startProgressCycle(); // <<< diff: start staged progress
       setMatchedProducts([]);
       setCopy({ why: "", rationale: "", extras: "" });
       setReasonsById({});
@@ -285,7 +322,9 @@ export default function CustomerRecommender() {
         });
         setReasonsById({});
       } finally {
+        stopProgressCycle(); // <<< diff: stop staged progress
         setLoading(false);
+        setProgressLabel("Thinking…"); // <<< diff: reset for next ask
       }
     },
     [concern]
@@ -302,16 +341,16 @@ export default function CustomerRecommender() {
   const subheadingText =
     settings.subheading || "Tell me what you’re after and I’ll fetch the best fits.";
   // === Ask button label wiring (Theme Editor: "In-Widget Button Text") ===
-// useUrlSettings() converts ?widget-cta-text=... → settings.widgetCtaText
-const widgetCtaOverride = (settings.widgetCtaText || "").trim();
+  // useUrlSettings() converts ?widget-cta-text=... → settings.widgetCtaText
+  const widgetCtaOverride = (settings.widgetCtaText || "").trim();
 
-// Optional soft fallback if you still want to accept any legacy param
-// coming through as `ctaText` (safe to keep, harmless if absent).
-const legacyCta = (settings.ctaText || "").trim();
+  // Optional soft fallback if you still want to accept any legacy param
+  // coming through as `ctaText` (safe to keep, harmless if absent).
+  const legacyCta = (settings.ctaText || "").trim();
 
-// Final label priority: URL override → legacy → safe default.
-// (Change the default if you prefer another phrase.)
-const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
+  // Final label priority: URL override → legacy → safe default.
+  // (Change the default if you prefer another phrase.)
+  const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
 
 
   return (
@@ -346,20 +385,21 @@ const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
       />
 
       <button
-  data-refina-ask-btn
-  className={styles.askButton}
-  onClick={() => handleRecommend(concern)}
-  disabled={loading}
-  aria-busy={loading}
->
-  {loading ? (
-    <>
-      Researching<span className={styles.dots} aria-hidden="true" />
-    </>
-  ) : (
-    askLabel
-  )}
-</button>
+        data-refina-ask-btn
+        className={styles.askButton}
+        onClick={() => handleRecommend(concern)}
+        disabled={loading}
+        aria-busy={loading}
+        aria-live="polite"
+      >
+        {loading ? (
+          <>
+            {progressLabel}<span className={styles.dots} aria-hidden="true" />
+          </>
+        ) : (
+          askLabel
+        )}
+      </button>
 
 
       {(copy.why || copy.rationale || copy.extras) && (
