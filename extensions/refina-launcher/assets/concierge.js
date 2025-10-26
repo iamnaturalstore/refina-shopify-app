@@ -56,6 +56,32 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
+    document.addEventListener("click", (e) => {
+  const a = e.target && e.target.closest ? e.target.closest("a") : null;
+  if (!a) return;
+
+  // allow new-tab/middle-click/etc.
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank" || a.hasAttribute("download")) return;
+
+  const href = a.getAttribute("href") || "";
+  const sameOrigin = !/^https?:\/\//i.test(href) || a.origin === location.origin;
+
+  // SAME endpoint as the launcher link
+  const isRefinaLink = sameOrigin && href.startsWith("/apps/refina");
+
+  if (!isRefinaLink) return;
+
+  e.preventDefault(); // don't navigate to proxy
+  const url = buildIframeUrl(); // identical URL the launcher uses (source=launcher, etc.)
+
+  if (IN_THEME_EDITOR || IN_ADMIN) {
+    // keep current editor behavior (open in new tab)
+    try { window.open(url, "_blank", "noopener"); } catch { location.href = url; }
+  } else {
+    openModal(); // open the existing widget/modal (same size as launcher)
+  }
+});
+
     // Early exits
     if (!shopDomain) {
       root.dataset.initialized = "true";
