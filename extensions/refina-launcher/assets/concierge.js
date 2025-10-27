@@ -57,14 +57,16 @@
     const zIndex = 2147483646;
 
     // --- REVISED INTERCEPTOR (handles relative /apps/refina AND absolute proxy /proxy/refina) ---
-    document.addEventListener("click", (e) => {
+    // Intercept menu/footer links and open the modal instead of navigating.
+    // Use CAPTURE phase so we beat theme handlers that navigate early.
+    function refinaInterceptHandler(e) {
       const a = e.target && e.target.closest ? e.target.closest("a") : null;
       if (!a) return;
 
       // allow new-tab/middle-click/etc.
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank" || a.hasAttribute("download")) return;
 
-      let href = a.getAttribute("href") || "";
+      const href = a.getAttribute("href") || "";
       if (!href) return;
 
       // Resolve to absolute URL for robust matching
@@ -72,6 +74,11 @@
       const hrefAbs = urlObj.toString();
       const path = urlObj.pathname;
 
+      // Match:
+      //  - /apps/refina... (store-relative App Proxy)
+      //  - /proxy/refina... (absolute proxy host)
+      //  - links explicitly flagged via data-refina-open="1"
+      //  - or links containing path_prefix=/apps/refina
       const isRefinaLink =
         a.dataset.refinaOpen === "1" ||
         path.startsWith("/apps/refina") ||
@@ -82,16 +89,25 @@
 
       if (!isRefinaLink) return;
 
-      e.preventDefault(); // don't navigate to proxy
-      const url = buildIframeUrl(); // identical URL the launcher uses (source=launcher, etc.)
+      // Block theme/router navigation
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+
+      const widgetUrl = buildIframeUrl();
 
       if (IN_THEME_EDITOR || IN_ADMIN) {
-        // keep current editor behavior (open in new tab)
-        try { window.open(url, "_blank", "noopener"); } catch { location.href = url; }
+        try { window.open(widgetUrl, "_blank", "noopener"); } catch { location.href = widgetUrl; }
       } else {
-        openModal(); // open the existing widget/modal (same size as launcher)
+        openModal(); // same modal size/behavior as the launcher button
       }
-    });
+    }
+
+    // Capture-phase listeners to win races with theme scripts
+    document.addEventListener("click", refinaInterceptHandler, true);
+    document.addEventListener("mousedown", refinaInterceptHandler, true);   // belt & braces for some themes
+    document.addEventListener("touchstart", refinaInterceptHandler, true);  // mobile taps
+
     // --- END REVISED INTERCEPTOR ---
 
     // Early exits
