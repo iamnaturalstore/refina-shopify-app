@@ -56,6 +56,22 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
+    // --- NEW: Storefront deeplink (runs before early exits) ---
+    {
+      const u = new URL(location.href);
+      const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
+      const deeplink = refinaParam === "1" || location.hash === "#refina";
+      if (deeplink) {
+        setTimeout(() => { try { openModal(); } catch(_) {} }, 0);
+        if (history.replaceState) {
+          u.searchParams.delete("refina");
+          const keepHash = (location.hash === "#refina") ? "" : location.hash;
+          history.replaceState({}, "", u.pathname + u.search + keepHash);
+        }
+      }
+    }
+    // --- END NEW ---
+
     // Early exits
     if (!shopDomain) {
       root.dataset.initialized = "true";
@@ -208,24 +224,9 @@
       }
     });
 
-    // Storefront deeplink: open modal when URL has ?refina=1 or #refina
-{
-  const u = new URL(location.href);
-  const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
-  const deeplink = refinaParam === "1" || location.hash === "#refina";
-
-  if (deeplink) {
-    setTimeout(openModal, 0);
-    if (history.replaceState) {
-      u.searchParams.delete("refina");
-      const keepHash = (location.hash === "#refina") ? "" : location.hash;
-      history.replaceState({}, "", u.pathname + u.search + keepHash);
+    if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {
+      setTimeout(openModal, 0);
     }
-  } else if (openOnLoad) {
-    setTimeout(openModal, 0);
-  }
-}
-    // --- END REVISED OPEN-ON-LOAD ---
 
     root.dataset.initialized = "true";
   }
