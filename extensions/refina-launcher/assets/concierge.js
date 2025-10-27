@@ -56,60 +56,6 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
-    // --- REVISED INTERCEPTOR (handles relative /apps/refina AND absolute proxy /proxy/refina) ---
-    // Intercept menu/footer links and open the modal instead of navigating.
-    // Use CAPTURE phase so we beat theme handlers that navigate early.
-    function refinaInterceptHandler(e) {
-      const a = e.target && e.target.closest ? e.target.closest("a") : null;
-      if (!a) return;
-
-      // allow new-tab/middle-click/etc.
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank" || a.hasAttribute("download")) return;
-
-      const href = a.getAttribute("href") || "";
-      if (!href) return;
-
-      // Resolve to absolute URL for robust matching
-      const urlObj = new URL(href, location.origin);
-      const hrefAbs = urlObj.toString();
-      const path = urlObj.pathname;
-
-      // Match:
-      //  - /apps/refina... (store-relative App Proxy)
-      //  - /proxy/refina... (absolute proxy host)
-      //  - links explicitly flagged via data-refina-open="1"
-      //  - or links containing path_prefix=/apps/refina
-      const isRefinaLink =
-        a.dataset.refinaOpen === "1" ||
-        path.startsWith("/apps/refina") ||
-        path.startsWith("/proxy/refina") ||
-        hrefAbs.includes("/apps/refina") ||
-        hrefAbs.includes("/proxy/refina") ||
-        urlObj.searchParams.get("path_prefix") === "/apps/refina";
-
-      if (!isRefinaLink) return;
-
-      // Block theme/router navigation
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-
-      const widgetUrl = buildIframeUrl();
-
-      if (IN_THEME_EDITOR || IN_ADMIN) {
-        try { window.open(widgetUrl, "_blank", "noopener"); } catch { location.href = widgetUrl; }
-      } else {
-        openModal(); // same modal size/behavior as the launcher button
-      }
-    }
-
-    // Capture-phase listeners to win races with theme scripts
-    document.addEventListener("click", refinaInterceptHandler, true);
-    document.addEventListener("mousedown", refinaInterceptHandler, true);   // belt & braces for some themes
-    document.addEventListener("touchstart", refinaInterceptHandler, true);  // mobile taps
-
-    // --- END REVISED INTERCEPTOR ---
-
     // Early exits
     if (!shopDomain) {
       root.dataset.initialized = "true";
