@@ -56,31 +56,43 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
+    // --- REVISED INTERCEPTOR (handles relative /apps/refina AND absolute proxy /proxy/refina) ---
     document.addEventListener("click", (e) => {
-  const a = e.target && e.target.closest ? e.target.closest("a") : null;
-  if (!a) return;
+      const a = e.target && e.target.closest ? e.target.closest("a") : null;
+      if (!a) return;
 
-  // allow new-tab/middle-click/etc.
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank" || a.hasAttribute("download")) return;
+      // allow new-tab/middle-click/etc.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank" || a.hasAttribute("download")) return;
 
-  const href = a.getAttribute("href") || "";
-  const sameOrigin = !/^https?:\/\//i.test(href) || a.origin === location.origin;
+      let href = a.getAttribute("href") || "";
+      if (!href) return;
 
-  // SAME endpoint as the launcher link
-  const isRefinaLink = sameOrigin && href.startsWith("/apps/refina");
+      // Resolve to absolute URL for robust matching
+      const urlObj = new URL(href, location.origin);
+      const hrefAbs = urlObj.toString();
+      const path = urlObj.pathname;
 
-  if (!isRefinaLink) return;
+      const isRefinaLink =
+        a.dataset.refinaOpen === "1" ||
+        path.startsWith("/apps/refina") ||
+        path.startsWith("/proxy/refina") ||
+        hrefAbs.includes("/apps/refina") ||
+        hrefAbs.includes("/proxy/refina") ||
+        urlObj.searchParams.get("path_prefix") === "/apps/refina";
 
-  e.preventDefault(); // don't navigate to proxy
-  const url = buildIframeUrl(); // identical URL the launcher uses (source=launcher, etc.)
+      if (!isRefinaLink) return;
 
-  if (IN_THEME_EDITOR || IN_ADMIN) {
-    // keep current editor behavior (open in new tab)
-    try { window.open(url, "_blank", "noopener"); } catch { location.href = url; }
-  } else {
-    openModal(); // open the existing widget/modal (same size as launcher)
-  }
-});
+      e.preventDefault(); // don't navigate to proxy
+      const url = buildIframeUrl(); // identical URL the launcher uses (source=launcher, etc.)
+
+      if (IN_THEME_EDITOR || IN_ADMIN) {
+        // keep current editor behavior (open in new tab)
+        try { window.open(url, "_blank", "noopener"); } catch { location.href = url; }
+      } else {
+        openModal(); // open the existing widget/modal (same size as launcher)
+      }
+    });
+    // --- END REVISED INTERCEPTOR ---
 
     // Early exits
     if (!shopDomain) {
@@ -234,9 +246,23 @@
       }
     });
 
-    if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {
-      setTimeout(openModal, 0);
+    // --- REVISED OPEN-ON-LOAD (adds ?refina=1 / #refina deeplink support) ---
+    {
+      const shouldOpenOnLoad = openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN);
+      const u = new URL(location.href);
+      const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
+      const deeplink = refinaParam === "1" || location.hash === "#refina";
+
+      if ((shouldOpenOnLoad || deeplink) && !(IN_THEME_EDITOR || IN_ADMIN)) {
+        setTimeout(openModal, 0);
+        if (deeplink && history.replaceState) {
+          u.searchParams.delete("refina");
+          const keepHash = (location.hash === "#refina") ? "" : location.hash;
+          history.replaceState({}, "", u.pathname + u.search + keepHash);
+        }
+      }
     }
+    // --- END REVISED OPEN-ON-LOAD ---
 
     root.dataset.initialized = "true";
   }
