@@ -57,19 +57,26 @@
     const zIndex = 2147483646;
 
     // --- NEW: Storefront deeplink (runs before early exits) ---
-    {
-      const u = new URL(location.href);
-      const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
-      const deeplink = refinaParam === "1" || location.hash === "#refina";
-      if (deeplink) {
-        setTimeout(() => { try { openModal(); } catch(_) {} }, 0);
-        if (history.replaceState) {
-          u.searchParams.delete("refina");
-          const keepHash = (location.hash === "#refina") ? "" : location.hash;
-          history.replaceState({}, "", u.pathname + u.search + keepHash);
-        }
+     // --- STOREFRONT HASH DEEPLINK (/#refina) ---
+{
+  function maybeOpenFromHash() {
+    if (location.hash === '#refina') {
+      setTimeout(openModal, 0);
+      // remove the hash without reloading
+      if (history.replaceState) {
+        history.replaceState({}, '', location.pathname + location.search);
+      } else {
+        location.hash = '';
       }
     }
+  }
+  // run once on load
+  maybeOpenFromHash();
+  // run again if a SPA/theme changes the hash later
+  window.addEventListener('hashchange', maybeOpenFromHash, false);
+}
+// --- END STOREFRONT HASH DEEPLINK ---
+
     // --- END NEW ---
 
     // Early exits
