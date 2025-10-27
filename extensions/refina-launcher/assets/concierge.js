@@ -208,22 +208,23 @@
       }
     });
 
-    // --- REVISED OPEN-ON-LOAD (adds ?refina=1 / #refina deeplink support) ---
-    {
-      const shouldOpenOnLoad = openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN);
-      const u = new URL(location.href);
-      const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
-      const deeplink = refinaParam === "1" || location.hash === "#refina";
+    // Storefront deeplink: open modal when URL has ?refina=1 or #refina
+{
+  const u = new URL(location.href);
+  const refinaParam = (u.searchParams.get("refina") || "").toLowerCase();
+  const deeplink = refinaParam === "1" || location.hash === "#refina";
 
-      if ((shouldOpenOnLoad || deeplink) && !(IN_THEME_EDITOR || IN_ADMIN)) {
-        setTimeout(openModal, 0);
-        if (deeplink && history.replaceState) {
-          u.searchParams.delete("refina");
-          const keepHash = (location.hash === "#refina") ? "" : location.hash;
-          history.replaceState({}, "", u.pathname + u.search + keepHash);
-        }
-      }
+  if (deeplink) {
+    setTimeout(openModal, 0);
+    if (history.replaceState) {
+      u.searchParams.delete("refina");
+      const keepHash = (location.hash === "#refina") ? "" : location.hash;
+      history.replaceState({}, "", u.pathname + u.search + keepHash);
     }
+  } else if (openOnLoad) {
+    setTimeout(openModal, 0);
+  }
+}
     // --- END REVISED OPEN-ON-LOAD ---
 
     root.dataset.initialized = "true";
