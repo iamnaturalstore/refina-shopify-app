@@ -38,11 +38,11 @@ Refina Theme App Embed (Launcher, production)
   data-show-badges="{{ block.settings.show_badges }}"
   data-show-prices="{{ block.settings.show_prices }}"
 
-  {# NEW: Trigger & Positioning (passed to JS) #}
+    {# NEW: Behaviour & Positioning (passed to JS) #}
   data-trigger-method="{{ block.settings.trigger_method }}"
-  data-vertical-anchor="{{ block.settings.vertical_anchor }}"
-  data-x-offset="{{ block.settings.x_offset }}"
-  data-y-offset="{{ block.settings.y_offset }}"
+  data-launcher-orientation="{{ block.settings.launcher_orientation }}"
+  data-left-offset="{{ block.settings.left_offset }}"
+  data-right-offset="{{ block.settings.right_offset }}"
 
   {# context #}
   data-shop="{{ shop.permanent_domain }}"
@@ -80,19 +80,8 @@ Refina Theme App Embed (Launcher, production)
     ], "default": "solid"},
     { "type": "range", "id": "grid_columns", "label": "Product Grid Columns", "min": 2, "max": 4, "step": 1, "default": 3 },
 
-    { "type": "header", "content": "Behavior & Visibility" },
-    { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
-        { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
-    ]},
-    { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
-    { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
-    { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
-    { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
-    { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
-    { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
-    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true },
+    { "type": "header", "content": "Behaviour & Positioning" },
 
-    { "type": "header", "content": "Trigger & Positioning" },
     {
       "type": "select",
       "id": "trigger_method",
@@ -103,28 +92,33 @@ Refina Theme App Embed (Launcher, production)
         { "value": "menu", "label": "Menu link (/#refina)" }
       ]
     },
+
+    { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
+        { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
+    ]},
+
     {
       "type": "select",
-      "id": "vertical_anchor",
-      "label": "Vertical anchor",
-      "default": "bottom",
+      "id": "launcher_orientation",
+      "label": "Launcher Orientation",
+      "default": "horizontal",
       "options": [
-        { "value": "bottom", "label": "Bottom" },
-        { "value": "top", "label": "Top" }
+        { "value": "horizontal", "label": "Horizontal" },
+        { "value": "vertical", "label": "Vertical" }
       ]
     },
-    {
-      "type": "number",
-      "id": "x_offset",
-      "label": "X offset (px)",
-      "default": 16,
-    },
-    {
-      "type": "number",
-      "id": "y_offset",
-      "label": "Y offset (px)",
-      "default": 24,
-    }
+
+    { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
+    { "type": "number", "id": "left_offset", "label": "Left Offset (px)", "default": 16 },
+    { "type": "number", "id": "right_offset", "label": "Right Offset (px)", "default": 16 },
+
+    { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
+    { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
+    { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
+    { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
+    { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
+    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true }
+
   ],
   "enabled_on": { "templates": ["*"] }
 }

@@ -73,7 +73,15 @@
     const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
     const launcherRadius = radiusMap[settings.borderRadius] || "16px";
     const side = settings.side === "left" ? "left" : "right";
-    const offset = Math.max(0, parseInt(settings.offset || "24", 10));
+
+    // NEW: behaviour & positioning settings
+    const triggerMethod = (settings.triggerMethod || "launcher").toLowerCase(); // 'launcher' | 'menu'
+    const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase(); // 'horizontal' | 'vertical'
+    const bottomOffset = Math.max(0, parseInt(settings.offset || "24", 10)); // primary vertical offset (bottom)
+    const leftOffset = Math.max(0, parseInt(settings.leftOffset || "16", 10));
+    const rightOffset = Math.max(0, parseInt(settings.rightOffset || "16", 10));
+    const sideOffset = side === "left" ? leftOffset : rightOffset;
+
     const showMobile = String(settings.showMobile).toLowerCase() !== "false";
 
     const pageType = String(settings.pageType || "").toLowerCase();
@@ -88,19 +96,18 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
-    // Early exits (unchanged)
+    // Early checks
     if (!shopDomain) {
       root.dataset.initialized = "true";
       return;
     }
-    if ((hideOnProduct && pageType === "product") || (hideOnCart && pageType === "cart")) {
-      root.dataset.initialized = "true";
-      return;
-    }
-    if (!showMobile && isMobile()) {
-      root.dataset.initialized = "true";
-      return;
-    }
+
+    // Important: button-only guards. Do NOT return; we still want deep-link to work.
+    const buttonAllowed = !(
+      (hideOnProduct && pageType === "product") ||
+      (hideOnCart && pageType === "cart") ||
+      (!showMobile && isMobile())
+    );
 
     // Primary instance claim: first initialized handles deep-link open
     if (!window.__RefinaPrimary) {
@@ -112,7 +119,7 @@
       });
     }
 
-    // One-time style
+    // One-time style (add vertical tab support)
     if (!$("#refina-launcher-style")) {
       const style = document.createElement("style");
       style.id = "refina-launcher-style";
@@ -123,20 +130,29 @@
           --rf-primary-color: ${primaryColor};
         }
         .refina-launcher-btn {
-          position: fixed; ${side}: 16px; bottom: calc(${offset}px + var(--refina-safe-bottom));
-          display: inline-flex; align-items: center; gap: 8px;
+          position: fixed;
+          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
           padding: 10px 14px; border-radius: 9999px;
           font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, sans-serif;
           font-weight: 600; font-size: 14px; color: #fff; background: var(--rf-primary-color);
           border: 0; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: ${zIndex};
         }
         .refina-launcher-btn:focus { outline: 2px solid var(--rf-primary-color); outline-offset: 2px; }
+        .refina-launcher-btn--vertical {
+          width: 56px; height: 200px; padding: 0; border-radius: 12px;
+          writing-mode: horizontal-tb; /* keep normal; rotate inner text */
+        }
+        .refina-launcher-btn--vertical > span {
+          display: inline-block; transform: rotate(-90deg);
+          white-space: nowrap;
+        }
         .refina-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; }
         .refina-modal { position: relative; width: min(92vw, 980px); height: min(92vh, 720px); background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
         .refina-modal iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
         .refina-modal-close { position: absolute; top: calc(10px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 10px; background: rgba(17,17,17,.75); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
         @media (max-width: 640px) {
-          .refina-launcher-btn { ${side}: 12px; padding: 10px 12px; }
+          .refina-launcher-btn { padding: 10px 12px; }
+          .refina-launcher-btn--vertical { width: 48px; height: 180px; }
           .refina-modal { width: 100vw; height: 100vh; border-radius: 0; }
           .refina-modal-close { top: calc(12px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 12px; }
         }
@@ -144,25 +160,45 @@
       document.head.appendChild(style);
     }
 
-    // Button (original behavior)
-    const btn = document.createElement("button");
-    btn.className = "refina-launcher-btn";
-    btn.type = "button";
-    btn.setAttribute("aria-label", "Open shopping concierge");
-    btn.innerHTML = `<span>${launcherText}</span>`;
-    document.body.appendChild(btn);
+    // Button (only if trigger_method === 'launcher' AND button is allowed on this context)
+    let btn = null;
+    if (triggerMethod === "launcher" && buttonAllowed) {
+      btn = document.createElement("button");
+      btn.className = "refina-launcher-btn";
+      if (launcherOrientation === "vertical") {
+        btn.classList.add("refina-launcher-btn--vertical");
+      }
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Open shopping concierge");
+      btn.innerHTML = `<span>${launcherText}</span>`;
+      document.body.appendChild(btn);
 
-    // Apply theme-selected radius to the launcher bubble only (override 9999px)
-    btn.style.borderRadius = launcherRadius;
+      // Apply theme-selected radius to the launcher bubble only (override 9999px for horizontal)
+      btn.style.borderRadius = launcherOrientation === "vertical" ? "12px" : launcherRadius;
 
-    // Positioning & visibility on resize (original: horizontal only; bottom + offset)
-    const applyPos = () => {
-      btn.style.bottom = `calc(${offset}px + var(--refina-safe-bottom))`;
-      btn.style[side] = "16px";
-      btn.style.display = (!showMobile && isMobile()) ? "none" : "inline-flex";
-    };
-    applyPos();
-    window.addEventListener("resize", applyPos, { passive: true });
+      // Positioning & visibility on resize (Bottom offset + side-specific offset)
+      const applyPos = () => {
+        btn.style.top = "";
+        btn.style.bottom = `calc(${bottomOffset}px + var(--refina-safe-bottom))`;
+        btn.style.left = ""; btn.style.right = "";
+        btn.style[side] = `${sideOffset}px`;
+        btn.style.display = (!showMobile && isMobile()) ? "none" : "inline-flex";
+      };
+      applyPos();
+      window.addEventListener("resize", applyPos, { passive: true });
+
+      // Click behavior: editor/admin → new tab; live storefront → modal
+      btn.addEventListener("click", () => {
+        const url = buildIframeUrl();
+        if (IN_THEME_EDITOR || IN_ADMIN) {
+          try { window.open(url, "_blank", "noopener"); }
+          catch (_) { location.href = url; }
+        } else {
+          window.__RefinaOpenSource = "launcher";
+          openModal();
+        }
+      });
+    }
 
     let overlay = null;
     let lastFocus = null;
@@ -182,7 +218,7 @@
       // Legacy param many widgets already read:
       if (launcherText)  base.searchParams.set("cta-text", launcherText);
 
-      base.searchParams.set("source", "launcher");
+      base.searchParams.set("source", window.__RefinaOpenSource || "launcher");
       try {
         if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1");
       } catch {}
@@ -236,7 +272,7 @@
       overlay.remove();
       overlay = null;
       if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
-      else btn.focus();
+      else if (btn && typeof btn.focus === "function") btn.focus();
     }
 
     // Wrapper for deeplink opens: guard + attribution
@@ -247,28 +283,14 @@
       window.__RefinaDeeplinkPending = false;
     }
 
-    // Click behavior: editor/admin → new tab; live storefront → modal
-    btn.addEventListener("click", () => {
-      const url = buildIframeUrl();
-      if (IN_THEME_EDITOR || IN_ADMIN) {
-        try { window.open(url, "_blank", "noopener"); }
-        catch (_) { location.href = url; }
-      } else {
-        openModal();
-      }
-    });
-
     if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {
       setTimeout(openModal, 0);
     }
 
-    // ─────────────────────────────────────────────────────────────
     // Phase 1: Auto-open once if deep-link arrived before init (primary only)
-    // ─────────────────────────────────────────────────────────────
     if (window.__RefinaPrimary === root && window.__RefinaDeeplinkPending && !(IN_THEME_EDITOR || IN_ADMIN)) {
       openModalFromDeeplink();
     }
-    // ─────────────────────────────────────────────────────────────
 
     root.dataset.initialized = "true";
   }
