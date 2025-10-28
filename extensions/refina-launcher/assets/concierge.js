@@ -139,7 +139,10 @@
         }
         .refina-launcher-btn:focus { outline: 2px solid var(--rf-primary-color); outline-offset: 2px; }
         .refina-launcher-btn--vertical {
-          width: 56px; height: 200px; padding: 0; border-radius: 12px;
+          width: 48px; padding: 0;
+          /* Height is set dynamically by JS based on label length */
+          min-height: 120px;  /* guardrails so it still looks like a tab */
+          max-height: 260px;  /* adjust if you prefer */
           writing-mode: horizontal-tb; /* keep normal; rotate inner text */
         }
         .refina-launcher-btn--vertical > span {
@@ -152,7 +155,7 @@
         .refina-modal-close { position: absolute; top: calc(10px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 10px; background: rgba(17,17,17,.75); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
         @media (max-width: 640px) {
           .refina-launcher-btn { padding: 10px 12px; }
-          .refina-launcher-btn--vertical { width: 48px; height: 180px; }
+          .refina-launcher-btn--vertical { width: 48px; }
           .refina-modal { width: 100vw; height: 100vh; border-radius: 0; }
           .refina-modal-close { top: calc(12px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 12px; }
         }
@@ -176,6 +179,11 @@
       // Apply theme-selected radius to the launcher bubble only (override 9999px for horizontal)
       btn.style.borderRadius = launcherRadius;
 
+      // If vertical, auto-size height to the label
+      if (launcherOrientation === "vertical") {
+        autosizeVerticalTab(btn);
+      }
+
       // Positioning & visibility on resize (Bottom offset + side-specific offset)
       const applyPos = () => {
         btn.style.top = "";
@@ -183,9 +191,37 @@
         btn.style.left = ""; btn.style.right = "";
         btn.style[side] = `${sideOffset}px`;
         btn.style.display = (!showMobile && isMobile()) ? "none" : "inline-flex";
+        if (launcherOrientation === "vertical") autosizeVerticalTab(btn);
       };
       applyPos();
       window.addEventListener("resize", applyPos, { passive: true });
+
+      function autosizeVerticalTab(btnEl) {
+  try {
+    const span = btnEl.querySelector('span');
+    if (!span) return;
+
+    const cs = window.getComputedStyle(btnEl);
+    const font = `${cs.fontWeight || 600} ${cs.fontSize || '14px'} ${cs.fontFamily || 'system-ui'}`;
+
+    const canvas = autosizeVerticalTab.__canvas || (autosizeVerticalTab.__canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    ctx.font = font;
+
+    const text = span.textContent || '';
+    const textWidth = ctx.measureText(text).width;
+
+    // Visual padding along the long axis (top+bottom after rotation)
+    const PAD = 16;              // adjust for cushier tabs if you like
+    const minH = 120, maxH = 260;
+
+    const targetHeight = Math.max(minH, Math.min(Math.ceil(textWidth + PAD * 2), maxH));
+    btnEl.style.height = `${targetHeight}px`;
+  } catch {
+    btnEl.style.height = '200px'; // safe fallback
+  }
+}
+
 
       // Click behavior: editor/admin → new tab; live storefront → modal
       btn.addEventListener("click", () => {
