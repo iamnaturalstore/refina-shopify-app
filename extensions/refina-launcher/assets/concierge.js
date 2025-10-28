@@ -174,7 +174,7 @@
       document.body.appendChild(btn);
 
       // Apply theme-selected radius to the launcher bubble only (override 9999px for horizontal)
-      btn.style.borderRadius = launcherOrientation === "vertical" ? "12px" : launcherRadius;
+      btn.style.borderRadius = launcherRadius;
 
       // Positioning & visibility on resize (Bottom offset + side-specific offset)
       const applyPos = () => {
