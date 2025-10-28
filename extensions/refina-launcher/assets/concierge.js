@@ -8,6 +8,39 @@
   if (window.__REFINA_LAUNCHER_LOADED__) return;
   window.__REFINA_LAUNCHER_LOADED__ = true;
 
+  // ─────────────────────────────────────────────────────────────
+  // Deep-link router (#refina) → dispatch open signal
+  // ─────────────────────────────────────────────────────────────
+  window.__RefinaPrimary = window.__RefinaPrimary || null;          // which instance handles open
+  window.__RefinaDeeplinkPending = window.__RefinaDeeplinkPending || false;
+  window.__RefinaOpenSource = "launcher";                            // default attribution
+
+  function hashWantsRefina() {
+    const h = (location.hash || "").toLowerCase();
+    return h === "#refina" || h === "#open-refina";
+  }
+
+  function handleHashOnceAndClean() {
+    // Editor/Admin guard is respected later by the primary instance
+    if (hashWantsRefina()) {
+      window.__RefinaDeeplinkPending = true;
+      window.__RefinaOpenSource = "deeplink";
+      // Signal any initialized instance
+      document.dispatchEvent(new Event("refina:open"));
+      // Clean the URL so refresh/back doesn't re-open
+      try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+    }
+  }
+
+  // On load & on hash changes
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", handleHashOnceAndClean, { once: true });
+  } else {
+    handleHashOnceAndClean();
+  }
+  window.addEventListener("hashchange", handleHashOnceAndClean, { passive: true });
+
+
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
@@ -40,10 +73,19 @@
     // Radius mapping for the **launcher bubble only**
     const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
     const launcherRadius = radiusMap[settings.borderRadius] || "16px";
-
     const side = settings.side === "left" ? "left" : "right";
-    const offset = Math.max(0, parseInt(settings.offset || "24", 10));
+
+    // New: trigger method (launcher|menu)
+    const triggerMethod = (settings.triggerMethod || "launcher").toLowerCase();
+
+    // New: vertical anchor + X/Y offsets (back-compat: legacy "offset" as Y if yOffset missing)
+    const verticalAnchor = (settings.verticalAnchor || "bottom").toLowerCase() === "top" ? "top" : "bottom";
+    const xOffset = Math.max(0, parseInt(settings.xOffset || "16", 10));
+    const yOffset = Math.max(0, parseInt(settings.yOffset || settings.offset || "24", 10));
+    const offset = yOffset; // back-compat for existing CSS template literal
+
     const showMobile = String(settings.showMobile).toLowerCase() !== "false";
+
     const pageType = String(settings.pageType || "").toLowerCase();
     const hideOnProduct = String(settings.hideOnProduct).toLowerCase() === "true";
     const hideOnCart = String(settings.hideOnCart).toLowerCase() === "true";
@@ -55,29 +97,6 @@
 
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
-
-    // --- NEW: Storefront deeplink (runs before early exits) ---
-     // --- STOREFRONT HASH DEEPLINK (/#refina) ---
-{
-  function maybeOpenFromHash() {
-    if (location.hash === '#refina') {
-      setTimeout(openModal, 0);
-      // remove the hash without reloading
-      if (history.replaceState) {
-        history.replaceState({}, '', location.pathname + location.search);
-      } else {
-        location.hash = '';
-      }
-    }
-  }
-  // run once on load
-  maybeOpenFromHash();
-  // run again if a SPA/theme changes the hash later
-  window.addEventListener('hashchange', maybeOpenFromHash, false);
-}
-// --- END STOREFRONT HASH DEEPLINK ---
-
-    // --- END NEW ---
 
     // Early exits
     if (!shopDomain) {
@@ -91,6 +110,16 @@
     if (!showMobile && isMobile()) {
       root.dataset.initialized = "true";
       return;
+    }
+
+    // Primary instance claim: first initialized handles deep-link open
+    if (!window.__RefinaPrimary) {
+      window.__RefinaPrimary = root;
+      document.addEventListener("refina:open", () => {
+        // Respect Editor/Admin behavior: deep-link is ignored in editor/admin
+        if (IN_THEME_EDITOR || IN_ADMIN) return;
+        openModalFromDeeplink();
+      });
     }
 
     // One-time style
@@ -125,25 +154,58 @@
       document.head.appendChild(style);
     }
 
-    // Button
-    const btn = document.createElement("button");
-    btn.className = "refina-launcher-btn";
-    btn.type = "button";
-    btn.setAttribute("aria-label", "Open shopping concierge");
-    btn.innerHTML = `<span>${launcherText}</span>`;
-    document.body.appendChild(btn);
+    // ─────────────────────────────────────────────────────────────
+    // DIFF D: Button creation only in launcher mode + Top/Bottom & X/Y positioning
+    // ─────────────────────────────────────────────────────────────
+    let btn = null;
 
-    // Apply theme-selected radius to the launcher bubble only (override 9999px)
-    btn.style.borderRadius = launcherRadius;
+    if (triggerMethod === "launcher") {
+      // Button
+      btn = document.createElement("button");
+      btn.className = "refina-launcher-btn";
+      btn.type = "button";
+      btn.setAttribute("aria-label", "Open shopping concierge");
+      btn.innerHTML = `<span>${launcherText}</span>`;
+      document.body.appendChild(btn);
 
-    // Positioning & visibility on resize
-    const applyPos = () => {
-      btn.style.bottom = `calc(${offset}px + var(--refina-safe-bottom))`;
-      btn.style[side] = "16px";
-      btn.style.display = (!showMobile && isMobile()) ? "none" : "inline-flex";
-    };
-    applyPos();
-    window.addEventListener("resize", applyPos, { passive: true });
+      // Apply theme-selected radius to the launcher bubble only (override 9999px)
+      btn.style.borderRadius = launcherRadius;
+
+      // Positioning & visibility on resize (Top/Bottom + X/Y offsets)
+      const applyPos = () => {
+        // clear both verticals, then set chosen anchor
+        btn.style.top = "";
+        btn.style.bottom = "";
+        if (verticalAnchor === "top") {
+          btn.style.top = `calc(${yOffset}px + var(--refina-safe-top))`;
+        } else {
+          btn.style.bottom = `calc(${yOffset}px + var(--refina-safe-bottom))`;
+        }
+
+        // horizontal side + X offset
+        btn.style.left = "";
+        btn.style.right = "";
+        btn.style[side] = `${xOffset}px`;
+
+        // visibility
+        btn.style.display = (!showMobile && isMobile()) ? "none" : "inline-flex";
+      };
+      applyPos();
+      window.addEventListener("resize", applyPos, { passive: true });
+
+      // Click behavior: editor/admin → new tab; live storefront → modal
+      btn.addEventListener("click", () => {
+        const url = buildIframeUrl();
+        if (IN_THEME_EDITOR || IN_ADMIN) {
+          try { window.open(url, "_blank", "noopener"); }
+          catch (_) { location.href = url; }
+        } else {
+          window.__RefinaOpenSource = "launcher";
+          openModal();
+        }
+      });
+    }
+    // ─────────────────────────────────────────────────────────────
 
     let overlay = null;
     let lastFocus = null;
@@ -216,24 +278,32 @@
       if (!overlay) return;
       overlay.remove();
       overlay = null;
-      if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
-      else btn.focus();
+      if (lastFocus && typeof lastFocus.focus === "function") {
+        lastFocus.focus();
+      } else if (typeof btn !== "undefined" && btn && typeof btn.focus === "function") {
+        btn.focus();
+      }
     }
 
-    // Click behavior: editor/admin → new tab; live storefront → modal
-    btn.addEventListener("click", () => {
-      const url = buildIframeUrl();
-      if (IN_THEME_EDITOR || IN_ADMIN) {
-        try { window.open(url, "_blank", "noopener"); }
-        catch (_) { location.href = url; }
-      } else {
-        openModal();
-      }
-    });
+    // Wrapper for deeplink opens: guard + attribution
+    function openModalFromDeeplink() {
+      window.__RefinaOpenSource = "deeplink";
+      openModal();
+      // ensure pending is cleared (e.g., if event arrived before init)
+      window.__RefinaDeeplinkPending = false;
+    }
 
     if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {
       setTimeout(openModal, 0);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // DIFF E: Auto-open once if deep-link arrived before init (primary only)
+    // ─────────────────────────────────────────────────────────────
+    if (window.__RefinaPrimary === root && window.__RefinaDeeplinkPending && !(IN_THEME_EDITOR || IN_ADMIN)) {
+      openModalFromDeeplink();
+    }
+    // ─────────────────────────────────────────────────────────────
 
     root.dataset.initialized = "true";
   }
