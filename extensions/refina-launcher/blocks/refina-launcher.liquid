@@ -5,8 +5,9 @@ Refina Theme App Embed (Launcher, production)
 - Editor-safe behavior is implemented inside the asset JS
 {%- endcomment -%}
 
-{{ 'concierge.css' | asset_url | append: '?v=' | append: 'now' | date: '%s' | stylesheet_tag }}
-<script type="module" src="{{ 'concierge.js' | asset_url | append: '?v=' | append: 'now' | date: '%s' }}" defer></script>
+{%- assign cachebust = 'now' | date: '%s' -%}
+{{ 'concierge.css' | asset_url | append: '?v=' | append: cachebust | stylesheet_tag }}
+<script type="module" src="{{ 'concierge.js' | asset_url | append: '?v=' | append: cachebust }}" defer></script>
 
 {%- assign page_type = template.name | downcase -%}
 
@@ -37,51 +38,7 @@ Refina Theme App Embed (Launcher, production)
   data-show-badges="{{ block.settings.show_badges }}"
   data-show-prices="{{ block.settings.show_prices }}"
 
-      { "type": "header", "content": "Trigger & Positioning" },
-
-    {
-      "type": "radio",
-      "id": "trigger_method",
-      "label": "Trigger method",
-      "options": [
-        { "label": "Launcher (floating button)", "value": "launcher" },
-        { "label": "Menu link (/#refina)", "value": "menu" }
-      ],
-      "default": "launcher",
-      "info": "Embed must remain enabled. Menu link opens Refina via a URL hash (/#refina). Theme Editor preview still opens in a new tab."
-    },
-
-    {
-      "type": "select",
-      "id": "vertical_anchor",
-      "label": "Vertical anchor",
-      "options": [
-        { "value": "bottom", "label": "Bottom" },
-        { "value": "top", "label": "Top" }
-      ],
-      "default": "bottom",
-      "info": "Where the launcher is anchored vertically."
-    },
-
-    {
-      "type": "number",
-      "id": "x_offset",
-      "label": "X offset (px)",
-      "default": 16,
-      "min": 0,
-      "info": "Distance from the chosen side (left or right)."
-    },
-
-    {
-      "type": "number",
-      "id": "y_offset",
-      "label": "Y offset (px)",
-      "default": 24,
-      "min": 0,
-      "info": "Distance from the chosen vertical anchor (top or bottom). If not set, uses the legacy Offset value."
-    },
-
-
+  {# NEW: Trigger & Positioning (passed to JS) #}
   data-trigger-method="{{ block.settings.trigger_method }}"
   data-vertical-anchor="{{ block.settings.vertical_anchor }}"
   data-x-offset="{{ block.settings.x_offset }}"
@@ -133,7 +90,43 @@ Refina Theme App Embed (Launcher, production)
     { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
     { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
     { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
-    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true }
+    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true },
+
+    { "type": "header", "content": "Trigger & Positioning" },
+    {
+      "type": "select",
+      "id": "trigger_method",
+      "label": "Trigger method",
+      "default": "launcher",
+      "options": [
+        { "value": "launcher", "label": "Launcher (floating button)" },
+        { "value": "menu", "label": "Menu link (/#refina)" }
+      ]
+    },
+    {
+      "type": "select",
+      "id": "vertical_anchor",
+      "label": "Vertical anchor",
+      "default": "bottom",
+      "options": [
+        { "value": "bottom", "label": "Bottom" },
+        { "value": "top", "label": "Top" }
+      ]
+    },
+    {
+      "type": "number",
+      "id": "x_offset",
+      "label": "X offset (px)",
+      "default": 16,
+      "min": 0
+    },
+    {
+      "type": "number",
+      "id": "y_offset",
+      "label": "Y offset (px)",
+      "default": 24,
+      "min": 0
+    }
   ],
   "enabled_on": { "templates": ["*"] }
 }
