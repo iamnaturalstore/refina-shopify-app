@@ -73,7 +73,7 @@
 .heading {
   text-align: center;
   font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2rem);
-  font-weight: 800;
+  font-weight: 500;
   color: var(--rf-color-primary);
   letter-spacing: 0.2px;
   margin-top: calc(var(--rf-spacing) * 1.5);
@@ -148,7 +148,7 @@
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 500;
   font-size: 1rem;
   color: var(--rf-on-primary);
   background: linear-gradient(180deg, var(--rf-color-primary), color-mix(in oklab, var(--rf-color-primary) 70%, black));
@@ -181,7 +181,7 @@
 }
 .responseBox h2 {
   font-size: 1.15rem;
-  font-weight: 800;
+  font-weight: 500;
   margin-bottom: calc(var(--rf-spacing) * 0.5);
   color: var(--rf-color-primary);
 }
@@ -352,7 +352,7 @@
   min-height: 42px;
   padding: 10px 18px;
   border-radius: 999px;                     /* keep the pill look */
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: .2px;
   margin: 0 auto 28px auto;                 /* stay centered */
   position: sticky;                         /* stick within the modal body */
