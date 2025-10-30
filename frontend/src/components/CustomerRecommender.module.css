@@ -377,3 +377,45 @@
 .card, .image, .modal, .modal img {
   border-radius: 14px !important;
 }
+/* === Ask button: light-mode defaults (CSS-only override) === */
+.askButton {
+  /* neutral pill so it’s never white-on-white */
+  --rf-btn-bg: var(--rf-btn-bg, #e7eaee);
+  --rf-btn-text: var(--rf-btn-text, #0b0f19);
+  --rf-btn-bg-hover: var(--rf-btn-bg-hover, #dfe3e9);
+  --rf-btn-bg-active: var(--rf-btn-bg-active, #d6dbe3);
+  --rf-btn-ring: var(--rf-btn-ring, rgba(59,130,246,0.45)); /* visible focus */
+
+  background: var(--rf-btn-bg);
+  color: var(--rf-btn-text);
+  border: 0;
+  box-shadow: 0 6px 18px rgba(16,24,40,0.08);
+  transition: background-color .15s ease, transform .05s ease, box-shadow .15s ease;
+  min-width: 140px; /* keeps width stable while text swaps */
+}
+
+.askButton:hover:not(:disabled) {
+  background: var(--rf-btn-bg-hover);
+  box-shadow: 0 8px 22px rgba(16,24,40,0.10);
+}
+
+.askButton:active:not(:disabled) {
+  background: var(--rf-btn-bg-active);
+  transform: translateY(1px);
+  box-shadow: 0 4px 12px rgba(16,24,40,0.12);
+}
+
+.askButton:focus-visible {
+  outline: 0;
+  box-shadow:
+    0 6px 18px rgba(16,24,40,0.08),
+    0 0 0 3px var(--rf-btn-ring);
+}
+
+/* Disabled stays readable (no “invisible” button) */
+.askButton:disabled {
+  background: #eceff3;
+  color: #6b7280;
+  box-shadow: none;
+  cursor: not-allowed;
+}
