@@ -11,7 +11,15 @@ Refina Theme App Embed (Launcher, production)
 
 {%- assign page_type = template.name | downcase -%}
 
-<div
+<style>
+  :root{
+    --rf-color-primary: {{ block.settings.primary_color }};
+    --rf-accent-color:  {{ block.settings.accent_color }};
+  }
+</style>
+
+<div class="refina-widget"
+  style="--rf-color-primary: {{ block.settings.primary_color }}; --rf-accent-color: {{ block.settings.accent_color }};"
   data-refina-launcher
   data-heading="{{ block.settings.heading }}"
   data-subheading="{{ block.settings.subheading }}"
