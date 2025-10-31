@@ -144,7 +144,7 @@ function teaserForCard(product, reasonsById) {
   return fromDesc || "A solid match for your request.";
 }
 
-export default function CustomerRecommender() {
+export default function CustomerRecommender({ initialPrompt = "" }) {
   const settings = useUrlSettings();
   const [concern, setConcern] = useState("");
   const [lastQuery, setLastQuery] = useState("");
@@ -192,6 +192,14 @@ export default function CustomerRecommender() {
     return () => progressTimers.current.forEach(clearTimeout);
   }, []);
   // ===== end staged progress =====
+
+  // One-time seed from initialPrompt (PDP Assist prefill)
+  useEffect(() => {
+    if (initialPrompt && !concern) {
+      setConcern(initialPrompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt]);
 
   // useEffect to apply theme settings from URL
   useEffect(() => {
@@ -378,6 +386,7 @@ export default function CustomerRecommender() {
 
       <textarea
         className={styles.textarea}
+        data-refina-input
         value={concern}
         onChange={(e) => setConcern(e.target.value)}
         onKeyDown={onTextKeyDown}

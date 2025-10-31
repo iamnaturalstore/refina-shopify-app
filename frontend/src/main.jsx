@@ -1,3 +1,4 @@
+// frontend/src/main.jsx
 console.log("🟢 Refina Embed: v3 Direct-Mount Loader Executed");
 
 import React, { useState, useEffect } from "react";
@@ -11,19 +12,19 @@ import { auth } from "./firebase"; // make sure this exports the initialized aut
 (() => {
   try {
     const qp = new URLSearchParams(window.location.search);
-    const primary = qp.get('primary-color');
-    const accent  = qp.get('accent-color');
-    if (primary) document.documentElement.style.setProperty('--rf-color-primary', primary);
-    if (accent)  document.documentElement.style.setProperty('--rf-accent-color', accent);
+    const primary = qp.get("primary-color");
+    const accent = qp.get("accent-color");
+    if (primary) document.documentElement.style.setProperty("--rf-color-primary", primary);
+    if (accent) document.documentElement.style.setProperty("--rf-accent-color", accent);
   } catch {}
 })();
-
 
 /**
  * The Root component remains the same. It accepts the storeId and handles Firebase auth.
  */
 function Root({ storeId }) {
   const [authReady, setAuthReady] = useState(false);
+  const [initialPrompt, setInitialPrompt] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -39,13 +40,22 @@ function Root({ storeId }) {
     return () => unsubscribe();
   }, []);
 
+  // Seed from ?prefill= if present (PDP Assist → iframe URL)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const prefill = params.get("prefill");
+      if (prefill) setInitialPrompt(prefill);
+    } catch {}
+  }, []);
+
   if (!authReady) {
     return null;
   }
 
   return (
     <React.StrictMode>
-      <App storeId={storeId} />
+      <App storeId={storeId} initialPrompt={initialPrompt} />
     </React.StrictMode>
   );
 }
@@ -55,7 +65,7 @@ function Root({ storeId }) {
  * This code now runs immediately, mirroring the timing of your old, working version,
  * while still using the safe data-fetching method required to prevent security errors.
  */
-const rootElement = document.getElementById('refina-concierge-root');
+const rootElement = document.getElementById("refina-concierge-root");
 
 if (rootElement) {
   // Safely get the storeId from the data attribute, with fallbacks. This is frame-safe.
@@ -69,4 +79,3 @@ if (rootElement) {
     rootElement.innerHTML = "<div>Error: Could not identify the store.</div>";
   }
 }
-

@@ -1,0 +1,125 @@
+{% comment %}
+Refina PDP Assist — pseudo-launcher for product pages
+- Intention-based: never auto-opens chat
+- Reuses existing launcher/modal via hash params or window.RefinaLauncher.open()
+- Safe in Theme Editor (designMode)
+
+Requires asset: assets/refina-pdp-assist.js
+{% endcomment %}
+
+{% assign product_obj = product | default: nil %}
+
+<div
+  class="refina-pdp-assist"
+  data-refina-pdp-assist
+  data-product-id="{{ product_obj.id | default: '' }}"
+  data-product-title="{{ product_obj.title | escape | default: '' }}"
+  data-product-price="{{ product_obj.price | money_without_currency | default: '' }}"
+  data-shop="{{ shop.permanent_domain }}"
+  data-button-text="{{ block.settings.button_text }}"
+  data-headline="{{ block.settings.headline }}"
+  data-subcopy="{{ block.settings.subcopy }}"
+  data-price-cap="{{ block.settings.price_cap }}"
+  data-chip-1="{{ block.settings.chip_1 }}"
+  data-chip-2="{{ block.settings.chip_2 }}"
+  data-chip-3="{{ block.settings.chip_3 }}"
+  data-chip-4="{{ block.settings.chip_4 }}"
+  data-style-radius="{{ block.settings.radius }}"
+  data-style-compact="{{ block.settings.compact }}"
+  data-style-accent="{{ block.settings.accent }}"
+>
+  <div class="refina-pdp-assist__card" style="border-radius: {{ block.settings.radius }}">
+    <div class="refina-pdp-assist__head">
+      <span class="refina-pdp-assist__icon" aria-hidden="true">🤖</span>
+      <div class="refina-pdp-assist__text">
+        <div class="refina-pdp-assist__headline">{{ block.settings.headline }}</div>
+        <div class="refina-pdp-assist__sub">{{ block.settings.subcopy }}</div>
+      </div>
+    </div>
+
+    <div class="refina-pdp-assist__actions">
+      <button type="button" class="refina-pdp-assist__button">
+        {{ block.settings.button_text }}
+      </button>
+      <div class="refina-pdp-assist__chips">
+        {% if block.settings.chip_1 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_1 }}</button>{% endif %}
+        {% if block.settings.chip_2 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_2 }}</button>{% endif %}
+        {% if block.settings.chip_3 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_3 }}</button>{% endif %}
+        {% if block.settings.chip_4 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_4 }}</button>{% endif %}
+      </div>
+    </div>
+
+    <div class="refina-pdp-assist__foot">Refina suggests up to 3 better fits and why.</div>
+  </div>
+</div>
+
+{{ 'refina-pdp-assist.js' | asset_url | script_tag }}
+
+<style>
+  .refina-pdp-assist__card {
+    background: color-mix(in srgb, var(--color-background, #0b0b0e) 92%, white 8%);
+    border: 1px solid color-mix(in srgb, var(--color-foreground, #ffffff) 12%, transparent);
+    padding: 12px 14px;
+  }
+  .refina-pdp-assist__head { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; }
+  .refina-pdp-assist__icon { font-size: 20px; }
+  .refina-pdp-assist__headline { font-weight: 600; line-height: 1.3; }
+  .refina-pdp-assist__sub { opacity: .8; font-size: .9em; margin-top: 2px; }
+  .refina-pdp-assist__actions { display: grid; gap: 8px; margin-top: 10px; }
+  .refina-pdp-assist__button {
+    width: 100%; padding: 10px 12px; border-radius: inherit; border: 1px solid rgba(255,255,255,.18);
+    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
+    cursor: pointer;
+  }
+  .refina-pdp-assist__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .refina-pdp-assist__chip {
+    padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
+    background: transparent; cursor: pointer; font-size: .9em;
+  }
+  .refina-pdp-assist__foot { opacity: .7; font-size: .8em; margin-top: 6px; }
+  {% if block.settings.compact %}
+  .refina-pdp-assist__sub, .refina-pdp-assist__foot { display: none; }
+  {% endif %}
+</style>
+
+{% schema %}
+{
+  "name": "Refina • PDP Assist (pseudo-launcher)",
+  "target": "section",
+  "templates": ["product"],
+  "settings": [
+    { "type": "text", "id": "headline", "label": "Headline", "default": "Not sure this is the one?" },
+    { "type": "text", "id": "subcopy", "label": "Subcopy", "default": "Ask Refina. Get 2–3 best-fit options and a quick ‘why’." },
+    { "type": "text", "id": "button_text", "label": "Button label", "default": "Ask about this product" },
+
+    { "type": "text", "id": "chip_1", "label": "Chip 1", "default": "Sensitive skin" },
+    { "type": "text", "id": "chip_2", "label": "Chip 2", "default": "Compare similar" },
+    { "type": "text", "id": "chip_3", "label": "Chip 3", "default": "Under $50" },
+    { "type": "text", "id": "chip_4", "label": "Chip 4", "default": "Fragrance-free" },
+
+    { "type": "text", "id": "price_cap", "label": "Default price cap (optional)", "default": "" },
+
+    { "type": "radio", "id": "accent", "label": "Accent", "default": "violet",
+      "options": [
+        { "value": "violet", "label": "Violet" },
+        { "value": "amber", "label": "Amber" },
+        { "value": "teal", "label": "Teal" }
+      ]
+    },
+    { "type": "select", "id": "radius", "label": "Border radius", "default": "16px",
+      "options": [
+        { "value": "0px", "label": "None" },
+        { "value": "8px", "label": "8px" },
+        { "value": "12px", "label": "12px" },
+        { "value": "16px", "label": "16px" },
+        { "value": "24px", "label": "24px" }
+      ]
+    },
+    { "type": "checkbox", "id": "compact", "label": "Compact mode (hide sub/foot)", "default": false }
+  ],
+  "blocks": [],
+  "presets": [
+    { "name": "Refina • PDP Assist" }
+  ]
+}
+{% endschema %}

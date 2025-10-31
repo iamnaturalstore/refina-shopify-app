@@ -17,7 +17,7 @@
 
   function hashWantsRefina() {
     const h = (location.hash || "").toLowerCase();
-    return h === "#refina" || h === "#open-refina";
+    return h.startsWith("#refina") || h === "#open-refina";
   }
 
   function handleHashOnceAndClean() {
@@ -118,6 +118,65 @@
         openModalFromDeeplink();
       });
     }
+
+    // ─────────────────────────────────────────────────────────────
+// Refina PDP Assist → Prefill bridge (hash + event, no launcher API)
+// ─────────────────────────────────────────────────────────────
+(function attachRefinaPrefillBridge() {
+  if (window.__REFINA_PREFILL_BRIDGE__) return;
+  window.__REFINA_PREFILL_BRIDGE__ = true;
+
+  function parseRefinaHash() {
+    if (!location.hash || !location.hash.toLowerCase().startsWith('#refina')) return null;
+    const q = location.hash.replace(/^#refina\??/i, '');
+    const params = new URLSearchParams(q);
+    // accept either "#refina" or "#refina?refina=1"
+    if (params.has('refina') === false && q.length > 0) {
+      // ok: querystring present but no explicit refina=1; still treat as valid
+    }
+    return {
+      source: params.get('source') || 'unknown',
+      shop: params.get('shop') || null,
+      productId: params.get('productId') || null,
+      productTitle: params.get('productTitle') || null,
+      priceCap: params.get('priceCap') || null,
+      chips: (params.get('chips') || '').split(',').filter(Boolean),
+      prefill: params.get('prefill') || ''
+    };
+  }
+
+  function maybeEmitPrefillAndOpen() {
+    const payload = parseRefinaHash();
+    if (!payload) return;
+
+    // Let the concierge UI prefill the input
+    try {
+      document.dispatchEvent(new CustomEvent('refina:prefill', { detail: payload }));
+      sessionStorage.setItem('refina_prefill', JSON.stringify(payload));
+    } catch {}
+
+    // Ask the existing launcher to open (your listener already calls openModalFromDeeplink)
+    document.dispatchEvent(new Event('refina:open'));
+
+    // Optional: clear the hash to avoid re-trigger on refresh/back
+    try { history.replaceState(null, '', location.pathname + location.search); } catch {}
+  }
+
+  window.addEventListener('load',       maybeEmitPrefillAndOpen);
+  window.addEventListener('hashchange', maybeEmitPrefillAndOpen);
+
+  // Allow late consumers to request the last payload (e.g., SPA mount order)
+  document.addEventListener('refina:prefill:request', () => {
+    const saved = sessionStorage.getItem('refina_prefill');
+    if (!saved) return;
+    try {
+      const payload = JSON.parse(saved);
+      if (payload) document.dispatchEvent(new CustomEvent('refina:prefill', { detail: payload }));
+    } catch {}
+  });
+})();
+
+
 
     // One-time style (add vertical tab support)
     if (!$("#refina-launcher-style")) {
