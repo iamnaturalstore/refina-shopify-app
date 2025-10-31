@@ -84,7 +84,7 @@ Requires asset: assets/refina-pdp-assist.js
 
 {% schema %}
 {
-  "name": "Refina • PDP Assist (pseudo-launcher)",
+  "name": "Refina PDP Assist",
   "target": "section",
   "templates": ["product"],
   "settings": [
@@ -97,7 +97,7 @@ Requires asset: assets/refina-pdp-assist.js
     { "type": "text", "id": "chip_3", "label": "Chip 3", "default": "Under $50" },
     { "type": "text", "id": "chip_4", "label": "Chip 4", "default": "Fragrance-free" },
 
-    { "type": "text", "id": "price_cap", "label": "Default price cap (optional)", "default": "" },
+    { "type": "text", "id": "price_cap", "label": "Default price cap (optional)", "default": "50" },
 
     { "type": "radio", "id": "accent", "label": "Accent", "default": "violet",
       "options": [
@@ -116,10 +116,6 @@ Requires asset: assets/refina-pdp-assist.js
       ]
     },
     { "type": "checkbox", "id": "compact", "label": "Compact mode (hide sub/foot)", "default": false }
-  ],
-  "blocks": [],
-  "presets": [
-    { "name": "Refina • PDP Assist" }
   ]
 }
 {% endschema %}
