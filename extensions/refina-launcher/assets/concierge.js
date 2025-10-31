@@ -43,6 +43,17 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
+  function readRefinaPrefill() {
+  try {
+    const raw = sessionStorage.getItem('refina_prefill');
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    return (p && typeof p === 'object') ? p : null;
+  } catch {
+    return null; // guards Safari ITP / blocked storage
+  }
+}
+
   const kebab = (s) => String(s || "").replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
   const isMobile = () => window.matchMedia("(max-width: 640px)").matches;
 
@@ -176,56 +187,6 @@
   });
 })();
 
-// ─────────────────────────────────────────────────────────────
-// Drawer → Prefill ingress API (callable or event-based)
-// Lets the drawer push a prefill into the widget without
-// modifying concierge.js anywhere else.
-// Usage (drawer):
-//   window.RefinaPrefill({ source:'drawer', prefill:'...', chips:['...'], priceCap:'40', productId:'123', productTitle:'...' })
-// or:
-//   document.dispatchEvent(new CustomEvent('refina:drawer:submit', { detail: { prefill:'...' } }))
-// ─────────────────────────────────────────────────────────────
-(function attachRefinaDrawerIngress() {
-  if (window.__REFINA_DRAWER_INGRESS__) return;
-  window.__REFINA_DRAWER_INGRESS__ = true;
-
-  function normalizePayload(x = {}) {
-    const out = {
-      source: String(x.source || 'drawer'),
-      prefill: String(x.prefill || ''),
-      productId: x.productId ? String(x.productId) : null,
-      productTitle: x.productTitle ? String(x.productTitle) : null,
-      priceCap: x.priceCap ? String(x.priceCap) : null,
-      chips: Array.isArray(x.chips) ? x.chips.filter(Boolean).map(String) : []
-    };
-    return out;
-  }
-
-  function writeAndSignal(payload) {
-    const p = normalizePayload(payload);
-    try {
-      sessionStorage.setItem('refina_prefill', JSON.stringify(p));
-    } catch {}
-    // Let any mounted UI (drawer/widget) prefill immediately
-    try {
-      document.dispatchEvent(new CustomEvent('refina:prefill', { detail: p }));
-    } catch {}
-    // Ask the launcher to open; primary instance will enforce editor/admin guards
-    document.dispatchEvent(new Event('refina:open'));
-    return true;
-  }
-
-  // 1) Global helper callable from the drawer
-  window.RefinaPrefill = function(payload) {
-    return writeAndSignal(payload || {});
-  };
-
-  // 2) Event-based ingress (if you prefer not to touch globals)
-  document.addEventListener('refina:drawer:submit', (ev) => {
-    const payload = (ev && ev.detail) || {};
-    writeAndSignal(payload);
-  });
-})();
 
 
     // One-time style (add vertical tab support)
@@ -385,6 +346,19 @@
       try { sessionStorage.removeItem("refina_prefill"); } catch (_) {}
     }
   } catch (_) {}
+
+  // — Carry prefill + PDP context from drawer (read-only, no removals) —
+const p = readRefinaPrefill();
+if (p) {
+  if (p.prefill)      base.searchParams.set('prefill', String(p.prefill));
+  if (p.productId)    base.searchParams.set('productId', String(p.productId));
+  if (p.productTitle) base.searchParams.set('productTitle', String(p.productTitle));
+  if (p.priceCap)     base.searchParams.set('priceCap', String(p.priceCap));
+  if (Array.isArray(p.chips) && p.chips.length) {
+    base.searchParams.set('chips', p.chips.join(','));
+  }
+  if (p.source)       base.searchParams.set('source', String(p.source));
+}
 
   // — Pass all theme settings as URL params (camelCase dataset → kebab-case query) —
   for (const key in settings) {
