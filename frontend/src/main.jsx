@@ -19,6 +19,13 @@ import { auth } from "./firebase"; // make sure this exports the initialized aut
   } catch {}
 })();
 
+// --- Read prefill from URL once (widget-only) ---
+let __rf_initialPrompt = "";
+try {
+  const qp = new URLSearchParams(window.location.search);
+  __rf_initialPrompt = (qp.get("prefill") || "").trim();
+} catch {}
+
 /**
  * The Root component remains the same. It accepts the storeId and handles Firebase auth.
  */
@@ -55,7 +62,7 @@ function Root({ storeId }) {
 
   return (
     <React.StrictMode>
-      <App storeId={storeId} initialPrompt={initialPrompt} />
+      <App storeId={storeId} initialPrompt={__rf_initialPrompt} />
     </React.StrictMode>
   );
 }

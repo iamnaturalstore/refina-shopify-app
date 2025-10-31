@@ -1,3 +1,4 @@
+// frontend/src/app.jsx
 import React from "react"
 import { Routes, Route, HashRouter } from "react-router-dom"
 import CustomerRecommender from "./components/CustomerRecommender.jsx";
@@ -5,18 +6,18 @@ import AdminDashboard from "./components/AdminDashboard"
 import { AppProvider as PolarisProvider } from "@shopify/polaris"
 import "@shopify/polaris/build/esm/styles.css"
 
-function RouterWithStore({ storeId }) {
+function RouterWithStore({ storeId, initialPrompt = "" }) {
   return (
     <HashRouter>
       <Routes>
-        <Route path="/" element={<CustomerRecommender storeId={storeId} />} />
+        <Route path="/" element={<CustomerRecommender storeId={storeId} initialPrompt={initialPrompt} />} />
         <Route path="/admin" element={<AdminDashboard storeId={storeId} />} />
       </Routes>
     </HashRouter>
   )
 }
 
-function App() {
+function App({ initialPrompt = "" }) {
   const [storeId, setStoreId] = React.useState("")
 
   React.useEffect(() => {
@@ -37,7 +38,7 @@ function App() {
 
   return (
     <PolarisProvider>
-      <RouterWithStore storeId={storeId} />
+      <RouterWithStore storeId={storeId} initialPrompt={initialPrompt} />
     </PolarisProvider>
   )
 }
