@@ -156,6 +156,8 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [reasonsById, setReasonsById] = useState({});
 
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const didAutoStartRef = useRef(false);      // auto-start once guard
+  const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
 
   // ===== Staged progress label (diffs only) =====
   const [progressLabel, setProgressLabel] = useState("Thinking…");
@@ -193,13 +195,71 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   }, []);
   // ===== end staged progress =====
 
-  // One-time seed from initialPrompt (PDP Assist prefill)
+  // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff.
   useEffect(() => {
-    if (initialPrompt && !concern) {
-      setConcern(initialPrompt);
+    let seeded = false;
+    let seedText = "";
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlPrefill = params.get("prefill");
+      if (urlPrefill && !seeded) {
+        seedText = urlPrefill;
+        seeded = true;
+      }
+    } catch {}
+
+    if (!seeded && initialPrompt) {
+      seedText = initialPrompt;
+      seeded = true;
+    }
+
+    if (!seeded) {
+      try {
+        const raw = sessionStorage.getItem("refina_prefill");
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            if (p && p.prefill) {
+              seedText = String(p.prefill || "");
+              seeded = !!seedText;
+            }
+          } catch {}
+          // optional: keep or clear; concierge clears on handoff already
+        }
+      } catch {}
+    }
+
+    if (seeded && seedText && !concern) {
+      setConcern(seedText);
+      seededFromPrefillRef.current = true;
+
+      // (2) Auto-start once, immediately after seeding
+      if (!didAutoStartRef.current) {
+        didAutoStartRef.current = true;
+        // call with the seed explicitly so we don't race on state
+        setTimeout(() => handleRecommend(seedText), 0);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPrompt]);
+  }, [initialPrompt]); // one-time seed on mount
+
+  // (3) Runtime seed bridge: allow opener to send a seed after mount
+  useEffect(() => {
+    function onSeed(ev) {
+      const d = ev?.detail || {};
+      const pre = String(d.prefill || "");
+      if (!pre) return;
+      setConcern(pre);
+      seededFromPrefillRef.current = true;
+      if (!didAutoStartRef.current) {
+        didAutoStartRef.current = true;
+        setTimeout(() => handleRecommend(pre), 0);
+      }
+    }
+    document.addEventListener("refina:seed", onSeed);
+    return () => document.removeEventListener("refina:seed", onSeed);
+  }, [handleRecommend]);
 
   // useEffect to apply theme settings from URL
   useEffect(() => {

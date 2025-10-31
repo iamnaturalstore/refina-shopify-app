@@ -299,26 +299,61 @@
     let lastFocus = null;
 
     function buildIframeUrl() {
-      const base = new URL(`https://${shopDomain}/apps/refina`);
+  // — Safe base URL (handles missing/empty shopDomain) —
+  let base;
+  try {
+    if (shopDomain && typeof shopDomain === "string" && shopDomain.indexOf(".") !== -1) {
+      base = new URL("https://" + shopDomain + "/apps/refina");
+    } else {
+      base = new URL("/apps/refina", location.origin);
+    }
+  } catch (_) {
+    base = new URL("/apps/refina", location.origin);
+  }
 
-      // Pass all theme settings as URL params (camelCase dataset → kebab-case query)
-      for (const key in settings) {
-        if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
-        base.searchParams.set(kebab(key), settings[key]);
+  // — Carry prefill + PDP context from drawer (all guards applied) —
+  try {
+    let raw = null;
+    try {
+      raw = (window && window.sessionStorage) ? sessionStorage.getItem("refina_prefill") : null;
+    } catch (_) { raw = null; }
+
+    if (raw) {
+      let p = {};
+      try { p = JSON.parse(raw || "{}") || {}; } catch (_) { p = {}; }
+
+      if (p.prefill)      base.searchParams.set("prefill", String(p.prefill));
+      if (p.productId)    base.searchParams.set("productId", String(p.productId));
+      if (p.productTitle) base.searchParams.set("productTitle", String(p.productTitle));
+      if (p.priceCap)     base.searchParams.set("priceCap", String(p.priceCap));
+      if (p.source)       base.searchParams.set("source", String(p.source));
+      if (Array.isArray(p.chips) && p.chips.length) {
+        base.searchParams.set("chips", p.chips.join(","));
       }
 
-      // Explicit params for back-compat / clarity
-      if (widgetCtaText) base.searchParams.set("widget-cta-text", widgetCtaText); // new, in-widget
-      if (launcherText)  base.searchParams.set("launcher-text", launcherText);    // optional (if iframe wants to display)
-      // Legacy param many widgets already read:
-      if (launcherText)  base.searchParams.set("cta-text", launcherText);
-
-      base.searchParams.set("source", window.__RefinaOpenSource || "launcher");
-      try {
-        if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1");
-      } catch {}
-      return base.toString();
+      // Hand off once per open (comment out to keep for SPA reuse)
+      try { sessionStorage.removeItem("refina_prefill"); } catch (_) {}
     }
+  } catch (_) {}
+
+  // — Pass all theme settings as URL params (camelCase dataset → kebab-case query) —
+  for (const key in settings) {
+    if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
+    base.searchParams.set(kebab(key), settings[key]);
+  }
+
+  // — Explicit params for back-compat / clarity —
+  if (widgetCtaText) base.searchParams.set("widget-cta-text", widgetCtaText); // new, in-widget
+  if (launcherText)  base.searchParams.set("launcher-text", launcherText);    // optional (if iframe wants to display)
+  if (launcherText)  base.searchParams.set("cta-text", launcherText);         // legacy many widgets read
+
+  base.searchParams.set("source", window.__RefinaOpenSource || "launcher");
+  try {
+    if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1");
+  } catch {}
+
+  return base.toString();
+}
 
     function openModal() {
       if (overlay) return;
