@@ -5,7 +5,8 @@
 
 /* --- Design tokens (safe defaults; override via inline CSS vars) --- */
 :root {
-  --rf-color-primary: var(--rf-color-primary, #7A5CFF); /* modern accent (violet) */
+  /* Neutral fallbacks; Theme Editor overrides via inline CSS vars */
+  --rf-color-primary: #64748B; /* slate (brand-agnostic) */
   --rf-color-primary-hover: color-mix(in oklab, var(--rf-color-primary) 80%, black);
   --rf-on-primary: #ffffff;
 
@@ -326,6 +327,7 @@
   .askButton, .card, .buyNow { transition: none; }
   .card:hover { transform: none; }
 }
+
 /* ——— Refina hot-fix overrides (append at end of file) ——— */
 
 /* Prevent theme bleed */
@@ -377,6 +379,7 @@
 .card, .image, .modal, .modal img {
   border-radius: 14px !important;
 }
+
 /* === Ask button: light-mode defaults (CSS-only override) === */
 .askButton {
   /* neutral pill so it’s never white-on-white */

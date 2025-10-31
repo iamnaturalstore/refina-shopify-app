@@ -7,6 +7,18 @@ import App from "./app.jsx";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase"; // make sure this exports the initialized auth object
 
+// --- Theme color hydration (widget-only) ---
+(() => {
+  try {
+    const qp = new URLSearchParams(window.location.search);
+    const primary = qp.get('primary-color');
+    const accent  = qp.get('accent-color');
+    if (primary) document.documentElement.style.setProperty('--rf-color-primary', primary);
+    if (accent)  document.documentElement.style.setProperty('--rf-accent-color', accent);
+  } catch {}
+})();
+
+
 /**
  * The Root component remains the same. It accepts the storeId and handles Firebase auth.
  */
