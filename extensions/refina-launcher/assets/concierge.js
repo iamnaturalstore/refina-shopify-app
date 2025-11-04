@@ -7,6 +7,15 @@
   if (window.__REFINA_LAUNCHER_LOADED__) return;
   window.__REFINA_LAUNCHER_LOADED__ = true;
 
+  // --- storefront no-op guard (let the extension-owned concierge run) ---
+  const __ref = document.referrer || "";
+  let __host = "";
+  try { __host = new URL(__ref, location.href).hostname || ""; } catch {}
+  const __IN_EDITOR = !!(window.Shopify && window.Shopify.designMode);
+  const __IN_ADMIN  = /(^|\.)admin\.shopify\.com$/i.test(__host);
+  const __IN_APP    = location.pathname.startsWith("/apps/refina");
+  if (!(__IN_EDITOR || __IN_ADMIN || __IN_APP)) { return; }
+
   // Deeplink/open state
   window.__RefinaPrimary = window.__RefinaPrimary || null;   // which instance handles open
   window.__RefinaDeeplinkPending = window.__RefinaDeeplinkPending || false;
@@ -81,7 +90,7 @@
     IN_ADMIN = /(^|\.)admin\.shopify\.com$/i.test(h);
   } catch { IN_ADMIN = false; }
 
-// ─────────────────────────────────────
+  // ─────────────────────────────────────
 // Init
 // ─────────────────────────────────────
 function initAll() {
