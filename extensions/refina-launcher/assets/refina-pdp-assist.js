@@ -19,7 +19,7 @@
     IN_ADMIN = /(^|\.)admin\.shopify\.com$/i.test(refHost);
   } catch {}
 
-  // Minimal CSS for drawer (glass look)
+  // Minimal CSS for drawer (glass look) + North Star additions
   (function injectDrawerCssOnce() {
     if (document.getElementById("refina-pdp-drawer-css")) return;
     const css = `
@@ -34,23 +34,30 @@
         transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
         display: grid; grid-template-rows: auto 1fr auto; border-top-left-radius: var(--rfina-dw-radius, 16px);
         border-bottom-left-radius: var(--rfina-dw-radius, 16px); overflow: hidden;
+        color: var(--color-foreground, #fff);
       }
       .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
-      .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 14px 14px 12px; }
-      .refina-dw-title { font-weight: 600; }
+
+      .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 8px; padding: 14px 14px 8px; }
+      .refina-dw-title { font-weight: 700; font-size: 18px; line-height: 1.25; margin: 0; }
+      .refina-dw-sub { grid-column: 1 / -1; font-size: 13px; opacity: .8; margin: 4px 0 0; }
+      .refina-dw-context { grid-column: 1 / -1; font-size: 12px; opacity: .7; margin: 6px 0 0; }
+
       .refina-dw-close { border: 1px solid rgba(255,255,255,.18); background: transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+
       .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
-      .refina-dw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+      .refina-dw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
       .refina-dw-chip { padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: transparent; cursor: pointer; font-size: .9em; }
       .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
-      .refina-dw-input { width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
+      .refina-dw-input { width: 100%; min-height: 88px; padding: 10px 12px; border-radius: 12px;
         border: 1px solid rgba(255,255,255,.18); background: color-mix(in srgb, var(--color-accent, #7A5CFF) 10%, transparent);
         color: inherit; resize: vertical; }
+
       .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
       .refina-dw-continue {
         width: 100%; padding: 10px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
         background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
-        font-weight: 600; cursor: pointer;
+        font-weight: 700; cursor: pointer;
       }
       @media (max-width: 640px) {
         .refina-dw { width: 100vw; }
@@ -177,13 +184,17 @@
       <div class="refina-dw-backdrop" data-close></div>
       <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
         <header class="refina-dw-head">
-          <h3 id="rf-dw-title" class="refina-dw-title">Fine-tune your ask</h3>
+          <div>
+            <h3 id="rf-dw-title" class="refina-dw-title">Fine-tune your ask</h3>
+            <p class="refina-dw-sub" data-subcopy style="display:none"></p>
+            <p class="refina-dw-context" data-context style="display:none"></p>
+          </div>
           <button type="button" class="refina-dw-close" data-close aria-label="Close">✕</button>
         </header>
         <div class="refina-dw-body">
           <div class="refina-dw-chips" data-chips></div>
           <label class="refina-dw-label" id="rf-dw-label">Message to Refina</label>
-          <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label" placeholder="Add details (skin type, budget, goals)…"></textarea>
+          <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label" placeholder="Add details (age/skin type, goals, budget)…"></textarea>
         </div>
         <footer class="refina-dw-foot">
           <button type="button" class="refina-dw-continue" data-continue>Continue</button>
@@ -196,19 +207,42 @@
   }
 
   function openDrawerFrom(root, basePayload) {
-    const radiusPx = root?.dataset?.styleRadius || "16px";
+    const ds = root?.dataset || {};
+    const radiusPx = ds.styleRadius || "16px";
     const host = ensureDrawer(radiusPx);
     const aside = host.querySelector(".refina-dw");
+
+    const titleEl = host.querySelector("#rf-dw-title");
+    const subEl = host.querySelector("[data-subcopy]");
+    const ctxEl = host.querySelector("[data-context]");
     const input = host.querySelector("[data-input]");
     const chipsBox = host.querySelector("[data-chips]");
+    const continueBtn = host.querySelector("[data-continue]");
 
     // Mint contextId at drawer open
     basePayload.contextId = basePayload.contextId || uuid();
 
+    // Header: headline + subcopy from theme settings
+    const headline = (ds.headline || "").trim();
+    const subcopy = (ds.subcopy || "").trim();
+    if (headline) titleEl.textContent = headline;
+    if (subcopy) { subEl.textContent = subcopy; subEl.style.display = ""; }
+
+    // Context hint (product title, subtle)
+    const ctx = (basePayload.productTitle || "").trim();
+    if (ctx) {
+      ctxEl.textContent = `Using: “${ctx}”`;
+      ctxEl.style.display = "";
+    }
+
+    // CTA label override from theme settings (widget/pdp button text)
+    const ctaText = (ds.buttonText || ds.widgetButtonText || "").trim();
+    if (ctaText) continueBtn.textContent = ctaText;
+
     // Seed input with payload.prefill
     input.value = basePayload.prefill || "";
 
-    // Render chips (reuse from block settings); also infer intent when a chip is clicked
+    // Render chips (reuse from block settings); infer intent on click
     chipsBox.innerHTML = "";
     (basePayload.chips || []).forEach((c) => {
       const b = document.createElement("button");
@@ -216,8 +250,8 @@
       b.className = "refina-dw-chip";
       b.textContent = c;
       b.addEventListener("click", () => {
-        const ctx = basePayload.productTitle ? ` — “${basePayload.productTitle}”` : "";
-        input.value = input.value ? `${input.value} ${c}${ctx}` : `${c}${ctx}`;
+        const ctxSuffix = basePayload.productTitle ? ` — “${basePayload.productTitle}”` : "";
+        input.value = input.value ? `${input.value} ${c}${ctxSuffix}` : `${c}${ctxSuffix}`;
         const maybeIntent = mapChipToIntent(c);
         if (maybeIntent) basePayload.intent = maybeIntent;
         input.focus();
@@ -238,12 +272,11 @@
     document.addEventListener("keydown", onEsc);
 
     // Continue → Option B: Refresh live PDP details, then open concierge
-    host.querySelector("[data-continue]").addEventListener("click", () => {
+    continueBtn.addEventListener("click", () => {
       const finalPrefill = (input.value || "").trim() || basePayload.prefill;
 
       // Re-read live PDP state (variant/price/availability/currency)
       const liveVariantId = findCurrentVariantId() || basePayload.variantId;
-      const ds = root.dataset || {};
       const refreshed = {
         ...basePayload,
         prefill: finalPrefill,
