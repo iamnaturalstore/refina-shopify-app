@@ -144,53 +144,6 @@ function teaserForCard(product, reasonsById) {
   return fromDesc || "A solid match for your request.";
 }
 
-// ─────────────────────────────────────────────
-// NEW (diff): one-shot prefill + editor guard + analytics
-// ─────────────────────────────────────────────
-const enableAutoAnswerFromPDP = true;
-
-function inThemeEditorOrAdmin() {
-  try {
-    if (window.Shopify && window.Shopify.designMode) return true;
-    const ref = new URL(document.referrer || "", location.href);
-    if (/(^|\.)admin\.shopify\.com$/i.test(ref.hostname || "")) return true;
-  } catch {}
-  return false;
-}
-
-// Read full prefill payload once from sessionStorage (and clear), else from URL.
-// Returns { text, payload } where `payload` may contain contextId, productId, intent…
-function readRefinaPrefillOnce() {
-  // 1) Prefer drawer handoff via sessionStorage
-  try {
-    const raw = sessionStorage.getItem("refina_prefill");
-    if (raw) {
-      sessionStorage.removeItem("refina_prefill"); // one-shot
-      const p = JSON.parse(raw);
-      const text = String(p?.prefill || "");
-      return { text, payload: (p && typeof p === "object") ? p : {} };
-    }
-  } catch {}
-
-  // 2) Fallback: parse URL params (drawer in admin/editor uses querystring too)
-  try {
-    const params = new URLSearchParams(location.search);
-    const text = String(params.get("prefill") || "");
-    if (text) {
-      const payload = {};
-      for (const [k, v] of params.entries()) {
-        // capture known keys for analytics
-        if (["contextId","productId","intent","shop","source","priceCap"].includes(k)) {
-          payload[k] = v;
-        }
-      }
-      return { text, payload };
-    }
-  } catch {}
-
-  return { text: "", payload: {} };
-}
-
 export default function CustomerRecommender({ initialPrompt = "" }) {
   const settings = useUrlSettings();
   const [concern, setConcern] = useState("");
@@ -205,8 +158,6 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const didAutoStartRef = useRef(false);      // auto-start once guard
   const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
-  const userInteractedRef = useRef(false);    // cancel auto if user types in-widget
-  const lastPrefillPayloadRef = useRef(null); // keep full payload for analytics
 
   // ===== Staged progress label (diffs only) =====
   const [progressLabel, setProgressLabel] = useState("Thinking…");
@@ -244,67 +195,48 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   }, []);
   // ===== end staged progress =====
 
-  // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff (ONE-SHOT).
+  // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff.
   useEffect(() => {
     let seeded = false;
     let seedText = "";
 
-    // Prefer the one-shot helper (clears storage; also parses URL if present)
-    const { text: oneShotText, payload } = readRefinaPrefillOnce();
-    if (oneShotText) {
-      seedText = oneShotText;
-      lastPrefillPayloadRef.current = payload || null;
-      seeded = true;
-    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlPrefill = params.get("prefill");
+      if (urlPrefill && !seeded) {
+        seedText = urlPrefill;
+        seeded = true;
+      }
+    } catch {}
 
-    // If no one-shot, then URL-only prefill (already handled above) or initialPrompt
     if (!seeded && initialPrompt) {
       seedText = initialPrompt;
       seeded = true;
+    }
+
+    if (!seeded) {
+      try {
+        const raw = sessionStorage.getItem("refina_prefill");
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            if (p && p.prefill) {
+              seedText = String(p.prefill || "");
+              seeded = !!seedText;
+            }
+          } catch {}
+          // optional: keep or clear; concierge clears on handoff already
+        }
+      } catch {}
     }
 
     if (seeded && seedText && !concern) {
       setConcern(seedText);
       seededFromPrefillRef.current = true;
 
-      // (2) Auto-start once, immediately after seeding (with guards)
-      const preLen = seedText.trim().length;
-      const skip =
-        !enableAutoAnswerFromPDP ||
-        inThemeEditorOrAdmin() ||
-        didAutoStartRef.current ||
-        userInteractedRef.current ||
-        preLen < 6 ||
-        loading ||
-        (Array.isArray(matchedProducts) && matchedProducts.length > 0);
-
-      if (!skip) {
+      // (2) Auto-start once, immediately after seeding
+      if (!didAutoStartRef.current) {
         didAutoStartRef.current = true;
-
-        // Analytics: drawer_auto_answer (best-effort)
-        try {
-          const storeId =
-            new URLSearchParams(location.search).get("shop") ||
-            document.getElementById("root")?.dataset.shop ||
-            "";
-
-          const meta = lastPrefillPayloadRef.current || {};
-          fetch(`${API_PREFIX}/analytics/ingest`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              storeId,
-              type: "concern",
-              event: "drawer_auto_answer",
-              concern: seedText,
-              contextId: meta.contextId || null,
-              productId: meta.productId || null,
-              intent: meta.intent || null,
-            }),
-            keepalive: true,
-          });
-        } catch {}
-
         // call with the seed explicitly so we don't race on state
         setTimeout(() => handleRecommend(seedText), 0);
       }
@@ -312,60 +244,22 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPrompt]); // one-time seed on mount
 
-  // (3) Runtime seed bridge: allow opener to send a seed after mount (one-shot semantics)
+  // (3) Runtime seed bridge: allow opener to send a seed after mount
   useEffect(() => {
     function onSeed(ev) {
       const d = ev?.detail || {};
       const pre = String(d.prefill || "");
       if (!pre) return;
-
-      // treat as one-shot: overwrite any existing concern only if we have none
-      setConcern((prev) => prev || pre);
+      setConcern(pre);
       seededFromPrefillRef.current = true;
-      lastPrefillPayloadRef.current = d || null;
-
-      const preLen = pre.trim().length;
-      const skip =
-        !enableAutoAnswerFromPDP ||
-        inThemeEditorOrAdmin() ||
-        didAutoStartRef.current ||
-        userInteractedRef.current ||
-        preLen < 6 ||
-        loading ||
-        (Array.isArray(matchedProducts) && matchedProducts.length > 0);
-
-      if (!skip) {
+      if (!didAutoStartRef.current) {
         didAutoStartRef.current = true;
-
-        // Analytics: drawer_auto_answer (best-effort)
-        try {
-          const storeId =
-            new URLSearchParams(location.search).get("shop") ||
-            document.getElementById("root")?.dataset.shop ||
-            "";
-          fetch(`${API_PREFIX}/analytics/ingest`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              storeId,
-              type: "concern",
-              event: "drawer_auto_answer",
-              concern: pre,
-              contextId: d.contextId || null,
-              productId: d.productId || null,
-              intent: d.intent || null,
-            }),
-            keepalive: true,
-          });
-        } catch {}
-
         setTimeout(() => handleRecommend(pre), 0);
       }
     }
     document.addEventListener("refina:seed", onSeed);
     return () => document.removeEventListener("refina:seed", onSeed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleRecommend, loading, matchedProducts]);
+  }, [handleRecommend]);
 
   // useEffect to apply theme settings from URL
   useEffect(() => {
@@ -423,11 +317,10 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
       try {
         // --- resolve storeId from ?shop= or #root[data-shop] ---
-       const rootEl = document.getElementById("root");
-       const storeId =
-         new URLSearchParams(location.search).get("shop") ||
-         (rootEl && rootEl.dataset ? rootEl.dataset.shop : "") ||
-         "";
+        const storeId =
+          new URLSearchParams(location.search).get("shop") ||
+          document.getElementById("root")?.dataset.shop ||
+          "";
 
         const resp = await fetch(`${API_PREFIX}/recommend`, {
           method: "POST",
@@ -461,10 +354,9 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         // Analytics (best-effort)
         try {
           // Resolve storeId again the same way as for /recommend
-          const rootEl2 = document.getElementById("root");
           const storeId2 =
             new URLSearchParams(location.search).get("shop") ||
-            (rootEl2 && rootEl2.dataset ? rootEl2.dataset.shop : "") ||
+            document.getElementById("root")?.dataset.shop ||
             "";
 
           const analyticsPayload = {
@@ -474,7 +366,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
             concern: q,
             productIds: products.map((p) => p.id),
             meta: {
-              plan: (window.__REFINA__ && window.__REFINA__.plan) || "unknown",
+              plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
               model: (data?.meta?.model || data?.meta?.source) || "",
             },
           };
@@ -556,10 +448,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         className={styles.textarea}
         data-refina-input
         value={concern}
-        onChange={(e) => {
-          userInteractedRef.current = true; // <<< diff: cancel auto on manual edits
-          setConcern(e.target.value);
-        }}
+        onChange={(e) => setConcern(e.target.value)}
         onKeyDown={onTextKeyDown}
         placeholder="Type your concern… (Enter to Ask, Shift+Enter for new line)"
       />
