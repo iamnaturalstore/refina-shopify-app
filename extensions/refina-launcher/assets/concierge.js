@@ -19,29 +19,21 @@
   // ─────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────
-  function readRefinaPrefillOnce() {
-    try {
-      const raw = sessionStorage.getItem("refina_prefill");
-      if (!raw) return null;
-      sessionStorage.removeItem("refina_prefill"); // one-shot: clear after read
-      const p = JSON.parse(raw);
-      return (p && typeof p === "object") ? p : null;
-    } catch {
-      return null;
-    }
-  }
-
-  // Compat shim for any legacy callers elsewhere on the page
+  // Non-destructive read (keep until ACK)
   function readRefinaPrefill() {
     try {
       const raw = sessionStorage.getItem("refina_prefill");
       if (!raw) return null;
       const p = JSON.parse(raw);
       return (p && typeof p === "object") ? p : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
+  // Clear only after iframe ACK or on modal close (fallback)
+  function clearRefinaPrefill() {
+    try { sessionStorage.removeItem("refina_prefill"); } catch {}
+  }
+
+  const kebab = (s) => String(s || "").replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
 
   function hashWantsRefina() {
     const h = (location.hash || "").toLowerCase();
@@ -51,12 +43,14 @@
   function handleHashOnceAndClean() {
     if (!hashWantsRefina()) return;
 
-    // Stash payload into sessionStorage for late consumers
+    // Stash hash payload; do NOT clear here (we’ll clear on ACK/close)
     try {
       const q = location.hash.replace(/^#refina\??/i, "");
       const params = new URLSearchParams(q);
       const payload = {};
       params.forEach((v, k) => (payload[k] = v));
+      // Normalize source to canonical "pdp" if it smells like pdp-assist
+      if (payload.source && /pdp/i.test(payload.source)) payload.source = "pdp";
       if (Object.keys(payload).length) {
         sessionStorage.setItem("refina_prefill", JSON.stringify(payload));
       }
@@ -141,32 +135,66 @@
     );
 
     // Primary instance claim + unified open handler
-    if (!window.__RefinaPrimary) {
-      window.__RefinaPrimary = root;
-      document.addEventListener("refina:open", () => {
-        const url = buildIframeUrl();
-        if (IN_THEME_EDITOR || IN_ADMIN) {
-          // Editor/Admin: open in a new tab (no modal)
-          try { window.open(url, "_blank", "noopener"); }
-          catch { location.href = url; }
-        } else {
-          // Storefront: open modal
-          openModalFromDeeplink();
-        }
-      });
+if (!window.__RefinaPrimary) {
+  window.__RefinaPrimary = root;
+  document.addEventListener("refina:open", () => {
+    if (IN_THEME_EDITOR || IN_ADMIN) {
+      // Editor/Admin: open in a new tab (no modal)
+      const url = buildIframeUrl();                 // build here (one time) for editor/admin
+      try { window.open(url, "_blank", "noopener"); }
+      catch { location.href = url; }
+    } else {
+      // Storefront: open modal; iframe will call buildIframeUrl() exactly once
+      openModalFromDeeplink();
     }
+  });
+}
 
-    // Prefill bridge (payload only; do not open here)
+    // Prefill bridge (payload only; non-destructive; clear on ACK)
     (function attachPrefillBridgeOnce() {
       if (window.__REFINA_PREFILL_BRIDGE__) return;
       window.__REFINA_PREFILL_BRIDGE__ = true;
 
+      // Iframe can request latest payload (if query params were incomplete)
       document.addEventListener("refina:prefill:request", () => {
-        const saved = readRefinaPrefillOnce(); // one-shot reader
+        const saved = readRefinaPrefill();
         if (saved) {
           document.dispatchEvent(new CustomEvent("refina:prefill", { detail: saved }));
         }
       });
+
+      // Iframe ACKs when it has consumed params/event
+      document.addEventListener("refina:prefill:ack", () => {
+        clearRefinaPrefill();
+      });
+      // Prefill bridge (payload only; non-destructive; clear on ACK)
+    (function attachPrefillBridgeOnce() {
+      if (window.__REFINA_PREFILL_BRIDGE__) return;
+      window.__REFINA_PREFILL_BRIDGE__ = true;
+
+      // Iframe can request latest payload (if query params were incomplete)
+      document.addEventListener("refina:prefill:request", () => {
+        const saved = readRefinaPrefill();
+        if (saved) {
+          document.dispatchEvent(new CustomEvent("refina:prefill", { detail: saved }));
+        }
+      });
+
+      // Iframe ACKs when it has consumed params/event
+      document.addEventListener("refina:prefill:ack", () => {
+        clearRefinaPrefill();
+      });
+    })();
+    
+    // Cross-frame ACK from the iframe (/apps/refina) via postMessage
+window.addEventListener("message", (e) => {
+  try {
+    if (e && e.data && e.data.type === "refina:prefill:ack") {
+      clearRefinaPrefill(); // uses your existing helper
+    }
+  } catch {}
+});
+
     })();
 
     // One-time styles
@@ -276,9 +304,11 @@
         base = new URL("/apps/refina", location.origin);
       }
 
-      // Canonical payload from session (one-shot)
-      const p = readRefinaPrefillOnce();
+      // Canonical payload from session (NON-DESTRUCTIVE read)
+      const p = readRefinaPrefill();
       if (p) {
+        // Normalize source to "pdp" if present
+        if (p.source && /pdp/i.test(p.source)) p.source = "pdp";
         const fields = [
           "prefill","productId","productTitle","productType",
           "variantId","variantTitle","available",
@@ -293,44 +323,18 @@
         }
       }
 
-      // Forward Theme Editor settings to the iframe (safe whitelist)
-      const THEME_PARAM_MAP = {
-        // content
-        heading:              "heading",
-        subheading:           "subheading",
-        launcherText:         "launcher-text",
-        widgetButtonText:     "widget-cta-text",
-        ctaText:              "cta-text",
-        // appearance
-        primaryColor:         "primary-color",
-        accentColor:          "accent-color",
-        borderRadius:         "border-radius",
-        buttonStyle:          "button-style",
-        gridColumns:          "grid-columns",
-        // behaviour & positioning
-        triggerMethod:        "trigger-method",
-        launcherOrientation:  "launcher-orientation",
-        side:                 "side",
-        offset:               "offset",
-        leftOffset:           "left-offset",
-        rightOffset:          "right-offset",
-        showMobile:           "show-mobile",
-        hideOnProduct:        "hide-on-product",
-        hideOnCart:           "hide-on-cart",
-        openOnLoad:           "open-on-load",
-        showBadges:           "show-badges",
-        showPrices:           "show-prices",
-      };
-
-      for (const [datasetKey, paramName] of Object.entries(THEME_PARAM_MAP)) {
-        const v = settings[datasetKey];
-        if (v == null || v === "") continue;
-        base.searchParams.set(paramName, String(v));
+      // Liberal pass-through of all theme settings (baseline behavior)
+      for (const key in settings) {
+        if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
+        const val = settings[key];
+        if (val == null || val === "") continue;
+        base.searchParams.set(kebab(key), String(val));
       }
 
-      base.searchParams.set("source", window.__RefinaOpenSource || (p?.source || "launcher"));
-      try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch {}
+      // Final source attribution (prefer payload, else launcher state)
+      base.searchParams.set("source", (p && p.source) || window.__RefinaOpenSource || "launcher");
 
+      try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch {}
       return base.toString();
     }
 
@@ -380,6 +384,8 @@
       if (!overlay) return;
       overlay.remove();
       overlay = null;
+      // Fallback cleanup if iframe never ACKed
+      clearRefinaPrefill();
       if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
       else if (btn && typeof btn.focus === "function") btn.focus();
     }
@@ -388,6 +394,9 @@
       window.__RefinaOpenSource = "deeplink";
       openModal();
       window.__RefinaDeeplinkPending = false;
+
+      // Belt-and-braces: clean hash now too
+      try { history.replaceState(null, "", location.pathname + location.search); } catch {}
     }
 
     if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {

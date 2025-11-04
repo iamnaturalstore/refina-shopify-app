@@ -183,14 +183,14 @@
           <div class="refina-dw-copy">
             <h3 id="rf-dw-title" class="refina-dw-title"></h3>
             <div class="refina-dw-sub" data-sub></div>
-            <div class="refina-dw-micro">You can add your age, skin type, budget or goals for smarter picks. Or ask me another question.</div>
+            <div class="refina-dw-micro">You can add your age, skin type, budget or goals for smarter picks. Or ask me any other question.</div>
           </div>
           <button type="button" class="refina-dw-close" data-close aria-label="Close">✕</button>
         </header>
         <div class="refina-dw-body">
           <div class="refina-dw-context" data-context></div>
           <div class="refina-dw-chips" data-chips></div>
-          <label class="refina-dw-label" id="rf-dw-label">Message to Refina (hint: you can edit this!)</label>
+          <label class="refina-dw-label" id="rf-dw-label">Suggested message to Refina (hint: you can edit this!)</label>
           <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label" placeholder="Add details (e.g., age 55, sensitive, target dark spots)…"></textarea>
         </div>
         <footer class="refina-dw-foot">
