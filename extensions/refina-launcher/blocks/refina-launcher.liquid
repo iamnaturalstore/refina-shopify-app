@@ -1,90 +1,133 @@
-{% comment %}
-Refina PDP Assist — pseudo-launcher for product pages
-- Intention-based: never auto-opens chat
-- Reuses existing launcher/modal via hash params or window.RefinaLauncher.open()
-- Safe in Theme Editor (designMode)
-Requires asset: assets/refina-pdp-assist.js
-{% endcomment %}
+{%- comment -%}
+Refina Theme App Embed (Launcher, production)
+- Loads launcher assets from the extension bundle
+- Outputs a single launcher mount with data-* config from Theme App Embed
+- Editor-safe behavior is implemented inside the asset JS
+{%- endcomment -%}
 
-{% assign product_obj = product | default: nil %}
+{%- assign cachebust = 'now' | date: '%s' -%}
+{{ 'concierge.css' | asset_url | append: '?v=' | append: cachebust | stylesheet_tag }}
+<script type="module" src="{{ 'concierge.js' | asset_url | append: '?v=' | append: cachebust }}" defer></script>
 
-<div
-  class="refina-pdp-assist"
-  data-refina-pdp-assist
-  data-instance-id="{{ block.id }}"
-  data-product-id="{{ product_obj.id | default: '' }}"
-  data-product-title="{{ product_obj.title | escape | default: '' }}"
-  data-product-type="{{ product.type | escape }}"
-  data-selected-variant-id="{{ product.selected_or_first_available_variant.id }}"
-  data-selected-variant-title="{{ product.selected_or_first_available_variant.title | escape }}"
-  data-selected-variant-available="{{ product.selected_or_first_available_variant.available }}"
-  data-price-cents="{{ product.selected_or_first_available_variant.price }}"
-  data-compare-at-price-cents="{{ product.selected_or_first_available_variant.compare_at_price }}"
-  data-currency="{{ cart.currency.iso_code | default: shop.currency }}"
+{%- assign page_type = template.name | downcase -%}
+
+<style>
+  :root{
+    --rf-color-primary: {{ block.settings.primary_color }};
+    --rf-accent-color:  {{ block.settings.accent_color }};
+  }
+</style>
+
+<div class="refina-widget"
+  style="--rf-color-primary: {{ block.settings.primary_color }}; --rf-accent-color: {{ block.settings.accent_color }};"
+  data-refina-launcher
+  data-heading="{{ block.settings.heading }}"
+  data-subheading="{{ block.settings.subheading }}"
+
+  {# Text controls #}
+  data-launcher-text="{{ block.settings.launcher_text }}"
+  data-widget-button-text="{{ block.settings.widget_button_text }}"
+  data-cta-text="{{ block.settings.cta_text }}"           {# legacy single text (fallback) #}
+
+  {# Appearance #}
+  data-primary-color="{{ block.settings.primary_color }}"
+  data-accent-color="{{ block.settings.accent_color }}"
+  data-border-radius="{{ block.settings.border_radius }}"
+  data-button-style="{{ block.settings.button_style }}"
+  data-grid-columns="{{ block.settings.grid_columns }}"
+
+  {# Behavior & visibility #}
+  data-side="{{ block.settings.side }}"
+  data-offset="{{ block.settings.offset }}"
+  data-show-mobile="{{ block.settings.show_mobile }}"
+  data-hide-on-product="{{ block.settings.hide_on_product }}"
+  data-hide-on-cart="{{ block.settings.hide_on_cart }}"
+  data-open-on-load="{{ block.settings.open_on_load }}"
+  data-show-badges="{{ block.settings.show_badges }}"
+  data-show-prices="{{ block.settings.show_prices }}"
+
+  {# NEW: Behaviour & Positioning (passed to JS) #}
+  data-trigger-method="{{ block.settings.trigger_method }}"
+  data-launcher-orientation="{{ block.settings.launcher_orientation }}"
+  data-left-offset="{{ block.settings.left_offset }}"
+  data-right-offset="{{ block.settings.right_offset }}"
+
+  {# context #}
   data-shop="{{ shop.permanent_domain }}"
-  data-button-text="{{ block.settings.button_text }}"
-  data-headline="{{ block.settings.headline }}"
-  data-subcopy="{{ block.settings.subcopy }}"
-  data-price-cap="{{ block.settings.price_cap }}"
-  data-chip-1="{{ block.settings.chip_1 }}"
-  data-chip-2="{{ block.settings.chip_2 }}"
-  data-chip-3="{{ block.settings.chip_3 }}"
-  data-chip-4="{{ block.settings.chip_4 }}"
-  data-chip-keys="sensitive,compare,under-cap,fragrance-free"
-  data-style-radius="{{ block.settings.radius }}"
-  data-style-compact="{{ block.settings.compact }}"
-  data-style-accent="{{ block.settings.accent }}"
->
-  <div class="refina-pdp-assist__card" style="border-radius: {{ block.settings.radius }}">
-    <div class="refina-pdp-assist__head">
-      <span class="refina-pdp-assist__icon" aria-hidden="true">🤖</span>
-      <div class="refina-pdp-assist__text">
-        <div class="refina-pdp-assist__headline">{{ block.settings.headline }}</div>
-        <div class="refina-pdp-assist__sub">{{ block.settings.subcopy }}</div>
-      </div>
-    </div>
-
-    <!-- Verdict placeholder to avoid CLS; hydrated by JS -->
-    <div class="refina-pdp-assist__verdict" aria-live="polite"></div>
-
-    <div class="refina-pdp-assist__actions">
-      <button type="button" class="refina-pdp-assist__button">
-        {{ block.settings.button_text }}
-      </button>
-      <div class="refina-pdp-assist__chips">
-        {% if block.settings.chip_1 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_1 }}</button>{% endif %}
-        {% if block.settings.chip_2 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_2 }}</button>{% endif %}
-        {% if block.settings.chip_3 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_3 }}</button>{% endif %}
-        {% if block.settings.chip_4 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_4 }}</button>{% endif %}
-      </div>
-    </div>
-  </div>
-</div>
+  data-page-type="{{ page_type }}"
+></div>
 
 {% schema %}
 {
-  "name": "Refina • PDP Assist",
-  "target": "section",
+  "name": "Enable Refina App",
+  "target": "body",
   "settings": [
-    { "type": "text", "id": "headline", "label": "Headline", "default": "Need help choosing?" },
-    { "type": "text", "id": "subcopy", "label": "Subcopy", "default": "We’ll ask a quick question and pick the best match." },
-    { "type": "text", "id": "button_text", "label": "Button text", "default": "Ask Refina about this product" },
+    { "type": "header", "content": "Content" },
+    { "type": "text", "id": "heading", "label": "Heading", "default": "Find the perfect routine" },
+    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Tell us your concern and we’ll match expert picks." },
 
-    { "type": "text", "id": "price_cap", "label": "Default price cap (optional)", "default": "" },
+    { "type": "text", "id": "launcher_text", "label": "Launcher Button Text", "default": "Help Finding Products" },
+    { "type": "text", "id": "widget_button_text", "label": "In-Widget Button Text", "default": "Find My Products" },
 
-    { "type": "text", "id": "chip_1", "label": "Chip 1", "default": "Sensitive skin" },
-    { "type": "text", "id": "chip_2", "label": "Chip 2", "default": "Compare" },
-    { "type": "text", "id": "chip_3", "label": "Chip 3", "default": "Under $50" },
-    { "type": "text", "id": "chip_4", "label": "Chip 4", "default": "Fragrance-free" },
+    { "type": "paragraph", "content": "If left blank, both will fall back to the legacy “Launcher Button Text” field below." },
+    { "type": "text", "id": "cta_text", "label": "Legacy: Single Button Text (fallback)", "default": "Ask Refina" },
 
-    { "type": "select", "id": "radius", "label": "Card radius", "default": "16px", "options": [
-      { "value": "8px", "label": "Small" },
-      { "value": "16px", "label": "Medium" },
-      { "value": "24px", "label": "Large" }
+    { "type": "header", "content": "Appearance" },
+    { "type": "color", "id": "primary_color", "label": "Primary Color (Buttons)", "default": "#111827" },
+    { "type": "color", "id": "accent_color", "label": "Accent Color (Highlights)", "default": "#10B981" },
+    { "type": "select", "id": "border_radius", "label": "Launcher Border Radius", "options": [
+        { "value": "none", "label": "None" },
+        { "value": "sm", "label": "Small" },
+        { "value": "md", "label": "Medium" },
+        { "value": "lg", "label": "Large" },
+        { "value": "2xl", "label": "2XL" }
+    ], "default": "lg"},
+    { "type": "select", "id": "button_style", "label": "Button Style", "options": [
+        { "value": "solid", "label": "Solid" },
+        { "value": "outline", "label": "Outline" }
+    ], "default": "solid"},
+    { "type": "range", "id": "grid_columns", "label": "Product Grid Columns", "min": 2, "max": 4, "step": 1, "default": 3 },
+
+    { "type": "header", "content": "Behaviour & Positioning" },
+
+    {
+      "type": "select",
+      "id": "trigger_method",
+      "label": "Trigger method",
+      "default": "launcher",
+      "options": [
+        { "value": "launcher", "label": "Launcher (floating button)" },
+        { "value": "menu", "label": "Menu link (/#refina)" }
+      ]
+    },
+
+    { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
+        { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
     ]},
-    { "type": "checkbox", "id": "compact", "label": "Compact layout", "default": false },
-    { "type": "text", "id": "accent", "label": "Accent (hex)", "default": "#7A5CFF" }
+
+    {
+      "type": "select",
+      "id": "launcher_orientation",
+      "label": "Launcher Orientation",
+      "default": "horizontal",
+      "options": [
+        { "value": "horizontal", "label": "Horizontal" },
+        { "value": "vertical", "label": "Vertical" }
+      ]
+    },
+
+    { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
+    { "type": "number", "id": "left_offset", "label": "Left Offset (px)", "default": 16 },
+    { "type": "number", "id": "right_offset", "label": "Right Offset (px)", "default": 16 },
+
+    { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
+    { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
+    { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
+    { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
+    { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
+    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true }
+
   ],
-  "presets": [{ "name": "Refina • PDP Assist" }]
+  "enabled_on": { "templates": ["*"] }
 }
 {% endschema %}
