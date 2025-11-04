@@ -190,7 +190,7 @@
         <div class="refina-dw-body">
           <div class="refina-dw-context" data-context></div>
           <div class="refina-dw-chips" data-chips></div>
-          <label class="refina-dw-label" id="rf-dw-label">Suggested message to Refina (hint: you can edit this!)</label>
+          <label class="refina-dw-label" id="rf-dw-label">Message to Refina (hint: you can edit this!)</label>
           <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label" placeholder="Add details (e.g., age 55, sensitive, target dark spots)…"></textarea>
         </div>
         <footer class="refina-dw-foot">
