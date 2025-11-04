@@ -7,8 +7,7 @@ Refina Theme App Embed (Launcher, production)
 
 {%- assign cachebust = 'now' | date: '%s' -%}
 {{ 'concierge.css' | asset_url | append: '?v=' | append: cachebust | stylesheet_tag }}
-<!-- IMPORTANT: classic script, no type=module, no defer -->
-<script src="{{ 'concierge.js' | asset_url | append: '?v=' | append: cachebust }}"></script>
+<script type="module" src="{{ 'concierge.js' | asset_url | append: '?v=' | append: cachebust }}" defer></script>
 
 {%- assign page_type = template.name | downcase -%}
 
