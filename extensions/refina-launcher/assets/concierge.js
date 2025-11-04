@@ -16,16 +16,18 @@
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-  function readRefinaPrefill() {
-    try {
-      const raw = sessionStorage.getItem('refina_prefill');
-      if (!raw) return null;
-      const p = JSON.parse(raw);
-      return (p && typeof p === 'object') ? p : null;
-    } catch {
-      return null; // guards Safari ITP / blocked storage
-    }
+function readRefinaPrefillOnce() {
+  try {
+    const raw = sessionStorage.getItem('refina_prefill');
+    if (!raw) return null;
+    sessionStorage.removeItem('refina_prefill'); // one-shot: clear after read
+    const p = JSON.parse(raw);
+    return (p && typeof p === 'object') ? p : null;
+  } catch {
+    return null;
   }
+}
+
 
   function hashWantsRefina() {
     const h = (location.hash || "").toLowerCase();
@@ -138,10 +140,13 @@
       if (window.__REFINA_PREFILL_BRIDGE__) return;
       window.__REFINA_PREFILL_BRIDGE__ = true;
 
-      document.addEventListener('refina:prefill:request', () => {
-        const saved = readRefinaPrefill();
-        if (saved) document.dispatchEvent(new CustomEvent('refina:prefill', { detail: saved }));
-      });
+     document.addEventListener('refina:prefill:request', () => {
+  const saved = readRefinaPrefillOnce();   // <-- use the one-shot reader
+  if (saved) {
+    document.dispatchEvent(new CustomEvent('refina:prefill', { detail: saved }));
+  }
+});
+
     })();
 
     // One-time styles
@@ -249,7 +254,7 @@
       }
 
       // Canonical payload from session (Option B already applied upstream)
-      const p = readRefinaPrefill();
+      const p = readRefinaPrefillOnce();
       if (p) {
         // Only set canonical fields (avoid theme-setting collisions)
         const fields = [
