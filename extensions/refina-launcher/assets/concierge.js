@@ -266,12 +266,42 @@
         }
       }
 
-      // Minimal theme hints if needed (whitelist small subset)
-      const themeHints = {
-        "launcher-text": settings.launcherText || "",
-        "widget-cta-text": widgetCtaText || ""
-      };
-      Object.entries(themeHints).forEach(([k,v]) => { if (v) base.searchParams.set(k, v); });
+      // --- Forward ALL relevant Theme Editor settings to the iframe (safe whitelist) ---
+const THEME_PARAM_MAP = {
+  // content
+  heading:              "heading",
+  subheading:           "subheading",
+  launcherText:         "launcher-text",
+  widgetButtonText:     "widget-cta-text",
+  ctaText:              "cta-text",
+
+  // appearance
+  primaryColor:         "primary-color",
+  accentColor:          "accent-color",
+  borderRadius:         "border-radius",
+  buttonStyle:          "button-style",
+  gridColumns:          "grid-columns",
+
+  // behaviour & positioning
+  triggerMethod:        "trigger-method",
+  launcherOrientation:  "launcher-orientation",
+  side:                 "side",
+  offset:               "offset",
+  leftOffset:           "left-offset",
+  rightOffset:          "right-offset",
+  showMobile:           "show-mobile",
+  hideOnProduct:        "hide-on-product",
+  hideOnCart:           "hide-on-cart",
+  openOnLoad:           "open-on-load",
+  showBadges:           "show-badges",
+  showPrices:           "show-prices",
+};
+
+for (const [datasetKey, paramName] of Object.entries(THEME_PARAM_MAP)) {
+  const v = settings[datasetKey];
+  if (v == null || v === "") continue;
+  base.searchParams.set(paramName, String(v));
+}
 
       base.searchParams.set("source", window.__RefinaOpenSource || (p?.source || "launcher"));
       try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch {}
