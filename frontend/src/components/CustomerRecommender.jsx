@@ -423,10 +423,11 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
       try {
         // --- resolve storeId from ?shop= or #root[data-shop] ---
-        const storeId =
-          new URLSearchParams(location.search).get("shop") ||
-          document.getElementById("root")?.dataset.shop ||
-          "";
+       const rootEl = document.getElementById("root");
+       const storeId =
+         new URLSearchParams(location.search).get("shop") ||
+         (rootEl && rootEl.dataset ? rootEl.dataset.shop : "") ||
+         "";
 
         const resp = await fetch(`${API_PREFIX}/recommend`, {
           method: "POST",
@@ -460,9 +461,10 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         // Analytics (best-effort)
         try {
           // Resolve storeId again the same way as for /recommend
+          const rootEl2 = document.getElementById("root");
           const storeId2 =
             new URLSearchParams(location.search).get("shop") ||
-            document.getElementById("root")?.dataset.shop ||
+            (rootEl2 && rootEl2.dataset ? rootEl2.dataset.shop : "") ||
             "";
 
           const analyticsPayload = {
@@ -472,7 +474,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
             concern: q,
             productIds: products.map((p) => p.id),
             meta: {
-              plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+              plan: (window.__REFINA__ && window.__REFINA__.plan) || "unknown",
               model: (data?.meta?.model || data?.meta?.source) || "",
             },
           };
