@@ -1,7 +1,8 @@
 /* Refina — PDP Assist client
    - Side Drawer presets UX + handoff to main concierge
-   - Saves a prefill payload to sessionStorage
-   - Opens the launcher (live storefront) or new tab (Theme Editor/Admin)
+   - Builds a canonical paramstring and saves to sessionStorage
+   - Option B (Refresh on Continue): re-reads live PDP variant/price before opening
+   - Seeds inline verdict + quick-peek via tiny GET fast paths
 */
 
 (() => {
@@ -10,7 +11,7 @@
 
   const STORAGE_KEY = "refina_prefill";
 
-  // Detect Theme Editor/Admin (no in-page modal)
+  // Detect Theme Editor/Admin (open in new tab)
   const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
   let IN_ADMIN = false;
   try {
@@ -18,9 +19,7 @@
     IN_ADMIN = /(^|\.)admin\.shopify\.com$/i.test(refHost);
   } catch {}
 
-  // ─────────────────────────────────────────────────────────────
-  // Tiny CSS (injected once) — inherits your violet/amber glass look
-  // ─────────────────────────────────────────────────────────────
+  // Minimal CSS for drawer (glass look)
   (function injectDrawerCssOnce() {
     if (document.getElementById("refina-pdp-drawer-css")) return;
     const css = `
@@ -63,31 +62,65 @@
     document.head.appendChild(el);
   })();
 
-  // ─────────────────────────────────────────────────────────────
   // Helpers
-  // ─────────────────────────────────────────────────────────────
+  const uuid = () =>
+    ([1e7]+-1e3+-4e3+-8e3+-1e11)
+      .replace(/[018]/g,c=>(c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+
+  function findCurrentVariantId() {
+    // Try common theme patterns for variant input/select
+    const cand = document.querySelector('form[action*="/cart"] [name="id"], form[action*="/cart/add"] [name="id"]');
+    if (!cand) return null;
+    const val = (cand.value || cand.getAttribute("value") || "").trim();
+    return val || null;
+  }
+
+  function coerceInt(v) {
+    const n = Number(String(v || "").replace(/[^\d.-]/g, ""));
+    return Number.isFinite(n) ? Math.round(n) : null;
+  }
+
   function getPayload(root, overrides = {}) {
     const ds = root.dataset || {};
     const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4].filter(Boolean).map(s => s.trim());
 
     const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
     const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
+    const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
 
     const defaultPrefill =
       (productTitle ? `I’m looking at “${productTitle}”. Can you suggest better fits for me?`
                     : `Can you suggest the best fit for me from this store?`);
-
     const prefill = (overrides.prefill && overrides.prefill.trim()) || defaultPrefill;
 
+    // Canonical base
     return {
-      source: "pdp-assist",
+      source: "pdp",
       shop: ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "",
       productId: ds.productId || null,
       productTitle,
+      productType: productType || null,
+      variantId: ds.selectedVariantId || null,
+      variantTitle: ds.selectedVariantTitle || null,
+      available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
+      price: coerceInt(ds.priceCents),
+      compareAtPrice: coerceInt(ds.compareAtPriceCents),
+      currency: ds.currency || (window.Shopify && Shopify.currency && Shopify.currency.active) || null,
       priceCap: priceCap || null,
       chips,
+      intent: null,      // set on chip/pill selection
+      contextId: null,   // minted at drawer open
       prefill,
     };
+  }
+
+  function mapChipToIntent(chip) {
+    const s = String(chip || "").toLowerCase();
+    if (s.includes("compare")) return "compare-3";
+    if (s.includes("under")) return "alt-cheaper";
+    if (s.includes("sensitive")) return "verify";
+    if (s.includes("fragrance")) return "avoid-eo";
+    return null;
   }
 
   function savePrefill(payload) {
@@ -98,59 +131,41 @@
     // Save payload for concierge.js → buildIframeUrl()
     savePrefill(payload);
 
-    // Launcher API (future-proof; if you ever expose it)
+    // Launcher API path (if ever exposed)
     if (window.RefinaLauncher && typeof window.RefinaLauncher.open === "function") {
-      window.RefinaLauncher.open({
-        source: payload.source,
-        prefill: payload.prefill,
-        context: {
-          productId: payload.productId,
-          productTitle: payload.productTitle,
-          priceCap: payload.priceCap,
-          chips: payload.chips
-        }
-      });
+      window.RefinaLauncher.open({ source: payload.source, prefill: payload.prefill, context: payload });
       return;
     }
 
-    // Admin/Editor → open new tab with query string
+    // Admin/Editor → open new tab with querystring (full paramstring)
     if (IN_THEME_EDITOR || IN_ADMIN) {
       const shop = payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
       if (!shop) return;
       const url = new URL(`https://${shop}/apps/refina`);
-      url.searchParams.set("prefill", payload.prefill);
-      if (payload.productId)    url.searchParams.set("productId", payload.productId);
-      if (payload.productTitle) url.searchParams.set("productTitle", payload.productTitle);
-      if (payload.priceCap)     url.searchParams.set("priceCap", payload.priceCap);
-      if (payload.chips?.length)url.searchParams.set("chips", payload.chips.join(","));
+      for (const [k, v] of Object.entries(payload)) {
+        if (v == null) continue;
+        if (Array.isArray(v)) url.searchParams.set(k, v.join(","));
+        else url.searchParams.set(k, String(v));
+      }
       try { window.open(url.toString(), "_blank", "noopener"); } catch { location.href = url.toString(); }
       return;
     }
 
     // Live storefront → hash signal + event dispatch
-    const params = new URLSearchParams({ refina: "1", source: "pdp" });
-    if (payload.productId) params.set("productId", payload.productId);
-    if (payload.priceCap)  params.set("priceCap", payload.priceCap);
+    const params = new URLSearchParams({ refina: "1" });
+    for (const [k, v] of Object.entries(payload)) {
+      if (v == null) continue;
+      if (Array.isArray(v)) params.set(k, v.join(","));
+      else params.set(k, String(v));
+    }
+
     try { history.replaceState(null, "", location.pathname + location.search + "#refina?" + params.toString()); }
     catch { location.hash = "#refina?" + params.toString(); }
 
-    document.dispatchEvent(new CustomEvent("refina:open", {
-      detail: {
-        source: "pdp",
-        prefill: payload.prefill,
-        context: {
-          productId: payload.productId,
-          productTitle: payload.productTitle,
-          priceCap: payload.priceCap,
-          chips: payload.chips
-        }
-      }
-    }));
+    document.dispatchEvent(new CustomEvent("refina:open", { detail: payload }));
   }
 
-  // ─────────────────────────────────────────────────────────────
   // Drawer creation / UX
-  // ─────────────────────────────────────────────────────────────
   function ensureDrawer(radiusPx = "16px") {
     let host = document.getElementById("refina-pdp-drawer");
     if (host) return host;
@@ -167,8 +182,8 @@
         </header>
         <div class="refina-dw-body">
           <div class="refina-dw-chips" data-chips></div>
-          <label class="refina-dw-label">Message to Refina</label>
-          <textarea class="refina-dw-input" data-input rows="3" placeholder="Add details (skin type, budget, goals)…"></textarea>
+          <label class="refina-dw-label" id="rf-dw-label">Message to Refina</label>
+          <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label" placeholder="Add details (skin type, budget, goals)…"></textarea>
         </div>
         <footer class="refina-dw-foot">
           <button type="button" class="refina-dw-continue" data-continue>Continue</button>
@@ -176,7 +191,6 @@
       </aside>
     `;
     document.body.appendChild(host);
-    // inherit radius from block setting
     host.style.setProperty("--rfina-dw-radius", radiusPx);
     return host;
   }
@@ -188,10 +202,13 @@
     const input = host.querySelector("[data-input]");
     const chipsBox = host.querySelector("[data-chips]");
 
+    // Mint contextId at drawer open
+    basePayload.contextId = basePayload.contextId || uuid();
+
     // Seed input with payload.prefill
     input.value = basePayload.prefill || "";
 
-    // Render chips (reuse from block settings)
+    // Render chips (reuse from block settings); also infer intent when a chip is clicked
     chipsBox.innerHTML = "";
     (basePayload.chips || []).forEach((c) => {
       const b = document.createElement("button");
@@ -201,6 +218,8 @@
       b.addEventListener("click", () => {
         const ctx = basePayload.productTitle ? ` — “${basePayload.productTitle}”` : "";
         input.value = input.value ? `${input.value} ${c}${ctx}` : `${c}${ctx}`;
+        const maybeIntent = mapChipToIntent(c);
+        if (maybeIntent) basePayload.intent = maybeIntent;
         input.focus();
       });
       chipsBox.appendChild(b);
@@ -210,31 +229,50 @@
     host.classList.add("is-open");
     try { aside.focus(); } catch {}
 
-    // Close handlers (backdrop / × button / ESC)
+    // Close handlers
     const close = () => host.classList.remove("is-open");
     const backdrop = host.querySelector("[data-close]");
+    const onEsc = (ev) => { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", onEsc); } };
     backdrop.addEventListener("click", close, { once: true });
     host.querySelector(".refina-dw-close").addEventListener("click", close, { once: true });
-    const escHandler = (ev) => { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", escHandler); } };
-    document.addEventListener("keydown", escHandler);
+    document.addEventListener("keydown", onEsc);
 
-    // Continue → save + open
+    // Continue → Option B: Refresh live PDP details, then open concierge
     host.querySelector("[data-continue]").addEventListener("click", () => {
       const finalPrefill = (input.value || "").trim() || basePayload.prefill;
-      const payload = { ...basePayload, prefill: finalPrefill };
-      // analytics (best-effort)
+
+      // Re-read live PDP state (variant/price/availability/currency)
+      const liveVariantId = findCurrentVariantId() || basePayload.variantId;
+      const ds = root.dataset || {};
+      const refreshed = {
+        ...basePayload,
+        prefill: finalPrefill,
+        variantId: liveVariantId,
+        // If merchant/theme updates expose these, prefer them; else fallback to data-attrs
+        variantTitle: ds.selectedVariantTitle || basePayload.variantTitle || null,
+        available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
+        price: coerceInt(ds.priceCents),
+        compareAtPrice: coerceInt(ds.compareAtPriceCents),
+        currency: ds.currency || basePayload.currency || null,
+        intent: basePayload.intent || null,
+      };
+
+      // best-effort analytics
       try {
         navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
           new Blob([JSON.stringify({
-            storeId: basePayload.shop,
+            storeId: refreshed.shop,
             type: "concern",
             event: "drawer_confirm",
             concern: finalPrefill,
-            productId: basePayload.productId || null
+            productId: refreshed.productId || null,
+            contextId: refreshed.contextId || null,
+            intent: refreshed.intent || null
           })], { type: "application/json" })
         );
       } catch {}
-      openConcierge(payload);
+
+      openConcierge(refreshed);
       close();
     }, { once: true });
 
@@ -245,15 +283,52 @@
           storeId: basePayload.shop,
           type: "concern",
           event: "drawer_open",
-          productId: basePayload.productId || null
+          productId: basePayload.productId || null,
+          contextId: basePayload.contextId || null
         })], { type: "application/json" })
       );
     } catch {}
   }
 
-  // ─────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────
+  // Verdict + Quick-peek (PDP fast paths)
+  // ─────────────────────────────────────────────
+  async function hydrateVerdictAndPeek(root) {
+    const ds = root.dataset || {};
+    const verdictEl = root.querySelector(".refina-pdp-assist__verdict");
+    if (!verdictEl) return;
+
+    const storeId = ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
+    if (!storeId) return;
+
+    const qs = new URLSearchParams({
+      mode: "verdict",
+      storeId,
+      productId: ds.productId || "",
+      price: String(ds.priceCents || ""),
+      compareAtPrice: String(ds.compareAtPriceCents || ""),
+      available: String(ds.selectedVariantAvailable || ""),
+      currency: ds.currency || ""
+    });
+
+    try {
+      const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, { credentials: "same-origin" });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const chips = Array.isArray(data.chips) ? data.chips : [];
+      const verdict = (data.verdict || "Maybe").toUpperCase();
+
+      verdictEl.textContent = `${verdict}${chips.length ? " • " + chips.slice(0,3).join(" • ") : ""}`;
+    } catch {
+      // no-op; leave placeholder empty
+    }
+
+    // Quick-peek (optional, safe to be empty)
+    const qs2 = new URLSearchParams({ mode: "peek", storeId });
+    try { await fetch(`/apps/refina/v1/recommend?${qs2.toString()}`, { credentials: "same-origin" }); } catch {}
+  }
+
   // Click delegate (button + chips) → open drawer
-  // ─────────────────────────────────────────────────────────────
   document.addEventListener("click", (ev) => {
     const root = ev.target.closest("[data-refina-pdp-assist]");
     if (!root) return;
@@ -262,20 +337,33 @@
     const chip = ev.target.closest(".refina-pdp-assist__chip");
     if (!btn && !chip) return;
 
-    // Base payload from block
     const base = getPayload(root);
 
-    // If chip clicked, prefer chip text + product context as seed
     if (chip) {
       const chipText = (chip.textContent || "").trim();
-      const withChip = chipText
+      base.prefill = chipText
         ? (base.productTitle ? `${chipText} — “${base.productTitle}”` : chipText)
         : base.prefill;
-      base.prefill = withChip;
+      const maybeIntent = mapChipToIntent(chipText);
+      if (maybeIntent) base.intent = maybeIntent;
+      if (maybeIntent === "alt-cheaper" && !base.priceCap) {
+        // Pull from block default if set (e.g., "Under $50")
+        const rawCap = (root.dataset.priceCap || "").trim();
+        if (rawCap) base.priceCap = rawCap;
+      }
     }
+
+    // Seed verdict/peek (first time the shopper clicks)
+    hydrateVerdictAndPeek(root);
 
     // Open the drawer instead of launching immediately
     openDrawerFrom(root, base);
   }, { passive: true });
+
+  // On load, pre-hydrate verdict (no blocking)
+  document.addEventListener("DOMContentLoaded", () => {
+    const root = document.querySelector("[data-refina-pdp-assist]");
+    if (root) hydrateVerdictAndPeek(root);
+  });
 
 })();
