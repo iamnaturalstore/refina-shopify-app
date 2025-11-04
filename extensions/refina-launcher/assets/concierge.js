@@ -284,6 +284,10 @@ if (!$("#refina-launcher-style")) {
       } catch {
         base = new URL("/apps/refina", location.origin);
       }
+      // Always include explicit shop for the app proxy / BFF resolver
+  try {
+    if (shopDomain) base.searchParams.set("shop", String(shopDomain));
+  } catch {}
 
       // Canonical payload from session (NON-DESTRUCTIVE read)
       const p = readRefinaPrefill();
