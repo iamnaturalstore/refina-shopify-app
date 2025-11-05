@@ -20,6 +20,7 @@ import { callGemini } from "../bff/ai/gemini.js";
 
 import { aiGuard } from "../bff/ai/guard.js";
 import { incrementOnInvoke } from "../lib/usage.js";
+import { FieldPath } from "firebase-admin/firestore"; // harmless if unused elsewhere
 
 // ─── Admin ping schema (for /admin/ai-ping) ──────────────────────────────────
 const PingSchema = {
@@ -91,16 +92,20 @@ async function loadEmbeddings(storeId) {
 }
 
 async function loadProductsByIds(storeId, ids) {
-  if (!ids.length) return [];
+  // Batch read via getAll to avoid 1-by-1 round trips.
+  const uniq = Array.from(new Set(ids.map(String)));
+  if (!uniq.length) return [];
+
   const col = db.collection("products").doc(storeId).collection("items");
-  const out = [];
-  for (const id of ids) {
-    /* eslint no-await-in-loop: 0 */
-    const s = await col.doc(String(id)).get();
-    if (s.exists) out.push({ id: s.id, ...s.data() });
-  }
-  return out;
+  const refs = uniq.map(id => col.doc(id));
+
+  // Single network call for all refs (Admin SDK).
+  const snaps = await db.getAll(...refs);
+  return snaps
+    .filter(s => s.exists)
+    .map(s => ({ id: s.id, ...s.data() }));
 }
+
 
 // ─── Deterministic KB scoring & filters ──────────────────────────────────────
 function intersects(a = [], b = []) {
@@ -324,7 +329,7 @@ router.post("/recommend", async (req, res) => {
       const scored = allEmb
         .map(e => ({ id: e.id, sim: cosine(qVec, (e.vector || [])) }))
         .sort((a, b) => b.sim - a.sim)
-        .slice(0, 60);
+        .slice(0, 30);
       const top60Ids = scored.map(s => s.id);
       const top60Docs = await loadProductsByIds(storeId, top60Ids);
       const byId = new Map(scored.map(s => [String(s.id), s.sim]));
@@ -430,11 +435,11 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Top-60 by cosine
+    // Top-60 by cosine - changed to 30
     const scored = allEmb
       .map(e => ({ id: e.id, sim: cosine(qVec, e.vector || []) }))
       .sort((a, b) => b.sim - a.sim)
-      .slice(0, 60);
+      .slice(0, 30);
 
     const top60Ids = scored.map(s => s.id);
     const top60Docs = await loadProductsByIds(storeId, top60Ids);
