@@ -164,11 +164,12 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const progressTimers = useRef([]);
 
   const PROGRESS_PHASES = [
-    { at: 0,       text: "Thinking…" },
-    { at: 10_000,  text: "Researching…" },
-    { at: 20_000,  text: "Shortlisting products…" },
-    { at: 30_000,  text: "Analyzing matches…" },
-    { at: 40_000,  text: "Finalizing your Top 3…" },
+    { at: 0,       text: "Thinking" },
+    { at: 5_000,  text: "Researching" },
+    { at: 10_000,  text: "Shortlisting products" },
+    { at: 15_000,  text: "Analyzing matches" },
+    { at: 20_000,  text: "Finalizing your Top 3" },
+    { at: 25_000,  text: "Reasons why" },
   ];
 
   function startProgressCycle() {
