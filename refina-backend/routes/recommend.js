@@ -533,21 +533,125 @@ router.post("/recommend", async (req, res) => {
       forStage2 = forStage2.slice(0, forStage2.length - 1);
     }
 
-    const ingSlugs = await expandConcernToIngredients(concernNorm);
-    const ingredientFacts = await getIngredientFacts(ingSlugs);
+    // (NEW) KB-driven facts: assemble from productEmbeddings + product entities doc
+function uniq(arr) {
+  const seen = new Set(); const out = [];
+  for (const x of arr) { const k = String(x).toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(x); } }
+  return out;
+}
 
-    const prompt1 = buildGeminiPrompt({
-      concern,
-      normalizedConcern: concernNorm,
-      category,
-      tone,
-      products: forStage1,
-      ingredientFacts,
-    });
+// Build a convenient lookup for embeddings rows (id and/or productId)
+const embById = new Map();
+for (const e of allEmb) {
+  const key1 = String(e.id || e.docId || e._id || e.productId || "");
+  if (key1) embById.set(key1, e);
+  if (e.productId) embById.set(String(e.productId), e);
+}
 
-    const prompt2 = needWiden
-      ? buildGeminiPrompt({ concern, normalizedConcern: concernNorm, category, tone, products: forStage2, ingredientFacts })
+// Pull “facts” doc under products/{storeId}/items/{id}/entities (single doc with keyed facts)
+async function loadProductFactsDoc(storeId, pid) {
+  try {
+    const ref = db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection
+      ? db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection("entities") // in case it was modeled as a collection
       : null;
+
+    // Prefer a single doc at .../items/{pid}/entities
+    const entDoc = await db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection
+      ? null
+      : await db.collection("products").doc(storeId).collection("items").doc(String(pid)).get().then(s => {
+          // When “entities” is a nested map on the product doc, return that map.
+          const d = s.exists ? (s.data() || {}) : {};
+          return (d && d.entities && typeof d.entities === "object") ? d.entities : null;
+        });
+
+    if (entDoc && typeof entDoc === "object") return entDoc;
+
+    // Fallback: if entities was stored as a subcollection with one doc named "entities"
+    if (ref) {
+      const entSnap = await db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection("entities").doc("entities").get();
+      if (entSnap.exists) return entSnap.data() || null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Merge evidence lines from embedding row + product “entities” doc into {slug, evidence[]} items
+async function buildKBIngredientFacts(storeId, finalistIds) {
+  const facts = new Map(); // slug -> Set(evidence)
+
+  // 1) From productEmbeddings
+  for (const pid of finalistIds) {
+    const emb = embById.get(String(pid));
+    if (emb) {
+      const ent = Array.isArray(emb.entities) ? emb.entities : [];
+      const evs = Array.isArray(emb.evidence) ? emb.evidence : [];
+      // evidence may be [{slug, evidence:[...]}, ...] or flat strings; handle both
+      const evMap = new Map();
+      for (const ev of evs) {
+        if (ev && typeof ev === "object" && ev.slug) {
+          evMap.set(String(ev.slug), Array.isArray(ev.evidence) ? ev.evidence : []);
+        } else if (typeof ev === "string") {
+          // If only strings, attribute to a generic “note” for the unioned slug later
+          evMap.set("__generic__", (evMap.get("__generic__") || []).concat(ev));
+        }
+      }
+      for (const slug of ent) {
+        const k = String(slug).trim();
+        if (!k) continue;
+        if (!facts.has(k)) facts.set(k, new Set());
+        const bag = facts.get(k);
+        const lines = evMap.get(k) || evMap.get("__generic__") || [];
+        for (const line of lines) if (line && String(line).trim()) bag.add(String(line).trim());
+      }
+    }
+  }
+
+  // 2) From product entities doc at products/.../items/{pid}/entities
+  for (const pid of finalistIds) {
+    const entsDoc = await loadProductFactsDoc(storeId, pid);
+    if (entsDoc && typeof entsDoc === "object") {
+      for (const [slug, obj] of Object.entries(entsDoc)) {
+        const k = String(slug).trim();
+        if (!k) continue;
+        if (!facts.has(k)) facts.set(k, new Set());
+        const bag = facts.get(k);
+        // Prefer explicit fields commonly present in your schema
+        const lines = [];
+        if (obj?.fact) lines.push(obj.fact);
+        if (Array.isArray(obj?.evidence)) lines.push(...obj.evidence);
+        if (obj?.name) lines.push(String(obj.name));
+        if (Array.isArray(obj?.synonyms)) lines.push(...obj.synonyms);
+        for (const line of lines) if (line && String(line).trim()) bag.add(String(line).trim());
+      }
+    }
+  }
+
+  // Shape into the prompt format: [{ slug, evidence: [ ..unique lines.. ] }]
+  const out = [];
+  for (const [slug, set] of facts.entries()) {
+    const ev = Array.from(set).slice(0, 6); // cap per-slug evidence to keep prompt lean
+    if (ev.length) out.push({ slug, evidence: ev });
+  }
+  // Keep it reasonable in total size
+  return out.slice(0, 24);
+}
+
+const finalistIdsForFacts = finalists.map(p => String(p.id));
+const ingredientFacts = await buildKBIngredientFacts(storeId, finalistIdsForFacts);
+
+const prompt1 = buildGeminiPrompt({
+  concern,
+  normalizedConcern: concernNorm,
+  category,
+  tone,
+  products: forStage1,
+  ingredientFacts,
+});
+
+const prompt2 = needWiden
+  ? buildGeminiPrompt({ concern, normalizedConcern: concernNorm, category, tone, products: forStage2, ingredientFacts })
+  : null;
+
 
     // Single call (gemini.js handles JSON mode/retries)
     let raw = null, rawHead = null, vr = { ok: false };
