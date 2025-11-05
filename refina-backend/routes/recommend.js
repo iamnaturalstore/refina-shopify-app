@@ -87,9 +87,12 @@ async function embedText(text) {
 }
 
 async function loadEmbeddings(storeId) {
-  const snap = await db.collection("productEmbeddings").doc(storeId).collection("items").get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Read only the vector field to avoid pulling large entities/evidence payloads.
+  const col = db.collection("productEmbeddings").doc(storeId).collection("items");
+  const snap = await col.select("vector").get(); // field mask trims payload drastically
+  return snap.docs.map(d => ({ id: d.id, vector: d.get("vector") || [] }));
 }
+
 
 async function loadProductsByIds(storeId, ids) {
   // Batch read via getAll to avoid 1-by-1 round trips.
@@ -479,7 +482,7 @@ router.post("/recommend", async (req, res) => {
       const step = p.usageStep || p.step || "";
 
       const stripHtmlLocal = (s = "") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-      const capLocal = (s, n = 200) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+      const capLocal = (s, n = 140) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
       const rs = ruleScore(p, constraints, concernNorm);
       const typeMatch = constraints.step
@@ -506,13 +509,13 @@ router.post("/recommend", async (req, res) => {
         productType_norm: pt,
         usageStep: step,
         category: p.categoryNormalized || p.category || "",
-        benefitsNormalized: ben.slice(0, 12),
-        concernsNormalized: con.slice(0, 12),
-        ingredientsNormalized: ing.slice(0, 12),
-        tags: Array.isArray(p.tags) ? p.tags.slice(0, 12)
+        benefitsNormalized: ben.slice(0, 10),
+        concernsNormalized: con.slice(0, 10),
+        ingredientsNormalized: ing.slice(0, 10),
+        tags: Array.isArray(p.tags) ? p.tags.slice(0, 8)
           : (typeof p.tags === "string" ? p.tags.split(",").map(t => t.trim()).slice(0, 12) : []),
         keywords: Array.isArray(p.keywordsNormalized) ? p.keywordsNormalized.slice(0, 12)
-          : (Array.isArray(p.keywords) ? p.keywords.slice(0, 12) : []),
+          : (Array.isArray(p.keywords) ? p.keywords.slice(0, 8) : []),
         ruleScore: Number((Number.isFinite(rs) ? rs : 0).toFixed(3)),
         typeMatch,
         audienceMatch,
