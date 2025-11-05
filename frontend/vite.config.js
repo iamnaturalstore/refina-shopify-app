@@ -7,18 +7,17 @@ import path from 'path';
 export default defineConfig({
   plugins: [react(), basicSsl()],
   server: {
-    https: false,
+    https: false, // For HMR via a public tunnel, the tunnel terminates TLS.
     host: 'localhost',
     port: 5173,
   },
   resolve: { dedupe: ['react', 'react-dom'] },
   build: {
-    // ⬇️ emit straight into the app-proxy’s public path
-    outDir: path.resolve(__dirname, '../refina-backend/public/concierge'),
+    outDir: 'dist-concierge',
     emptyOutDir: true,
     sourcemap: true,
-    minify: false,              // ⬅️ TEMP: avoid TDZ/cycle crashes
-    cssCodeSplit: false,
+    minify: false,            // ← TEMP: prevents TDZ (“L before init”) crash
+    cssCodeSplit: false,      // Emit a single CSS file we can link predictably
     rollupOptions: {
       input: path.resolve(__dirname, 'src/concierge/main.jsx'),
       output: {
@@ -31,6 +30,5 @@ export default defineConfig({
         },
       },
     },
-    target: 'es2019',
   },
 });
