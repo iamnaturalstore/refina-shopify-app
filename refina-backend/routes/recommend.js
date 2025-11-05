@@ -333,8 +333,8 @@ router.post("/recommend", async (req, res) => {
         .map(e => ({ id: e.id, sim: cosine(qVec, (e.vector || [])) }))
         .sort((a, b) => b.sim - a.sim)
         .slice(0, 30);
-      const top60Ids = scored.map(s => s.id);
-      const top60Docs = await loadProductsByIds(storeId, top60Ids);
+      const topIds = scored.map(s => s.id);
+      const topDocs = await loadProductsForScoring(storeId, topIds);
       const byId = new Map(scored.map(s => [String(s.id), s.sim]));
       const constraints = detectConstraints(concernNormLocal);
 
@@ -444,8 +444,9 @@ router.post("/recommend", async (req, res) => {
       .sort((a, b) => b.sim - a.sim)
       .slice(0, 30);
 
-    const top60Ids = scored.map(s => s.id);
-    const top60Docs = await loadProductsByIds(storeId, top60Ids);
+    const topIds = scored.map(s => s.id);
+    const topDocs = await loadProductsForScoring(storeId, topIds);
+
 
     // Map id → doc + cosine
     const byId = new Map();
@@ -784,6 +785,54 @@ const prompt2 = needWiden
   }
 
   // —— helpers inside POST scope (keep shapes consistent) ——
+
+// Read only the tiny set of fields needed for ruleScore/constraints.
+// Uses chunks of 10 to stay within Firestore "in" limits.
+async function loadProductsForScoring(storeId, ids = []) {
+  if (!ids.length) return [];
+  const col = db.collection("products").doc(storeId).collection("items");
+  const fields = [
+    "productType_norm",
+    "productType",
+    "usageStep",
+    "step",
+    "benefitsNormalized",
+    "benefits",
+    "concernsNormalized",
+    "concerns",
+    "ingredientsNormalized",
+    "ingredients",
+    // (Optional but cheap; helps compactForPrompt later without rehydrating everything)
+    "title",
+    "name",
+    "description",
+    "body_html",
+    "categoryNormalized",
+    "category",
+    "tags",
+    "keywordsNormalized",
+    "keywords",
+  ];
+
+  const chunkSize = 10;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    chunks.push(ids.slice(i, i + chunkSize));
+  }
+
+  const results = [];
+  for (const chunk of chunks) {
+    // eslint-disable-next-line no-await-in-loop
+    const snap = await col
+      .where("__name__", "in", chunk.map(id => String(id)))
+      .select(...fields)
+      .get();
+    for (const d of snap.docs) results.push({ id: d.id, ...d.data() });
+  }
+  return results;
+}
+
+
   function clampCachedPayload(payload, guard) {
     try {
       if (!payload || typeof payload !== "object") return payload;
