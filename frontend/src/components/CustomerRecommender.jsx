@@ -195,6 +195,101 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   }, []);
   // ===== end staged progress =====
 
+  const handleRecommend = useCallback(
+    async (nextConcern) => {
+      const q = String(nextConcern ?? concern).trim();
+      if (!q) return;
+
+      setLoading(true);
+      startProgressCycle(); // <<< diff: start staged progress
+      setMatchedProducts([]);
+      setCopy({ why: "", rationale: "", extras: "" });
+      setReasonsById({});
+      setLastQuery(q);
+
+      try {
+        // --- resolve storeId from ?shop= or #root[data-shop] ---
+        const storeId =
+          new URLSearchParams(location.search).get("shop") ||
+          document.getElementById("root")?.dataset.shop ||
+          "";
+
+        const resp = await fetch(`${API_PREFIX}/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // include { storeId, concern } in body
+          body: JSON.stringify({ storeId, concern: q }),
+        });
+        if (!resp.ok) throw new Error(`recommend ${resp.status}`);
+
+        const data = await resp.json();
+
+        // 1) Normalize products to have `name`
+        const products = normalizeProducts(
+          Array.isArray(data?.products) ? data.products : []
+        );
+
+        // 2) Build reasonsById from Awesome
+        const reasonsMap = buildReasonsMapFromAwesome(data?.awesome);
+
+        // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
+        const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
+
+        setMatchedProducts(products);
+        setCopy({
+          why: String(copyOut.why || ""),
+          rationale: String(copyOut.rationale || ""),
+          extras: String(copyOut.extras || ""),
+        });
+        setReasonsById(reasonsMap);
+
+        // Analytics (best-effort)
+        try {
+          // Resolve storeId again the same way as for /recommend
+          const storeId2 =
+            new URLSearchParams(location.search).get("shop") ||
+            document.getElementById("root")?.dataset.shop ||
+            "";
+
+          const analyticsPayload = {
+            storeId: storeId2, // ✅ include canonical shop id
+            type: "concern",
+            event: "recommendation_received",
+            concern: q,
+            productIds: products.map((p) => p.id),
+            meta: {
+              plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
+              model: (data?.meta?.model || data?.meta?.source) || "",
+            },
+          };
+
+          fetch(`${API_PREFIX}/analytics/ingest`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(analyticsPayload),
+            keepalive: true,
+          });
+        } catch (analyticsError) {
+          console.warn("[Recommender] Analytics reporting failed:", analyticsError);
+        }
+      } catch (_e) {
+        setMatchedProducts([]);
+        setCopy({
+          why: "Gentle, low-foam cleansing preserves your skin barrier.",
+          rationale:
+            "I couldn’t fetch smart picks just now, so I’ve kept things simple.",
+          extras: "Use lukewarm water and pat dry—no scrubbing.",
+        });
+        setReasonsById({});
+      } finally {
+        stopProgressCycle(); // <<< diff: stop staged progress
+        setLoading(false);
+        setProgressLabel("Thinking…"); // <<< diff: reset for next ask
+      }
+    },
+    [concern]
+  );
+
   // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff.
   useEffect(() => {
     let seeded = false;
@@ -301,102 +396,6 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
       cancelled = true;
     };
   }, []);
-
-
-  const handleRecommend = useCallback(
-    async (nextConcern) => {
-      const q = String(nextConcern ?? concern).trim();
-      if (!q) return;
-
-      setLoading(true);
-      startProgressCycle(); // <<< diff: start staged progress
-      setMatchedProducts([]);
-      setCopy({ why: "", rationale: "", extras: "" });
-      setReasonsById({});
-      setLastQuery(q);
-
-      try {
-        // --- resolve storeId from ?shop= or #root[data-shop] ---
-        const storeId =
-          new URLSearchParams(location.search).get("shop") ||
-          document.getElementById("root")?.dataset.shop ||
-          "";
-
-        const resp = await fetch(`${API_PREFIX}/recommend`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          // include { storeId, concern } in body
-          body: JSON.stringify({ storeId, concern: q }),
-        });
-        if (!resp.ok) throw new Error(`recommend ${resp.status}`);
-
-        const data = await resp.json();
-
-        // 1) Normalize products to have `name`
-        const products = normalizeProducts(
-          Array.isArray(data?.products) ? data.products : []
-        );
-
-        // 2) Build reasonsById from Awesome
-        const reasonsMap = buildReasonsMapFromAwesome(data?.awesome);
-
-        // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
-        const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
-
-        setMatchedProducts(products);
-        setCopy({
-          why: String(copyOut.why || ""),
-          rationale: String(copyOut.rationale || ""),
-          extras: String(copyOut.extras || ""),
-        });
-        setReasonsById(reasonsMap);
-
-        // Analytics (best-effort)
-        try {
-          // Resolve storeId again the same way as for /recommend
-          const storeId2 =
-            new URLSearchParams(location.search).get("shop") ||
-            document.getElementById("root")?.dataset.shop ||
-            "";
-
-          const analyticsPayload = {
-            storeId: storeId2, // ✅ include canonical shop id
-            type: "concern",
-            event: "recommendation_received",
-            concern: q,
-            productIds: products.map((p) => p.id),
-            meta: {
-              plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
-              model: (data?.meta?.model || data?.meta?.source) || "",
-            },
-          };
-
-          fetch(`${API_PREFIX}/analytics/ingest`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(analyticsPayload),
-            keepalive: true,
-          });
-        } catch (analyticsError) {
-          console.warn("[Recommender] Analytics reporting failed:", analyticsError);
-        }
-      } catch (_e) {
-        setMatchedProducts([]);
-        setCopy({
-          why: "Gentle, low-foam cleansing preserves your skin barrier.",
-          rationale:
-            "I couldn’t fetch smart picks just now, so I’ve kept things simple.",
-          extras: "Use lukewarm water and pat dry—no scrubbing.",
-        });
-        setReasonsById({});
-      } finally {
-        stopProgressCycle(); // <<< diff: stop staged progress
-        setLoading(false);
-        setProgressLabel("Thinking…"); // <<< diff: reset for next ask
-      }
-    },
-    [concern]
-  );
 
   const onTextKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
