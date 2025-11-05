@@ -64,7 +64,7 @@ Requires asset: assets/refina-pdp-assist.js
   </div>
 </div>
 
-{{ 'refina-pdp-assist.js' | asset_url | script_tag }}
+<script src="{{ 'refina-pdp-assist.js' | asset_url }}" defer></script>
 
 <style>
   .refina-pdp-assist__card {

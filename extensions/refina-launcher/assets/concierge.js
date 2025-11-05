@@ -191,6 +191,7 @@
           clearRefinaPrefill();
         }
       } catch {}
+
     });
 
     // One-time styles
@@ -270,10 +271,16 @@
 
       // Click: editor/admin → new tab; live storefront → modal
       btn.addEventListener("click", () => {
-        const url = buildIframeUrl();
         if (IN_THEME_EDITOR || IN_ADMIN) {
-          try { window.open(url, "_blank", "noopener"); }
-          catch { location.href = url; }
+          // Build the URL only in editor/admin path (avoid needless errors on storefront)
+          try {
+            const url = buildIframeUrl();
+            try { window.open(url, "_blank", "noopener"); }
+            catch { location.href = url; }
+          } catch (e) {
+            // Even if URL build fails, fall back to modal so merchants can still test
+            openModal();
+          }
         } else {
           window.__RefinaOpenSource = "launcher";
           openModal();
