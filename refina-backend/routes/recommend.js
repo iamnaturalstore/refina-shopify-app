@@ -339,7 +339,7 @@ router.post("/recommend", async (req, res) => {
       const constraints = detectConstraints(concernNormLocal);
 
       const filtered = [];
-      for (const p of top60Docs) {
+      for (const p of topDocs) {
         const ingNorm =
           (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
           (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
@@ -455,7 +455,7 @@ router.post("/recommend", async (req, res) => {
 
     // Hard allergen filter (EO) when asked to avoid fragrance/EO/sensitive
     const filtered = [];
-    for (const p of top60Docs) {
+    for (const p of topDocs) {
       const ingNorm =
         (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
         (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
@@ -788,10 +788,14 @@ const prompt2 = needWiden
 
 // Read only the tiny set of fields needed for ruleScore/constraints.
 // Uses chunks of 10 to stay within Firestore "in" limits.
+// Skinny scorer fetch: vector-friendly field mask, no "where ... in".
+// Falls back to full-doc fetch if fieldMask isn't supported.
 async function loadProductsForScoring(storeId, ids = []) {
   if (!ids.length) return [];
   const col = db.collection("products").doc(storeId).collection("items");
-  const fields = [
+
+  // Only the fields needed for ruleScore/constraints/compactForPrompt
+  const fieldMask = [
     "productType_norm",
     "productType",
     "usageStep",
@@ -802,7 +806,6 @@ async function loadProductsForScoring(storeId, ids = []) {
     "concerns",
     "ingredientsNormalized",
     "ingredients",
-    // (Optional but cheap; helps compactForPrompt later without rehydrating everything)
     "title",
     "name",
     "description",
@@ -814,23 +817,38 @@ async function loadProductsForScoring(storeId, ids = []) {
     "keywords",
   ];
 
-  const chunkSize = 10;
-  const chunks = [];
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    chunks.push(ids.slice(i, i + chunkSize));
-  }
+  // Helper to do a masked getAll in chunks (keeps payload tiny)
+  const chunk = (arr, n) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
 
-  const results = [];
-  for (const chunk of chunks) {
-    // eslint-disable-next-line no-await-in-loop
-    const snap = await col
-      .where("__name__", "in", chunk.map(id => String(id)))
-      .select(...fields)
-      .get();
-    for (const d of snap.docs) results.push({ id: d.id, ...d.data() });
+  const out = [];
+  try {
+    // Some SDKs prefer <= 50 per getAll for best latency
+    for (const batch of chunk(ids.map(id => col.doc(String(id))), 50)) {
+      // eslint-disable-next-line no-await-in-loop
+      const snaps = await db.getAll(...batch, { fieldMask });
+      for (const s of snaps) {
+        if (s.exists) out.push({ id: s.id, ...s.data() });
+      }
+    }
+    return out;
+  } catch {
+    // Fallback: hydrate winners fully (still chunked, still batched)
+    const fallback = [];
+    for (const batch of chunk(ids.map(id => col.doc(String(id))), 50)) {
+      // eslint-disable-next-line no-await-in-loop
+      const snaps = await db.getAll(...batch);
+      for (const s of snaps) {
+        if (s.exists) fallback.push({ id: s.id, ...s.data() });
+      }
+    }
+    return fallback;
   }
-  return results;
 }
+
 
 
   function clampCachedPayload(payload, guard) {
