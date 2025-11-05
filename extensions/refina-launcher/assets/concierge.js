@@ -4,8 +4,21 @@
    - Theme Editor/Admin: opens concierge in a new tab (no cross-origin issues)
 */
 (() => {
-  if (window.__REFINA_LAUNCHER_LOADED__) return;
-  window.__REFINA_LAUNCHER_LOADED__ = true;
+  // === Namespaced + soft guard (immune to proxy bundle's shared flag) ===
+  if (window.__REFINA_THEME_LAUNCHER_LOADED__) {
+    return; // this same vanilla file already ran
+  }
+  window.__REFINA_THEME_LAUNCHER_LOADED__ = true;
+
+  // If any launcher UI is already mounted, bow out quietly (prevents doubles).
+  const __alreadyMounted =
+    document.querySelector('[data-refina-launcher][data-initialized="true"]') ||
+    document.querySelector('.refina-launcher-btn') ||
+    document.querySelector('.refina-modal');
+
+  if (__alreadyMounted) {
+    return;
+  }
 
   // Deeplink/open state
   window.__RefinaPrimary = window.__RefinaPrimary || null;   // which instance handles open
@@ -82,136 +95,138 @@
   } catch { IN_ADMIN = false; }
 
   // ─────────────────────────────────────
-// Init
-// ─────────────────────────────────────
-function initAll() {
-  $$("[data-refina-launcher]").forEach(initOne);
-}
-
-function initOne(root) {
-  if (!root || root.dataset.initialized === "true") return;
-
-  const settings = root.dataset;
-
-  // Text: prefer new fields, fall back to legacy
-  const launcherText = settings.launcherText || settings.ctaText || "Ask Refina";
-
-  // Appearance / placement
-  const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
-  const launcherRadius = radiusMap[settings.borderRadius] || "16px";
-  const side = settings.side === "left" ? "left" : "right";
-
-  // Behaviour & positioning
-  const triggerMethod       = (settings.triggerMethod || "launcher").toLowerCase();          // 'launcher' | 'menu'
-  const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase();  // 'horizontal' | 'vertical'
-  const bottomOffset = Math.max(0, parseInt(settings.offset      || "24", 10));
-  const leftOffset   = Math.max(0, parseInt(settings.leftOffset  || "16", 10));
-  const rightOffset  = Math.max(0, parseInt(settings.rightOffset || "16", 10));
-  const sideOffset   = side === "left" ? leftOffset : rightOffset;
-
-  const showMobile   = String(settings.showMobile).toLowerCase() !== "false";
-  const pageType     = String(settings.pageType || "").toLowerCase();
-  const hideOnProduct= String(settings.hideOnProduct).toLowerCase() === "true";
-  const hideOnCart   = String(settings.hideOnCart).toLowerCase() === "true";
-  const shopDomain   =
-    settings.shop ||
-    (window.Shopify && (window.Shopify.shop || window.Shopify.permanent_domain)) ||
-    "";
-  const openOnLoad   = String(settings.openOnLoad).toLowerCase() === "true";
-
-  const primaryColor = settings.primaryColor || "#111827";
-  const zIndex = 2147483646;
-
-  if (!shopDomain) {
-    root.dataset.initialized = "true";
-    return;
+  // Init
+  // ─────────────────────────────────────
+  function initAll() {
+    $$("[data-refina-launcher]").forEach(initOne);
   }
 
-  // Button-only guards; keep deeplinks working even if button hidden
-  const buttonAllowed = !(
-    (hideOnProduct && pageType === "product") ||
-    (hideOnCart && pageType === "cart") ||
-    (!showMobile && isMobile())
-  );
+  function initOne(root) {
+    if (!root || root.dataset.initialized === "true") return;
 
-  // Primary instance claim + unified open handler
-if (!window.__RefinaPrimary) {
-  window.__RefinaPrimary = root;
-  document.addEventListener("refina:open", () => {
-    if (IN_THEME_EDITOR || IN_ADMIN) {
-      // Editor/Admin: open in a new tab (no modal)
-      const url = buildIframeUrl(); // build here (one time) for editor/admin
-      try { window.open(url, "_blank", "noopener"); }
-      catch { location.href = url; }
-    } else {
-      // Storefront: open modal; iframe will call buildIframeUrl() exactly once
-      openModalFromDeeplink();
-    }
-  });
-}
+    const settings = root.dataset;
 
-// Prefill bridge (payload only; non-destructive; clear on ACK)
-(function attachPrefillBridgeOnce() {
-  if (window.__REFINA_PREFILL_BRIDGE__) return;
-  window.__REFINA_PREFILL_BRIDGE__ = true;
+    // Text: prefer new fields, fall back to legacy
+    const launcherText = settings.launcherText || settings.ctaText || "Ask Refina";
 
-  // Iframe can request latest payload (if query params were incomplete)
-  document.addEventListener("refina:prefill:request", () => {
-    const saved = readRefinaPrefill();
-    if (saved) {
-      document.dispatchEvent(new CustomEvent("refina:prefill", { detail: saved }));
-    }
-  });
+    // Appearance / placement
+    const radiusMap = { none: "0px", sm: "8px", md: "12px", lg: "16px", "2xl": "24px" };
+    const launcherRadius = radiusMap[settings.borderRadius] || "16px";
+    const side = settings.side === "left" ? "left" : "right";
 
-  // Iframe ACKs when it has consumed params/event
-  document.addEventListener("refina:prefill:ack", () => {
-    clearRefinaPrefill();
-  });
-})();
+    // Behaviour & positioning
+    const triggerMethod       = (settings.triggerMethod || "launcher").toLowerCase();          // 'launcher' | 'menu'
+    const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase();  // 'horizontal' | 'vertical'
+    const bottomOffset = Math.max(0, parseInt(settings.offset      || "24", 10));
+    const leftOffset   = Math.max(0, parseInt(settings.leftOffset  || "16", 10));
+    const rightOffset  = Math.max(0, parseInt(settings.rightOffset || "16", 10));
+    const sideOffset   = side === "left" ? leftOffset : rightOffset;
 
-// Cross-frame ACK from the iframe (/apps/refina) via postMessage
-window.addEventListener("message", (e) => {
-  try {
-    if (e && e.data && e.data.type === "refina:prefill:ack") {
-      clearRefinaPrefill();
-    }
-  } catch {}
-});
+    const showMobile   = String(settings.showMobile).toLowerCase() !== "false";
+    const pageType     = String(settings.pageType || "").toLowerCase();
+    const hideOnProduct= String(settings.hideOnProduct).toLowerCase() === "true";
+    const hideOnCart   = String(settings.hideOnCart).toLowerCase() === "true";
+    const shopDomain   =
+      settings.shop ||
+      (window.Shopify && (window.Shopify.shop || window.Shopify.permanent_domain)) ||
+      "";
+    const openOnLoad   = String(settings.openOnLoad).toLowerCase() === "true";
 
-// One-time styles
-if (!$("#refina-launcher-style")) {
-  const style = document.createElement("style");
-  style.id = "refina-launcher-style";
-  style.textContent = `
-    :root {
-      --refina-safe-bottom: env(safe-area-inset-bottom, 0px);
-      --refina-safe-top: env(safe-area-inset-top, 0px);
-      --rf-primary-color: ${primaryColor};
+    const primaryColor = settings.primaryColor || "#111827";
+    const zIndex = 2147483646;
+
+    // IMPORTANT: Do NOT bail when shopDomain is missing.
+    // Keep rendering and fall back to relative /apps/refina (proxy resolves shop).
+
+    // Button-only guards; keep deeplinks working even if button hidden
+    const buttonAllowed = !(
+      (hideOnProduct && pageType === "product") ||
+      (hideOnCart && pageType === "cart") ||
+      (!showMobile && isMobile())
+    );
+
+    // Primary instance claim + unified open handler (robust re-claim)
+    {
+      const primaryEl = window.__RefinaPrimary;
+      const primaryIsLive = primaryEl && document.contains(primaryEl);
+      if (!primaryIsLive) {
+        window.__RefinaPrimary = root;
+        document.addEventListener("refina:open", () => {
+          if (IN_THEME_EDITOR || IN_ADMIN) {
+            // Editor/Admin: open in a new tab (no modal)
+            const url = buildIframeUrl(); // build here (one time) for editor/admin
+            try { window.open(url, "_blank", "noopener"); }
+            catch { location.href = url; }
+          } else {
+            // Storefront: open modal; iframe will call buildIframeUrl() exactly once
+            openModalFromDeeplink();
+          }
+        });
+      }
     }
-    .refina-launcher-btn {
-      position: fixed;
-      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-      padding: 10px 14px; border-radius: 9999px;
-      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, sans-serif;
-      font-weight: 600; font-size: 14px; color: #fff; background: var(--rf-primary-color);
-      border: 0; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: ${zIndex};
+
+    // Prefill bridge (payload only; non-destructive; clear on ACK)
+    (function attachPrefillBridgeOnce() {
+      if (window.__REFINA_PREFILL_BRIDGE__) return;
+      window.__REFINA_PREFILL_BRIDGE__ = true;
+
+      // Iframe can request latest payload (if query params were incomplete)
+      document.addEventListener("refina:prefill:request", () => {
+        const saved = readRefinaPrefill();
+        if (saved) {
+          document.dispatchEvent(new CustomEvent("refina:prefill", { detail: saved }));
+        }
+      });
+
+      // Iframe ACKs when it has consumed params/event
+      document.addEventListener("refina:prefill:ack", () => {
+        clearRefinaPrefill();
+      });
+    })();
+
+    // Cross-frame ACK from the iframe (/apps/refina) via postMessage
+    window.addEventListener("message", (e) => {
+      try {
+        if (e && e.data && e.data.type === "refina:prefill:ack") {
+          clearRefinaPrefill();
+        }
+      } catch {}
+    });
+
+    // One-time styles
+    if (!$("#refina-launcher-style")) {
+      const style = document.createElement("style");
+      style.id = "refina-launcher-style";
+      style.textContent = `
+        :root {
+          --refina-safe-bottom: env(safe-area-inset-bottom, 0px);
+          --refina-safe-top: env(safe-area-inset-top, 0px);
+          --rf-primary-color: ${primaryColor};
+        }
+        .refina-launcher-btn {
+          position: fixed;
+          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+          padding: 10px 14px; border-radius: 9999px;
+          font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, sans-serif;
+          font-weight: 600; font-size: 14px; color: #fff; background: var(--rf-primary-color);
+          border: 0; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: ${zIndex};
+        }
+        .refina-launcher-btn:focus { outline: 2px solid var(--rf-primary-color); outline-offset: 2px; }
+        .refina-launcher-btn--vertical { width: 48px; padding: 0; min-height: 120px; max-height: 260px; writing-mode: horizontal-tb; }
+        .refina-launcher-btn--vertical > span { display: inline-block; transform: rotate(-90deg); white-space: nowrap; }
+        .refina-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; }
+        .refina-modal { position: relative; width: min(92vw, 980px); height: min(92vh, 720px); background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+        .refina-modal iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+        .refina-modal-close { position: absolute; top: calc(10px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 10px; background: rgba(17,17,17,.75); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+        @media (max-width: 640px) {
+          .refina-launcher-btn { padding: 10px 12px; }
+          .refina-launcher-btn--vertical { width: 48px; }
+          .refina-modal { width: 100vw; height: 100vh; border-radius: 0; }
+          .refina-modal-close { top: calc(12px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 12px; }
+        }
+      `;
+      document.head.appendChild(style);
     }
-    .refina-launcher-btn:focus { outline: 2px solid var(--rf-primary-color); outline-offset: 2px; }
-    .refina-launcher-btn--vertical { width: 48px; padding: 0; min-height: 120px; max-height: 260px; writing-mode: horizontal-tb; }
-    .refina-launcher-btn--vertical > span { display: inline-block; transform: rotate(-90deg); white-space: nowrap; }
-    .refina-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; }
-    .refina-modal { position: relative; width: min(92vw, 980px); height: min(92vh, 720px); background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
-    .refina-modal iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
-    .refina-modal-close { position: absolute; top: calc(10px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 10px; background: rgba(17,17,17,.75); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
-    @media (max-width: 640px) {
-      .refina-launcher-btn { padding: 10px 12px; }
-      .refina-launcher-btn--vertical { width: 48px; }
-      .refina-modal { width: 100vw; height: 100vh; border-radius: 0; }
-      .refina-modal-close { top: calc(12px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 12px; }
-    }
-  `;
-  document.head.appendChild(style);
-}
 
     // Button (if triggerMethod === 'launcher' and allowed)
     let btn = null;
@@ -285,9 +300,9 @@ if (!$("#refina-launcher-style")) {
         base = new URL("/apps/refina", location.origin);
       }
       // Always include explicit shop for the app proxy / BFF resolver
-  try {
-    if (shopDomain) base.searchParams.set("shop", String(shopDomain));
-  } catch {}
+      try {
+        if (shopDomain) base.searchParams.set("shop", String(shopDomain));
+      } catch {}
 
       // Canonical payload from session (NON-DESTRUCTIVE read)
       const p = readRefinaPrefill();
