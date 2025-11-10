@@ -1,6 +1,4 @@
-// admin-ui/src/pages/Welcome.jsx
-
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import {
   Page,
   Layout,
@@ -11,30 +9,10 @@ import {
   Button,
   Box,
   List,
-  Spinner,
 } from "@shopify/polaris";
-import { useNavigate } from "react-router-dom";
 import { api, getShop } from "../api/client";
 
-console.log("[Refina] Welcome page mounted");
-
 // --- helpers -------------------------------------------------------
-
-function normalizeLevel(level) {
-  const v = String(level || "").toLowerCase().trim();
-  if (v === "premium" || v === "pro+") return "premium";
-  if (v === "pro") return "pro";
-  if (v === "free") return "free";
-  return "";
-}
-
-function parsePlanResponse(j) {
-  const p = j?.plan || j || {};
-  return {
-    level: normalizeLevel(p.level),
-    status: String(p.status || p.state || "").toLowerCase(),
-  };
-}
 
 function getCurrentHost() {
   const search = new URLSearchParams(window.location.search || "");
@@ -56,64 +34,9 @@ function buildQS() {
 // --- component -----------------------------------------------------
 
 export default function Welcome() {
-  const navigate = useNavigate();
+  console.log("[Refina] Welcome page mounted");
+
   const qs = useMemo(buildQS, []);
-
-  const [loading, setLoading] = useState(true);
-  const [hasActivePlan, setHasActivePlan] = useState(false);
-
-  useEffect(() => {
-    let on = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const { data } = await api.get("/api/billing/plan");
-        const plan = parsePlanResponse(data || {});
-        const active =
-          !!plan.level &&
-          ["active", "trial", "trialing"].includes(plan.status || "");
-        if (on && active) {
-          setHasActivePlan(true);
-          // If they already have a plan, send them to the main dashboard.
-          navigate(`/${qs}`);
-        }
-      } catch (e) {
-        // If this fails, we still show the welcome page as a safe default.
-        console.warn("Welcome: failed to read plan:", e?.message || e);
-      } finally {
-        if (on) setLoading(false);
-      }
-    })();
-
-    return () => {
-      on = false;
-    };
-  }, [navigate, qs]);
-
-  if (hasActivePlan) {
-    // Brief guard while redirecting; UI will be replaced by Home.
-    return (
-      <Box padding="400">
-        <InlineStack gap="200" blockAlign="center">
-          <Spinner size="small" />
-          <Text as="p">Loading your Refina dashboard…</Text>
-        </InlineStack>
-      </Box>
-    );
-  }
-
-  if (loading) {
-    return (
-      <Box padding="400">
-        <InlineStack gap="200" blockAlign="center">
-          <Spinner size="small" />
-          <Text as="p">Preparing your Refina welcome…</Text>
-        </InlineStack>
-      </Box>
-    );
-  }
-
   const billingUrl = `#/billing${qs || ""}`;
 
   return (
@@ -129,9 +52,8 @@ export default function Welcome() {
                     🎯 Stop the guessing. Refina tells shoppers what to buy.
                   </Text>
                   <Text as="p" tone="subdued">
-                    AI product recommendations with a clear “Why” —
-                    powered by your catalog and enriched facts, right inside
-                    your theme.
+                    AI product recommendations with a clear “Why” — powered by
+                    your catalog and enriched facts, right inside your theme.
                   </Text>
                   <Text as="p" tone="subdued">
                     Get Refina live in minutes: start your free trial in Shopify,
@@ -152,7 +74,7 @@ export default function Welcome() {
 
                 <Text as="p" tone="subdued">
                   Opens Shopify’s secure billing page. 7-day free trial • Pro
-                  ${"19"}/mo • Premium ${"49"}/mo • Cancel anytime in Shopify.
+                  $19/mo • Premium $49/mo • Cancel anytime in Shopify.
                 </Text>
               </BlockStack>
             </Box>
@@ -205,7 +127,7 @@ export default function Welcome() {
           </Card>
         </Layout.Section>
 
-        {/* Why Refina (benefits instead of fake quotes) */}
+        {/* Why Refina */}
         <Layout.Section>
           <Card>
             <Box padding="400">
@@ -215,24 +137,19 @@ export default function Welcome() {
                 </Text>
                 <List type="bullet">
                   <List.Item>
-                    Reduce choice overload on large catalogs with a guided
-                    “this is for me” experience.
+                    Reduce choice overload with a guided “this is for me” experience.
                   </List.Item>
                   <List.Item>
-                    Increase conversion and AOV with ranked best-fit products
-                    plus concise “Why” explanations.
+                    Increase conversion and AOV with ranked best-fit products plus concise “Why”.
                   </List.Item>
                   <List.Item>
-                    Cut repetitive pre-sale questions with expert-style answers
-                    drawn from your catalog.
+                    Cut repetitive pre-sale questions using your product knowledge.
                   </List.Item>
                   <List.Item>
-                    Theme-native, fast setup: no quiz friction, no heavy build;
-                    just enable, tune, and go.
+                    Theme-native, fast setup; no quiz build or heavy config.
                   </List.Item>
                   <List.Item>
-                    Privacy-first: uses your product data as the source of
-                    truth; no customer PII required.
+                    Privacy-first: your catalog is the source of truth; no customer PII required.
                   </List.Item>
                 </List>
               </BlockStack>
@@ -250,8 +167,8 @@ export default function Welcome() {
                     Ready to see Refina against your catalog?
                   </Text>
                   <Text as="p" tone="subdued">
-                    Start your free trial, choose Pro ($19/mo) or Premium
-                    ($49/mo) after 7 days if you love it.
+                    Start your free trial, then choose Pro ($19/mo) or Premium
+                    ($49/mo) if it’s a fit.
                   </Text>
                 </BlockStack>
                 <Button

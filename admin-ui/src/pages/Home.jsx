@@ -213,7 +213,7 @@ React.useEffect(() => {
       // Expected shape: { ok, shop, indexer: { phase, totalProducts, importedCount, embeddedCount, pct, updatedAt } }
       if (!cancelled) {
         setIndexer(data?.indexer ?? null);
-        setIxErr("");
+        setIndexerErr("");
       }
       // Stop polling when complete (or explicit pct >= 100)
       const phase = String(data?.indexer?.phase || "").toLowerCase();
