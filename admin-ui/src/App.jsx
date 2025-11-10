@@ -3,14 +3,16 @@ import React, { useEffect, useRef, useCallback } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import * as P from "@shopify/polaris";
 import { initAppBridge } from "./appBridge";
-import { consumeReturnTo } from "./utils/returnTo"; // NEW
+import { consumeReturnTo } from "./utils/returnTo";
 
 // Real pages
 import Home from "./pages/Home.jsx";
 import Analytics from "./pages/Analytics.jsx";
 import Settings from "./pages/Settings.jsx";
 import Billing from "./pages/Billing.jsx";
-import Setup from "./pages/Setup.jsx"; // NEW
+import Setup from "./pages/Setup.jsx";
+import Welcome from "./pages/Welcome.jsx";
+
 
 // (no app-bridge-react hooks here)
 
@@ -208,6 +210,7 @@ export default function App() {
         <TopNav />
         <P.Box padding="400">
           <Routes>
+            <Route path="/welcome" element={<Welcome />} />
             <Route path="/" element={<Home />} />
             <Route path="/setup" element={<Setup />} />        {/* NEW ROUTE */}
             <Route path="/analytics" element={<Analytics />} />
