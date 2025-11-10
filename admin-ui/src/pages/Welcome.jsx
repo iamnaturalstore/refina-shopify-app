@@ -16,6 +16,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { api, getShop } from "../api/client";
 
+console.log("[Refina] Welcome page mounted");
+
 // --- helpers -------------------------------------------------------
 
 function normalizeLevel(level) {
