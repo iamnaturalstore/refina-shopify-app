@@ -136,72 +136,123 @@ export default function Home() {
     }
   }, []);
 
-  React.useEffect(() => {
-    let on = true;
-    (async () => {
-      setLoading(true);
-      setErr("");
-      try {
-        console.log("[Home] Fetching initial data...");
-        // NOTE: NO fresh=1 here — Home reads cached Firestore plan only.
-                const [
-          { data: planData },
-          { data: settingsData },
-          { data: overviewData },
-          { data: logsData },
-          { data: idxData },
-        ] = await Promise.all([
-          api.get(`/api/billing/plan`),
-          api.get(`/api/admin/store-settings`),
-          adminApi.getAnalyticsSummary({ days: 30 }),
-          adminApi.getAnalyticsEvents({ limit: 5 }),
-          api.get(`/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`),
-        ]);
+  // Initial load: plan, settings, overview, logs, indexer snapshot
+React.useEffect(() => {
+  let on = true;
 
+  (async () => {
+    setLoading(true);
+    setErr("");
 
-        console.log("[Home] Fetched Plan:", planData);
-        console.log("[Home] Fetched Settings:", settingsData);
-        console.log("[Home] Fetched Overview:", overviewData);
-        console.log("[Home] Fetched Logs:", logsData);
+    try {
+      console.log("[Home] Fetching initial data...");
 
-        if (on) {
-          const parsed = parsePlanResponse(planData);
-          setPlan(parsed);
-          setReauthHint(Boolean(parsed.reauthorize)); // show soft hint if backend indicates reauth is needed
-          setSettings(settingsData?.settings || {});
-          setOverview(overviewData || {});
-          const items = Array.isArray(logsData?.rows)
-            ? logsData.rows
-            : Array.isArray(logsData?.logs)
-            ? logsData.logs
-            : Array.isArray(logsData)
-            ? logsData
-            : [];
-          setLogs(items.slice(0, 5));
-          setIndexerApi(idxData?.indexer || null);
+      const [
+        { data: planData },
+        { data: settingsData },
+        { data: overviewData },
+        { data: logsData },
+        { data: idxData },
+      ] = await Promise.all([
+        api.get(`/api/billing/plan`),
+        api.get(`/api/admin/store-settings`),
+        adminApi.getAnalyticsSummary({ days: 30 }),
+        adminApi.getAnalyticsEvents({ limit: 5 }),
+        api.get(
+          `/api/indexer/status?shop=${encodeURIComponent(
+            shop
+          )}&fresh=1`
+        ),
+      ]);
 
-        }
-        console.log("[Home] Initial data load successful.");
-      } catch (e) {
-        console.error("[Home] Initial data load failed:", e);
-        if (on) setErr(`Failed to load dashboard: ${e?.message || "Unknown error"}`);
-      } finally {
-        if (on) setLoading(false);
+      console.log("[Home] Fetched Plan:", planData);
+      console.log("[Home] Fetched Settings:", settingsData);
+      console.log("[Home] Fetched Overview:", overviewData);
+      console.log("[Home] Fetched Logs:", logsData);
+
+      if (on) {
+        const parsed = parsePlanResponse(planData);
+        setPlan(parsed);
+        setReauthHint(Boolean(parsed.reauthorize)); // show soft hint if backend indicates reauth is needed
+        setSettings(settingsData?.settings || {});
+        setOverview(overviewData || {});
+
+        const items = Array.isArray(logsData?.rows)
+          ? logsData.rows
+          : Array.isArray(logsData?.logs)
+          ? logsData.logs
+          : Array.isArray(logsData)
+          ? logsData
+          : [];
+        setLogs(items.slice(0, 5));
+
+        setIndexerApi(idxData?.indexer || null);
       }
-    })();
 
-    window.addEventListener("rf:analytics:ingested", refreshAnalytics);
-    return () => {
-      on = false;
-      window.removeEventListener("rf:analytics:ingested", refreshAnalytics);
-    };
-  }, [shop, refreshAnalytics]);
+      console.log("[Home] Initial data load successful.");
+    } catch (e) {
+      console.error("[Home] Initial data load failed:", e);
+      if (on) {
+        setErr(
+          `Failed to load dashboard: ${
+            e?.message || "Unknown error"
+          }`
+        );
+      }
+    } finally {
+      if (on) setLoading(false);
+    }
+  })();
 
-  
+  window.addEventListener("rf:analytics:ingested", refreshAnalytics);
 
-  // derived values
-  const level = normalizeLevel(plan?.level);
-  const levelLabel = labelFromLevel(level);// Live indexer status loader + light polling (stops at complete)
+  return () => {
+    on = false;
+    window.removeEventListener(
+      "rf:analytics:ingested",
+      refreshAnalytics
+    );
+  };
+}, [shop, refreshAnalytics]);
+
+// -------- Derived values --------
+
+const level = normalizeLevel(plan?.level);
+const levelLabel = labelFromLevel(level);
+
+// Treat Pro/Premium with active/trial-like status as "has a plan".
+// Everything else (incl. none/free/unknown) counts as "no active plan" → eligible for Welcome.
+const hasActivePlan = React.useMemo(() => {
+  const lvl = normalizeLevel(plan?.level);
+  const status = String(plan?.status || "").toLowerCase();
+
+  const isPaid =
+    lvl === "pro" ||
+    lvl === "premium";
+
+  const isActiveLike =
+    status === "active" ||
+    status === "trialing" ||
+    status === "current";
+
+  return isPaid && isActiveLike;
+}, [plan]);
+
+// If there is no active plan yet and we're on "/", send the merchant to the Welcome page.
+// Runs after initial load so we don't fight OAuth, deep links, or return_to.
+React.useEffect(() => {
+  if (loading) return;
+
+  const path = String(location?.pathname || "/");
+
+  if (path === "/" && !hasActivePlan) {
+    console.log("[Home] No active plan; redirecting to /welcome");
+    navigate(`/welcome${qs}`, { replace: true });
+  }
+}, [loading, hasActivePlan, location?.pathname, navigate, qs]);
+
+// -------- Live indexer status loader + light polling (stops at complete) --------
+
 React.useEffect(() => {
   let timer = null;
   let cancelled = false;
@@ -209,16 +260,23 @@ React.useEffect(() => {
   async function fetchStatusOnce() {
     if (!shop) return;
     try {
-      const { data } = await api.get(`/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`);
+      const { data } = await api.get(
+        `/api/indexer/status?shop=${encodeURIComponent(
+          shop
+        )}&fresh=1`
+      );
       // Expected shape: { ok, shop, indexer: { phase, totalProducts, importedCount, embeddedCount, pct, updatedAt } }
       if (!cancelled) {
         setIndexer(data?.indexer ?? null);
         setIndexerErr("");
       }
       // Stop polling when complete (or explicit pct >= 100)
-      const phase = String(data?.indexer?.phase || "").toLowerCase();
+      const phase = String(
+        data?.indexer?.phase || ""
+      ).toLowerCase();
       const pct = Number(data?.indexer?.pct ?? 0);
-      const done = phase === "complete" || pct >= 100;
+      const done =
+        phase === "complete" || pct >= 100;
       // If not done, schedule another read
       if (!done && !cancelled) {
         timer = setTimeout(fetchStatusOnce, 8000);
@@ -232,7 +290,6 @@ React.useEffect(() => {
     }
   }
 
-  // Kick off immediately
   fetchStatusOnce();
 
   return () => {

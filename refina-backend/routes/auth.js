@@ -242,8 +242,6 @@ router.get("/callback", async (req, res) => {
 
     // Redirect to embedded Admin app
     const adminUrl = new URL(`/store/${store}/apps/${process.env.SHOPIFY_APP_HANDLE || "refina"}`, "https://admin.shopify.com");
-    // Send fresh auth to the Welcome screen inside the embedded app
-    adminUrl.hash = "/welcome";
     return res.redirect(302, adminUrl.toString());
   } catch (err) {
     console.error("OAuth callback failed:", err);
