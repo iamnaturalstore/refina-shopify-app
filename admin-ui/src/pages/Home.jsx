@@ -21,23 +21,44 @@ import { api, adminApi, getShop } from "../api/client.js";
 import { useLocation, useNavigate } from "react-router-dom"; // NEW
 
 // ── helpers ──────────────────────────────────────────────────────────────
+
+// Enumerate the tiers you consider paid.
+// Keep this in sync with your backend (planSync).
+const PAID_LEVELS = ["lite", "pro", "premium", "growth"];
+
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
-  if (/\bpremium\b/.test(v) || /\bpro\s*\+|\bpro\W*plus\b/.test(v)) return "premium";
-  if (/\bpro\b/.test(v)) return "pro";
+  if (!v) return "free";
+
+  // Direct known tiers
+  if (["free", "lite", "pro", "premium", "growth"].includes(v)) {
+    return v;
+  }
+
+  // Aliases / legacy labels → map them
+  if (v === "plus" || /\bpro\+|\bpro plus\b/.test(v)) {
+    return "premium";
+  }
+
+  // Fallback: treat unknowns as free (safe default)
   return "free";
 }
+
 function labelFromLevel(level) {
-  const v = (level || "").toLowerCase();
-  if (v === "premium" || v === "pro+") return "Premium";
+  const v = String(level || "").toLowerCase();
+  if (v === "premium") return "Premium";
   if (v === "pro") return "Pro";
+  if (v === "lite") return "Lite";
+  if (v === "growth") return "Growth";
   return "Free";
 }
+
 function parsePlanResponse(j) {
   const p = j?.plan || j || {};
+  const level = normalizeLevel(p.level || p.name || p.tier);
   return {
-    level: normalizeLevel(p.level),
-    status: (p.status || p.state || "unknown").toString(),
+    level,
+    status: String(p.status || p.state || "unknown"),
     reauthorize: !!j?.reauthorize,
   };
 }
@@ -226,10 +247,7 @@ const hasActivePlan = React.useMemo(() => {
   const lvl = normalizeLevel(plan?.level);
   const status = String(plan?.status || "").toLowerCase();
 
-  const isPaid =
-    lvl === "pro" ||
-    lvl === "premium";
-
+  const isPaid = PAID_LEVELS.includes(lvl);
   const isActiveLike =
     status === "active" ||
     status === "trialing" ||
@@ -245,11 +263,24 @@ React.useEffect(() => {
 
   const path = String(location?.pathname || "/");
 
+  // If no plan yet: always start in Mission Control (/welcome)
   if (path === "/" && !hasActivePlan) {
     console.log("[Home] No active plan; redirecting to /welcome");
     navigate(`/welcome${qs}`, { replace: true });
+    return;
   }
-}, [loading, hasActivePlan, location?.pathname, navigate, qs]);
+
+  // If plan is active but setup isn't complete yet:
+  // Prefer Mission Control so they see the checklist.
+  if (path === "/" && hasActivePlan && !isSetupComplete) {
+    console.log("[Home] Plan active but setup incomplete; redirecting to /welcome");
+    navigate(`/welcome${qs}`, { replace: true });
+    return;
+  }
+
+  // If plan active AND setup complete:
+  // Stay on "/", this is their true dashboard.
+}, [loading, hasActivePlan, isSetupComplete, location?.pathname, navigate, qs]);
 
 // -------- Live indexer status loader + light polling (stops at complete) --------
 

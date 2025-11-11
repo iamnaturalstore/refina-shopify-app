@@ -1,4 +1,6 @@
-import React, { useMemo } from "react";
+// admin-ui/src/pages/Welcome.jsx
+
+import React from "react";
 import {
   Page,
   Layout,
@@ -8,17 +10,23 @@ import {
   Text,
   Button,
   Box,
-  List,
+  Badge,
+  Icon,
 } from "@shopify/polaris";
+import { CheckIcon } from "@shopify/polaris-icons";
 import { api, getShop } from "../api/client";
 
 // --- helpers -------------------------------------------------------
 
 function getCurrentHost() {
-  const search = new URLSearchParams(window.location.search || "");
-  const hashQ = (window.location.hash || "").split("?")[1] || "";
-  const hash = new URLSearchParams(hashQ);
-  return search.get("host") || hash.get("host") || "";
+  try {
+    const search = new URLSearchParams(window.location.search || "");
+    const hashQ = (window.location.hash || "").split("?")[1] || "";
+    const hash = new URLSearchParams(hashQ);
+    return search.get("host") || hash.get("host") || "";
+  } catch {
+    return "";
+  }
 }
 
 function buildQS() {
@@ -31,157 +39,288 @@ function buildQS() {
   return s ? `?${s}` : "";
 }
 
+function normalizeLevel(lvl) {
+  return String(lvl || "").toLowerCase();
+}
+
+function isActivePlanLike(plan) {
+  if (!plan) return false;
+
+  const lvl = normalizeLevel(plan.level || plan.name || plan.tier);
+  const status = String(plan.status || "").toLowerCase();
+
+  const isPaid =
+    lvl === "pro" ||
+    lvl === "premium" ||
+    lvl === "paid";
+
+  const isActiveish =
+    status === "active" ||
+    status === "trialing" ||
+    status === "current";
+
+  return isPaid && isActiveish;
+}
+
 // --- component -----------------------------------------------------
 
 export default function Welcome() {
-  console.log("[Refina] Welcome page mounted");
+  const [loading, setLoading] = React.useState(true);
+  const [plan, setPlan] = React.useState(null);
+  const [settings, setSettings] = React.useState({});
+  const [err, setErr] = React.useState("");
 
-  const qs = useMemo(buildQS, []);
+  const qs = React.useMemo(buildQS, []);
   const billingUrl = `#/billing${qs || ""}`;
 
+  // Load minimal state for the checklist
+  React.useEffect(() => {
+    let on = true;
+
+    (async () => {
+      try {
+        setLoading(true);
+        setErr("");
+
+        const shop = getShop();
+
+        const [
+          { data: planData },
+          { data: settingsData },
+        ] = await Promise.all([
+          api.get(`/api/billing/plan`),
+          api.get(`/api/admin/store-settings`),
+        ]);
+
+        if (!on) return;
+
+        // If your Home.jsx uses parsePlanResponse, you can do the same here.
+        // For now we assume planData already has { level, status, ... } when present.
+        const resolvedPlan =
+          planData?.plan || planData || null;
+
+        setPlan(resolvedPlan);
+        setSettings(settingsData?.settings || {});
+      } catch (e) {
+        if (on) {
+          console.error("[Welcome] Failed to load state:", e);
+          setErr("We couldn’t load your setup status. You can still start your trial or open Settings.");
+        }
+      } finally {
+        if (on) setLoading(false);
+      }
+    })();
+
+    return () => {
+      on = false;
+    };
+  }, []);
+
+  const hasActivePlan = React.useMemo(
+    () => isActivePlanLike(plan),
+    [plan]
+  );
+
+  const hasCategory = Boolean(settings?.category);
+  // Adjust this flag to match however you persist theme/embed enablement.
+  const hasThemeEmbed =
+    Boolean(settings?.themeEmbedEnabled) ||
+    Boolean(settings?.appEmbedEnabled) ||
+    Boolean(settings?.refinaEnabled);
+
+  const completed = [
+    hasActivePlan,
+    hasCategory,
+    hasThemeEmbed,
+  ].filter(Boolean).length;
+
+  const allDone =
+    hasActivePlan && hasCategory && hasThemeEmbed;
+
+  // --- UI helpers --------------------------------------------------
+
+  function StepRow({
+    label,
+    description,
+    complete,
+    primaryAction,
+    subtle,
+  }) {
+    return (
+      <Card>
+        <Box padding="400">
+          <InlineStack align="space-between" blockAlign="center" gap="200">
+            <BlockStack gap="100">
+              <InlineStack gap="150" blockAlign="center">
+                <Text as="h3" variant="headingSm">
+                  {label}
+                </Text>
+                <Badge tone={complete ? "success" : "attention"}>
+                  {complete ? "Done" : "Required"}
+                </Badge>
+              </InlineStack>
+              {description && (
+                <Text as="p" tone={subtle ? "subdued" : "body"}>
+                  {description}
+                </Text>
+              )}
+              {primaryAction}
+            </BlockStack>
+            <Icon
+              source={CheckIcon}
+              tone={complete ? "success" : "subdued"}
+            />
+          </InlineStack>
+        </Box>
+      </Card>
+    );
+  }
+
+  // --- Render ------------------------------------------------------
+
+  const title = !hasActivePlan
+    ? "Welcome to Refina"
+    : allDone
+    ? "You're live with Refina"
+    : "Get started with Refina";
+
+  const subcopy = !hasActivePlan
+    ? "Start your free trial, then complete two quick steps to get AI recommendations live on your store."
+    : allDone
+    ? "Your trial/plan is active, Refina is configured, and you’re ready to help shoppers choose faster."
+    : "Your plan is active. Complete the remaining steps below to go live.";
+
   return (
-    <Page title="Welcome to Refina">
+    <Page title={title}>
       <Layout>
-        {/* Hero */}
+        {/* Hero / summary */}
         <Layout.Section>
           <Card>
             <Box padding="400">
-              <BlockStack gap="400">
-                <BlockStack gap="200">
-                  <Text as="h1" variant="headingLg">
-                    🎯 Stop the guessing. Refina tells shoppers what to buy.
+              <BlockStack gap="300">
+                <BlockStack gap="150">
+                  <Text as="p" tone="subdued">
+                    🎯 Stop the guessing. Refina turns your catalog into clear, guided recommendations.
                   </Text>
                   <Text as="p" tone="subdued">
-                    AI product recommendations with a clear “Why” — powered by
-                    your catalog and enriched facts, right inside your theme.
-                  </Text>
-                  <Text as="p" tone="subdued">
-                    Get Refina live in minutes: start your free trial in Shopify,
-                    we build your product knowledge base, and you switch Refina
-                    on in your theme.
+                    {subcopy}
                   </Text>
                 </BlockStack>
 
-                <InlineStack gap="200" blockAlign="center">
-                  <Button
-                    variant="primary"
-                    size="large"
-                    url={billingUrl}
-                  >
-                    Start free trial &amp; choose plan
-                  </Button>
+                <InlineStack align="space-between" blockAlign="center">
+                  <BlockStack gap="050">
+                    <Text as="p" tone="subdued">
+                      Setup progress
+                    </Text>
+                    <Text as="p" variant="headingMd">
+                      {completed} / 3 steps complete
+                    </Text>
+                  </BlockStack>
+                  {allDone && (
+                    <Button
+                      variant="primary"
+                      url={`/#/${""}${qs}`}
+                    >
+                      Go to dashboard
+                    </Button>
+                  )}
                 </InlineStack>
 
-                <Text as="p" tone="subdued">
-                  Opens Shopify’s secure billing page. 7-day free trial • Pro
-                  $19/mo • Premium $49/mo • Cancel anytime in Shopify.
-                </Text>
-              </BlockStack>
-            </Box>
-          </Card>
-        </Layout.Section>
-
-        {/* How it works */}
-        <Layout.Section>
-          <Card>
-            <Box padding="400">
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">
-                  How Refina works
-                </Text>
-                <BlockStack gap="200">
-                  <BlockStack gap="050">
-                    <Text as="h3" variant="headingSm">
-                      1️⃣ Start your free trial in Shopify
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Confirm your Refina plan on Shopify’s billing page. No
-                      charges until your trial ends.
-                    </Text>
-                  </BlockStack>
-
-                  <BlockStack gap="050">
-                    <Text as="h3" variant="headingSm">
-                      2️⃣ Refina builds your product knowledge
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      We scan your catalog, extract key attributes and
-                      ingredients, and build a store-specific knowledge base so
-                      recommendations stay accurate and explainable.
-                    </Text>
-                  </BlockStack>
-
-                  <BlockStack gap="050">
-                    <Text as="h3" variant="headingSm">
-                      3️⃣ Add Refina to your theme &amp; go live
-                    </Text>
-                    <Text as="p" tone="subdued">
-                      Enable the Refina app embed and PDP prompt in your Theme
-                      Editor. Shoppers ask in plain language and see ranked
-                      best-fit options with the “Why”.
-                    </Text>
-                  </BlockStack>
-                </BlockStack>
-              </BlockStack>
-            </Box>
-          </Card>
-        </Layout.Section>
-
-        {/* Why Refina */}
-        <Layout.Section>
-          <Card>
-            <Box padding="400">
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">
-                  Why merchants choose Refina
-                </Text>
-                <List type="bullet">
-                  <List.Item>
-                    Reduce choice overload with a guided “this is for me” experience.
-                  </List.Item>
-                  <List.Item>
-                    Increase conversion and AOV with ranked best-fit products plus concise “Why”.
-                  </List.Item>
-                  <List.Item>
-                    Cut repetitive pre-sale questions using your product knowledge.
-                  </List.Item>
-                  <List.Item>
-                    Theme-native, fast setup; no quiz build or heavy config.
-                  </List.Item>
-                  <List.Item>
-                    Privacy-first: your catalog is the source of truth; no customer PII required.
-                  </List.Item>
-                </List>
-              </BlockStack>
-            </Box>
-          </Card>
-        </Layout.Section>
-
-        {/* Closing CTA */}
-        <Layout.Section>
-          <Card>
-            <Box padding="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h3" variant="headingSm">
-                    Ready to see Refina against your catalog?
+                {err && (
+                  <Text as="p" tone="critical">
+                    {err}
                   </Text>
-                  <Text as="p" tone="subdued">
-                    Start your free trial, then choose Pro ($19/mo) or Premium
-                    ($49/mo) if it’s a fit.
-                  </Text>
-                </BlockStack>
+                )}
+              </BlockStack>
+            </Box>
+          </Card>
+        </Layout.Section>
+
+        {/* Step 1: Plan */}
+        <Layout.Section>
+          <StepRow
+            label="1. Start your free trial & choose a plan"
+            description={
+              hasActivePlan
+                ? "Your plan is active. You can change it anytime in Shopify billing."
+                : "Confirm your plan in Shopify. Your trial starts now; you won’t be charged until it ends."
+            }
+            complete={hasActivePlan}
+            primaryAction={
+              !hasActivePlan && (
                 <Button
                   variant="primary"
                   size="medium"
                   url={billingUrl}
+                  loading={loading}
                 >
-                  Start free trial &amp; choose plan
+                  Start free trial in Shopify
                 </Button>
-              </InlineStack>
-            </Box>
-          </Card>
+              )
+            }
+            subtle={hasActivePlan}
+          />
         </Layout.Section>
+
+        {/* Step 2: Category */}
+        <Layout.Section>
+          <StepRow
+            label="2. Choose your primary category"
+            description="Tell Refina what you sell so answers and recommendations stay relevant."
+            complete={hasCategory}
+            primaryAction={
+              <Button
+                variant={hasCategory ? "secondary" : "primary"}
+                size="medium"
+                url={`#/settings${qs}`}
+              >
+                {hasCategory ? "Edit in Settings" : "Choose category in Settings"}
+              </Button>
+            }
+          />
+        </Layout.Section>
+
+        {/* Step 3: Theme embed */}
+        <Layout.Section>
+          <StepRow
+            label="3. Enable Refina in your theme"
+            description="Turn on the Refina app embed / block in your theme so shoppers can start using it."
+            complete={hasThemeEmbed}
+            primaryAction={
+              <Button
+                variant={hasThemeEmbed ? "secondary" : "primary"}
+                size="medium"
+                url={`#/setup${qs}`}
+              >
+                {hasThemeEmbed ? "View theme setup" : "Open theme setup"}
+              </Button>
+            }
+          />
+        </Layout.Section>
+
+        {/* If everything is done, reinforce success */}
+        {allDone && (
+          <Layout.Section>
+            <Card>
+              <Box padding="400">
+                <BlockStack gap="150">
+                  <Text as="h3" variant="headingSm">
+                    ✅ You’re live with Refina
+                  </Text>
+                  <Text as="p" tone="subdued">
+                    Refina is ready in your theme. Head to the dashboard to track engagement and performance.
+                  </Text>
+                  <Button
+                    variant="primary"
+                    url={`/#/${""}${qs}`}
+                  >
+                    Go to dashboard
+                  </Button>
+                </BlockStack>
+              </Box>
+            </Card>
+          </Layout.Section>
+        )}
       </Layout>
     </Page>
   );
