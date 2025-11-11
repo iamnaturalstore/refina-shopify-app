@@ -282,15 +282,6 @@ React.useEffect(() => {
   // Stay on "/", this is their true dashboard.
 }, [loading, hasActivePlan, isSetupComplete, location?.pathname, navigate, qs]);
 
-// While we're redirecting to /welcome, don't render Home to avoid a flash.
-if (
-  !loading &&
-  location?.pathname === "/" &&
-  (!hasActivePlan || (hasActivePlan && !isSetupComplete))
-) {
-  return null;
-}
-
 // -------- Live indexer status loader + light polling (stops at complete) --------
 React.useEffect(() => {
   let timer = null;
@@ -388,18 +379,6 @@ const pctFromDoc = Number(liveOrLegacy?.pct ?? 0);
 const knowledgePct = knowledgeHasCounts
   ? pct(embeddedCount || importedCount, totalProducts)
   : (pctFromDoc ? Math.max(0, Math.min(100, pctFromDoc)) : (coarsePctByPhase[indexerPhase] ?? 0));
-
-
-  if (loading) {
-    return (
-      <Box padding="400">
-        <InlineStack gap="200" blockAlign="center">
-          <Spinner size="small" />
-          <Text as="p">Loading dashboard...</Text>
-        </InlineStack>
-      </Box>
-    );
-  }
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
