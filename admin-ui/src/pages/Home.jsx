@@ -292,7 +292,6 @@ if (
 }
 
 // -------- Live indexer status loader + light polling (stops at complete) --------
-
 React.useEffect(() => {
   let timer = null;
   let cancelled = false;
@@ -301,30 +300,21 @@ React.useEffect(() => {
     if (!shop) return;
     try {
       const { data } = await api.get(
-        `/api/indexer/status?shop=${encodeURIComponent(
-          shop
-        )}&fresh=1`
+        `/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
       );
-      // Expected shape: { ok, shop, indexer: { phase, totalProducts, importedCount, embeddedCount, pct, updatedAt } }
       if (!cancelled) {
         setIndexer(data?.indexer ?? null);
         setIndexerErr("");
       }
-      // Stop polling when complete (or explicit pct >= 100)
-      const phase = String(
-        data?.indexer?.phase || ""
-      ).toLowerCase();
+      const phase = String(data?.indexer?.phase || "").toLowerCase();
       const pct = Number(data?.indexer?.pct ?? 0);
-      const done =
-        phase === "complete" || pct >= 100;
-      // If not done, schedule another read
+      const done = phase === "complete" || pct >= 100;
       if (!done && !cancelled) {
         timer = setTimeout(fetchStatusOnce, 8000);
       }
     } catch (e) {
       if (!cancelled) {
         setIndexerErr(e?.message || "status_failed");
-        // Back off a little and try again
         timer = setTimeout(fetchStatusOnce, 12000);
       }
     }
@@ -337,6 +327,26 @@ React.useEffect(() => {
     if (timer) clearTimeout(timer);
   };
 }, [shop]);
+
+// ✅ Now it's safe to early-return: all hooks are already declared.
+if (
+  !loading &&
+  location?.pathname === "/" &&
+  (!hasActivePlan || (hasActivePlan && !isSetupComplete))
+) {
+  return null;
+}
+
+if (loading) {
+  return (
+    <Box padding="400">
+      <InlineStack gap="200" blockAlign="center">
+        <Spinner size="small" />
+        <Text as="p">Loading dashboard...</Text>
+      </InlineStack>
+    </Box>
+  );
+}
 
   const badgeTone = level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
 
