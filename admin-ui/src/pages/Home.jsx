@@ -282,6 +282,15 @@ React.useEffect(() => {
   // Stay on "/", this is their true dashboard.
 }, [loading, hasActivePlan, isSetupComplete, location?.pathname, navigate, qs]);
 
+// While we're redirecting to /welcome, don't render Home to avoid a flash.
+if (
+  !loading &&
+  location?.pathname === "/" &&
+  (!hasActivePlan || (hasActivePlan && !isSetupComplete))
+) {
+  return null;
+}
+
 // -------- Live indexer status loader + light polling (stops at complete) --------
 
 React.useEffect(() => {
