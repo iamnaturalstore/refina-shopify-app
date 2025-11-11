@@ -283,7 +283,7 @@ React.useEffect(() => {
       }
     } catch (e) {
       if (!cancelled) {
-        setIxErr(e?.message || "status_failed");
+        setIndexerErr(e?.message || "status_failed");
         // Back off a little and try again
         timer = setTimeout(fetchStatusOnce, 12000);
       }
@@ -314,6 +314,10 @@ React.useEffect(() => {
   const hasCategory = Boolean(settings?.category);
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
   const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
+  // High-level state flags for Home behavior
+  const isNewlyActivated = hasActivePlan && !isSetupComplete;
+  const isLive = hasActivePlan && isSetupComplete;
+
 
   // ── Knowledge/indexer: prefer live status; fall back to legacy shapes (settings/overview) ──
 const liveOrLegacy = (
@@ -365,36 +369,48 @@ const knowledgePct = knowledgeHasCounts
 
       {/* Setup callout — flips to a read-only success state when both quick settings are done */}
       <Box paddingBlockEnd="400">
-        <Card>
-          <Box padding="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text as="h3" variant="headingSm">
-                  {isSetupComplete ? "Setup complete" : "Finish setup"}
-                </Text>
-                <Text as="p" tone="subdued">
-                  Enable app embed • Choose category • Verify launcher visible
-                </Text>
-              </BlockStack>
-              <Button
-                variant="primary"
-                onClick={() => navigate(`/setup${qs}`)}
-                disabled={isSetupComplete}
-              >
-                {isSetupComplete ? "Setup complete ✓" : "Go to Setup"}
-              </Button>
-            </InlineStack>
-          </Box>
-        </Card>
-      </Box>
+  <Card>
+    <Box padding="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <BlockStack gap="100">
+          <Text as="h3" variant="headingSm">
+            {isLive
+              ? "Setup complete — you're live with Refina"
+              : isNewlyActivated
+              ? "Refina activated — you're almost ready"
+              : "Finish setup"}
+          </Text>
+          <Text as="p" tone="subdued">
+            {isLive
+              ? "Refina is answering customer questions using your catalog."
+              : "Complete 3 quick steps: enable the app embed, choose your category, and verify the launcher is visible."}
+          </Text>
+        </BlockStack>
+        <Button
+          variant="primary"
+          onClick={() => navigate(`/setup${qs}`)}
+          disabled={isLive}
+        >
+          {isLive ? "Setup complete ✓" : "Go to setup"}
+        </Button>
+      </InlineStack>
+    </Box>
+  </Card>
+</Box>
+
 
       {/* Existing Home content remains the Overview tab’s content */}
       <Card>
         <Box padding="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">
-              Welcome to Refina
+            {!hasActivePlan
+              ? "Welcome to Refina"
+              : isNewlyActivated
+              ? "Refina is activated — finish setup to go live"
+              : "Refina overview"}
             </Text>
+
             <InlineStack gap="200" blockAlign="center">
               <Tooltip content={levelLabel}>
                 <Badge tone={badgeTone}>{levelLabel}</Badge>
@@ -555,6 +571,7 @@ const knowledgePct = knowledgeHasCounts
         </Card>
       </Box>
 
+     {isLive && (
       <Box paddingBlockStart="400">
         <Card>
           <Box padding="400">
@@ -634,6 +651,7 @@ const knowledgePct = knowledgeHasCounts
           </Box>
         </Card>
       </Box>
+      )}
 
       <Box paddingBlockStart="400">
         <Card>
@@ -695,6 +713,7 @@ const knowledgePct = knowledgeHasCounts
             </Card>
           </Box>
 
+{isLive && (
           <Box minWidth="320px" maxWidth="520px" width="100%">
             <Card>
               <Box padding="400">
@@ -735,6 +754,7 @@ const knowledgePct = knowledgeHasCounts
               </Box>
             </Card>
           </Box>
+          )}
         </InlineStack>
       </Box>
     </Box>
