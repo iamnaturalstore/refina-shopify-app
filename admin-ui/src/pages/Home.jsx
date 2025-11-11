@@ -382,7 +382,7 @@ const knowledgePct = knowledgeHasCounts
           </Text>
           <Text as="p" tone="subdued">
             {isLive
-              ? "Refina is answering customer questions using your catalog."
+              ? "Refina is now answering your customer queries using your store's enriched knowledge base."
               : "Complete 3 quick steps: enable the app embed, choose your category, and verify the launcher is visible."}
           </Text>
         </BlockStack>
@@ -470,7 +470,7 @@ const knowledgePct = knowledgeHasCounts
         {/* PREMIUM → simple confirmation */}
         {level === "premium" && (
           <Banner tone="success" title="Premium active — higher limits & advanced analytics">
-            <p>Thanks for being on Premium. You’re getting the highest-quality answers and expanded analytics.</p>
+            <p>You’re getting the highest-quality AI responses and higher monthly token limits.</p>
           </Banner>
         )}
       </Box>
@@ -666,7 +666,7 @@ const knowledgePct = knowledgeHasCounts
                     ? "Pro unlocks AI recommendations, analytics, and styling controls."
                     : level === "pro"
                     ? "Premium unlocks higher limits and advanced analytics."
-                    : "You’re on Premium — thanks for supporting Refina!"}
+                    : "You’re on Premium — Need more? Talk to us about Enterprise plans with higher usage limits, larger catalogs, and dedicated support."}
                 </Text>
               </BlockStack>
               {level === "premium" ? (
@@ -695,19 +695,26 @@ const knowledgePct = knowledgeHasCounts
                       {checklistDone}/2
                     </Badge>
                   </InlineStack>
-                  <InlineStack gap="150" blockAlign="center">
-                    <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
-                    <Text as="span">
-                      Set your <strong>tone</strong> in <a href={`#/settings${qs}`}>Settings</a>
-                    </Text>
-                  </InlineStack>
-                  <InlineStack gap="150" blockAlign="center">
-                    <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
-                    <Text as="span">
-                      Choose your <strong>category</strong> in{" "}
-                      <a href={`#/settings${qs}`}>Settings</a>
-                    </Text>
-                  </InlineStack>
+                  <InlineStack align="space-between" gap="150" blockAlign="center">
+  <Text as="span">
+    Set your <strong>tone</strong> in{" "}
+    <a href={`#/settings${qs}`}>Settings</a>
+  </Text>
+  <Icon
+    source={CheckIcon}
+    tone={hasTone ? "success" : "subdued"}
+  />
+</InlineStack>
+                  <InlineStack align="space-between" gap="150" blockAlign="center">
+  <Text as="span">
+    Choose your <strong>category</strong> in{" "}
+    <a href={`#/settings${qs}`}>Settings</a>
+  </Text>
+  <Icon
+    source={CheckIcon}
+    tone={hasCategory ? "success" : "subdued"}
+  />
+</InlineStack>
                 </BlockStack>
               </Box>
             </Card>
