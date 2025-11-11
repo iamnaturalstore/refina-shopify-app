@@ -22,25 +22,17 @@ import { useLocation, useNavigate } from "react-router-dom"; // NEW
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
-// Enumerate the tiers you consider paid.
-// Keep this in sync with your backend (planSync).
+// Enumerate all tiers you treat as paid
 const PAID_LEVELS = ["lite", "pro", "premium", "growth"];
 
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
   if (!v) return "free";
 
-  // Direct known tiers
-  if (["free", "lite", "pro", "premium", "growth"].includes(v)) {
-    return v;
-  }
+  if (["free", "lite", "pro", "premium", "growth"].includes(v)) return v;
 
-  // Aliases / legacy labels → map them
-  if (v === "plus" || /\bpro\+|\bpro plus\b/.test(v)) {
-    return "premium";
-  }
+  if (v === "plus" || /\bpro\+|\bpro plus\b/.test(v)) return "premium";
 
-  // Fallback: treat unknowns as free (safe default)
   return "free";
 }
 
@@ -256,6 +248,14 @@ const hasActivePlan = React.useMemo(() => {
   return isPaid && isActiveLike;
 }, [plan]);
 
+ const hasTone = Boolean(settings?.aiTone);
+  const hasCategory = Boolean(settings?.category);
+  const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
+  const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
+  // High-level state flags for Home behavior
+  const isNewlyActivated = hasActivePlan && !isSetupComplete;
+  const isLive = hasActivePlan && isSetupComplete;
+
 // If there is no active plan yet and we're on "/", send the merchant to the Welcome page.
 // Runs after initial load so we don't fight OAuth, deep links, or return_to.
 React.useEffect(() => {
@@ -340,14 +340,6 @@ React.useEffect(() => {
   const limit =
     usage.limit ?? (level === "free" ? 0 : level === "pro" ? 1000 : level === "premium" ? 10000 : 0);
   const ctr = interactions ? (100 * productClicks) / interactions : 0;
-
-  const hasTone = Boolean(settings?.aiTone);
-  const hasCategory = Boolean(settings?.category);
-  const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
-  const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
-  // High-level state flags for Home behavior
-  const isNewlyActivated = hasActivePlan && !isSetupComplete;
-  const isLive = hasActivePlan && isSetupComplete;
 
 
   // ── Knowledge/indexer: prefer live status; fall back to legacy shapes (settings/overview) ──
