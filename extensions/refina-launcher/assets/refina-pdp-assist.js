@@ -23,43 +23,76 @@
   (function injectDrawerCssOnce() {
     if (document.getElementById("refina-pdp-drawer-css")) return;
     const css = `
-      .refina-dw-host { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
-      .refina-dw-host.is-open { pointer-events: auto; }
-      .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
-      .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
-      .refina-dw { position: absolute; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
-        background: color-mix(in srgb, var(--color-background, #0b0b0e) 92%, white 8%);
-        border-left: 1px solid color-mix(in srgb, var(--color-foreground, #ffffff) 12%, transparent);
-        box-shadow: -20px 0 60px rgba(0,0,0,.35);
-        transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
-        display: grid; grid-template-rows: auto 1fr auto; border-top-left-radius: var(--rfina-dw-radius, 16px);
-        border-bottom-left-radius: var(--rfina-dw-radius, 16px); overflow: hidden;
-      }
-      .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
-      .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
-      .refina-dw-copy { display: grid; gap: 4px; }
-      .refina-dw-title { font-weight: 600; line-height: 1.25; }
-      .refina-dw-sub { opacity: .85; font-size: .92em; line-height: 1.35; }
-      .refina-dw-micro { opacity: .7; font-size: .85em; line-height: 1.3; }
-      .refina-dw-close { border: 1px solid rgba(255,255,255,.18); background: transparent; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
-      .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
-      .refina-dw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
-      .refina-dw-chip { padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); background: transparent; cursor: pointer; font-size: .9em; }
-      .refina-dw-context { opacity: .75; font-size: .85em; margin-bottom: 6px; }
-      .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
-      .refina-dw-input { width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
-        border: 1px solid rgba(255,255,255,.18); background: color-mix(in srgb, var(--color-accent, #7A5CFF) 10%, transparent);
-        color: inherit; resize: vertical; }
-      .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
-      .refina-dw-continue {
-        width: 100%; padding: 10px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
-        background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
-        font-weight: 600; cursor: pointer;
-      }
-      @media (max-width: 640px) {
-        .refina-dw { width: 100vw; }
-      }
-    `;
+  .refina-dw-host { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
+  .refina-dw-host.is-open { pointer-events: auto; }
+
+  /* Force light scheme locally + safe fallbacks */
+  .refina-dw-host {
+    --color-background: #ffffff;
+    --color-foreground: #111111;
+    --refina-border: rgba(17,17,17,.10);
+    color-scheme: light;
+    isolation: isolate;
+  }
+
+  .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
+  .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
+
+  .refina-dw { position: absolute; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
+    /* was falling back to #0b0b0e → dark */
+    background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
+    border-left: 1px solid var(--refina-border);
+    box-shadow: -20px 0 60px rgba(0,0,0,.35);
+    transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
+    display: grid; grid-template-rows: auto 1fr auto; border-top-left-radius: var(--rfina-dw-radius, 16px);
+    border-bottom-left-radius: var(--rfina-dw-radius, 16px); overflow: hidden;
+    color: var(--color-foreground);
+  }
+  .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
+
+  .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
+  .refina-dw-copy { display: grid; gap: 4px; }
+  .refina-dw-title { font-weight: 600; line-height: 1.25; }
+  .refina-dw-sub { opacity: .85; font-size: .92em; line-height: 1.35; }
+  .refina-dw-micro { opacity: .7; font-size: .85em; line-height: 1.3; }
+
+  .refina-dw-close {
+    border: 1px solid rgba(17,17,17,.14);
+    background: transparent;
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; color: var(--color-foreground);
+  }
+
+  .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
+  .refina-dw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+
+  .refina-dw-chip {
+    padding: 6px 10px; border-radius: 999px;
+    border: 1px solid rgba(17,17,17,.12);
+    background: transparent; cursor: pointer; font-size: .9em; color: var(--color-foreground);
+  }
+
+  .refina-dw-context { opacity: .75; font-size: .85em; margin-bottom: 6px; }
+  .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
+
+  .refina-dw-input {
+    width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
+    border: 1px solid rgba(17,17,17,.14);
+    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 10%, transparent);
+    color: var(--color-foreground); resize: vertical;
+  }
+
+  .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
+
+  .refina-dw-continue {
+    width: 100%; padding: 10px 12px; border-radius: 999px;
+    border: 1px solid rgba(17,17,17,.14);
+    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
+    font-weight: 600; cursor: pointer; color: var(--color-foreground);
+  }
+
+  @media (max-width: 640px) { .refina-dw { width: 100vw; } }
+`;
+
     const el = document.createElement("style");
     el.id = "refina-pdp-drawer-css";
     el.textContent = css;
@@ -120,6 +153,14 @@
     };
   }
 
+  function resolveAccentHex(name) {
+  switch ((name || "").toLowerCase()) {
+    case "amber": return "#FFC466";
+    case "teal":  return "#17E6C3";
+    default:      return "#7A5CFF"; // violet (default)
+  }
+}
+
   function mapChipToIntent(chip) {
     const s = String(chip || "").toLowerCase();
     if (s.includes("compare")) return "compare-3";
@@ -169,14 +210,14 @@
   }
 
   // Drawer creation / UX
-  function ensureDrawer(radiusPx = "16px") {
-    let host = document.getElementById("refina-pdp-drawer");
-    if (host) return host;
+  function ensureDrawer(radiusPx = "16px", accentName = "violet") {
+  let host = document.getElementById("refina-pdp-drawer");
+  if (host) return host;
 
-    host = document.createElement("div");
-    host.id = "refina-pdp-drawer";
-    host.className = "refina-dw-host";
-    host.innerHTML = `
+  host = document.createElement("div");
+  host.id = "refina-pdp-drawer";
+  host.className = "refina-dw-host";
+  host.innerHTML = `
       <div class="refina-dw-backdrop" data-close></div>
       <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
         <header class="refina-dw-head">
@@ -197,14 +238,19 @@
           <button type="button" class="refina-dw-continue" data-continue>Continue</button>
         </footer>
       </aside>
-    `;
-    document.body.appendChild(host);
-    host.style.setProperty("--rfina-dw-radius", radiusPx);
-    return host;
-  }
+  `;
+  document.body.appendChild(host);
+
+  // NEW: set radius + accent CSS vars (this is the only addition here)
+  host.style.setProperty("--rfina-dw-radius", radiusPx);
+  host.style.setProperty("--color-accent", resolveAccentHex(accentName));
+
+  return host;
+}
 
   function openDrawerFrom(root, basePayload) {
     const radiusPx = root?.dataset?.styleRadius || "16px";
+    const accentName = root?.dataset?.styleAccent || "violet";
     const host = ensureDrawer(radiusPx);
     const aside = host.querySelector(".refina-dw");
     const input = host.querySelector("[data-input]");
