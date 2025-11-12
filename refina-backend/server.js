@@ -364,6 +364,7 @@ app.use('/apps/refina/v1', analyticsIngestRouter);
 
 // Other widget APIs
 app.use('/apps/refina/v1', recommendRouter);
+app.use('/proxy/refina/v1', recommendRouter);
 
 // 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
 // (Moved ABOVE the canonical redirect middleware)
