@@ -150,105 +150,100 @@ export default function Home() {
   }, []);
 
   // Initial load: plan, settings, overview, logs, indexer snapshot
-React.useEffect(() => {
-  let on = true;
+  React.useEffect(() => {
+    let on = true;
 
-  (async () => {
-    setLoading(true);
-    setErr("");
+    (async () => {
+      setLoading(true);
+      setErr("");
 
-    try {
-      console.log("[Home] Fetching initial data...");
+      try {
+        console.log("[Home] Fetching initial data...");
 
-      const [
-        { data: planData },
-        { data: settingsData },
-        { data: overviewData },
-        { data: logsData },
-        { data: idxData },
-      ] = await Promise.all([
-        api.get(`/api/billing/plan`),
-        api.get(`/api/admin/store-settings`),
-        adminApi.getAnalyticsSummary({ days: 30 }),
-        adminApi.getAnalyticsEvents({ limit: 5 }),
-        api.get(
-          `/api/indexer/status?shop=${encodeURIComponent(
-            shop
-          )}&fresh=1`
-        ),
-      ]);
+        const [
+          { data: planData },
+          { data: settingsData },
+          { data: overviewData },
+          { data: logsData },
+          { data: idxData },
+        ] = await Promise.all([
+          api.get(`/api/billing/plan`),
+          api.get(`/api/admin/store-settings`),
+          adminApi.getAnalyticsSummary({ days: 30 }),
+          adminApi.getAnalyticsEvents({ limit: 5 }),
+          api.get(
+            `/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
+          ),
+        ]);
 
-      console.log("[Home] Fetched Plan:", planData);
-      console.log("[Home] Fetched Settings:", settingsData);
-      console.log("[Home] Fetched Overview:", overviewData);
-      console.log("[Home] Fetched Logs:", logsData);
+        console.log("[Home] Fetched Plan:", planData);
+        console.log("[Home] Fetched Settings:", settingsData);
+        console.log("[Home] Fetched Overview:", overviewData);
+        console.log("[Home] Fetched Logs:", logsData);
 
-      if (on) {
-        const parsed = parsePlanResponse(planData);
-        setPlan(parsed);
-        setReauthHint(Boolean(parsed.reauthorize)); // show soft hint if backend indicates reauth is needed
-        setSettings(settingsData?.settings || {});
-        setOverview(overviewData || {});
+        if (on) {
+          const parsed = parsePlanResponse(planData);
+          setPlan(parsed);
+          setReauthHint(Boolean(parsed.reauthorize)); // show soft hint if backend indicates reauth is needed
+          setSettings(settingsData?.settings || {});
+          setOverview(overviewData || {});
 
-        const items = Array.isArray(logsData?.rows)
-          ? logsData.rows
-          : Array.isArray(logsData?.logs)
-          ? logsData.logs
-          : Array.isArray(logsData)
-          ? logsData
-          : [];
-        setLogs(items.slice(0, 5));
+          const items = Array.isArray(logsData?.rows)
+            ? logsData.rows
+            : Array.isArray(logsData?.logs)
+            ? logsData.logs
+            : Array.isArray(logsData)
+            ? logsData
+            : [];
+          setLogs(items.slice(0, 5));
 
-        setIndexerApi(idxData?.indexer || null);
+          setIndexerApi(idxData?.indexer || null);
+        }
+
+        console.log("[Home] Initial data load successful.");
+      } catch (e) {
+        console.error("[Home] Initial data load failed:", e);
+        if (on) {
+          setErr(
+            `Failed to load dashboard: ${e?.message || "Unknown error"}`
+          );
+        }
+      } finally {
+        if (on) setLoading(false);
       }
+    })();
 
-      console.log("[Home] Initial data load successful.");
-    } catch (e) {
-      console.error("[Home] Initial data load failed:", e);
-      if (on) {
-        setErr(
-          `Failed to load dashboard: ${
-            e?.message || "Unknown error"
-          }`
-        );
-      }
-    } finally {
-      if (on) setLoading(false);
-    }
-  })();
+    window.addEventListener("rf:analytics:ingested", refreshAnalytics);
 
-  window.addEventListener("rf:analytics:ingested", refreshAnalytics);
+    return () => {
+      on = false;
+      window.removeEventListener(
+        "rf:analytics:ingested",
+        refreshAnalytics
+      );
+    };
+  }, [shop, refreshAnalytics]);
 
-  return () => {
-    on = false;
-    window.removeEventListener(
-      "rf:analytics:ingested",
-      refreshAnalytics
-    );
-  };
-}, [shop, refreshAnalytics]);
+  // -------- Derived values --------
 
-// -------- Derived values --------
+  const level = normalizeLevel(plan?.level);
+  const levelLabel = labelFromLevel(level);
 
-const level = normalizeLevel(plan?.level);
-const levelLabel = labelFromLevel(level);
+  // Treat Pro/Premium with active/trial-like status as "has a plan".
+  const hasActivePlan = React.useMemo(() => {
+    const lvl = normalizeLevel(plan?.level);
+    const status = String(plan?.status || "").toLowerCase();
 
-// Treat Pro/Premium with active/trial-like status as "has a plan".
-// Everything else (incl. none/free/unknown) counts as "no active plan" → eligible for Welcome.
-const hasActivePlan = React.useMemo(() => {
-  const lvl = normalizeLevel(plan?.level);
-  const status = String(plan?.status || "").toLowerCase();
+    const isPaid = PAID_LEVELS.includes(lvl);
+    const isActiveLike =
+      status === "active" ||
+      status === "trialing" ||
+      status === "current";
 
-  const isPaid = PAID_LEVELS.includes(lvl);
-  const isActiveLike =
-    status === "active" ||
-    status === "trialing" ||
-    status === "current";
+    return isPaid && isActiveLike;
+  }, [plan]);
 
-  return isPaid && isActiveLike;
-}, [plan]);
-
- const hasTone = Boolean(settings?.aiTone);
+  const hasTone = Boolean(settings?.aiTone);
   const hasCategory = Boolean(settings?.category);
   const checklistDone = [hasTone, hasCategory].filter(Boolean).length;
   const isSetupComplete = checklistDone === 2; // minimal, Home-visible completion signal
@@ -256,129 +251,116 @@ const hasActivePlan = React.useMemo(() => {
   const isNewlyActivated = hasActivePlan && !isSetupComplete;
   const isLive = hasActivePlan && isSetupComplete;
 
-// If there is no active plan yet and we're on "/", send the merchant to the Welcome page.
-// Runs after initial load so we don't fight OAuth, deep links, or return_to.
-React.useEffect(() => {
-  if (loading) return;
+  // NOTE: Removed redirect-to-/welcome effect and early return that hid Home.
 
-  const path = String(location?.pathname || "/");
+  // -------- Live indexer status loader + light polling (stops at complete) --------
+  React.useEffect(() => {
+    let timer = null;
+    let cancelled = false;
 
-  // If no plan yet: always start in Mission Control (/welcome)
-  if (path === "/" && !hasActivePlan) {
-    console.log("[Home] No active plan; redirecting to /welcome");
-    navigate(`/welcome${qs}`, { replace: true });
-    return;
-  }
-
-  // If plan is active but setup isn't complete yet:
-  // Prefer Mission Control so they see the checklist.
-  if (path === "/" && hasActivePlan && !isSetupComplete) {
-    console.log("[Home] Plan active but setup incomplete; redirecting to /welcome");
-    navigate(`/welcome${qs}`, { replace: true });
-    return;
-  }
-
-  // If plan active AND setup complete:
-  // Stay on "/", this is their true dashboard.
-}, [loading, hasActivePlan, isSetupComplete, location?.pathname, navigate, qs]);
-
-// -------- Live indexer status loader + light polling (stops at complete) --------
-React.useEffect(() => {
-  let timer = null;
-  let cancelled = false;
-
-  async function fetchStatusOnce() {
-    if (!shop) return;
-    try {
-      const { data } = await api.get(
-        `/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
-      );
-      if (!cancelled) {
-        setIndexer(data?.indexer ?? null);
-        setIndexerErr("");
-      }
-      const phase = String(data?.indexer?.phase || "").toLowerCase();
-      const pct = Number(data?.indexer?.pct ?? 0);
-      const done = phase === "complete" || pct >= 100;
-      if (!done && !cancelled) {
-        timer = setTimeout(fetchStatusOnce, 8000);
-      }
-    } catch (e) {
-      if (!cancelled) {
-        setIndexerErr(e?.message || "status_failed");
-        timer = setTimeout(fetchStatusOnce, 12000);
+    async function fetchStatusOnce() {
+      if (!shop) return;
+      try {
+        const { data } = await api.get(
+          `/api/indexer/status?shop=${encodeURIComponent(shop)}&fresh=1`
+        );
+        if (!cancelled) {
+          setIndexer(data?.indexer ?? null);
+          setIndexerErr("");
+        }
+        const phase = String(data?.indexer?.phase || "").toLowerCase();
+        const p = Number(data?.indexer?.pct ?? 0);
+        const done = phase === "complete" || p >= 100;
+        if (!done && !cancelled) {
+          timer = setTimeout(fetchStatusOnce, 8000);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setIndexerErr(e?.message || "status_failed");
+          timer = setTimeout(fetchStatusOnce, 12000);
+        }
       }
     }
+
+    fetchStatusOnce();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [shop]);
+
+  if (loading) {
+    return (
+      <Box padding="400">
+        <InlineStack gap="200" blockAlign="center">
+          <Spinner size="small" />
+          <Text as="p">Loading dashboard...</Text>
+        </InlineStack>
+      </Box>
+    );
   }
 
-  fetchStatusOnce();
-
-  return () => {
-    cancelled = true;
-    if (timer) clearTimeout(timer);
-  };
-}, [shop]);
-
-// ✅ Now it's safe to early-return: all hooks are already declared.
-if (
-  !loading &&
-  location?.pathname === "/" &&
-  (!hasActivePlan || (hasActivePlan && !isSetupComplete))
-) {
-  return null;
-}
-
-if (loading) {
-  return (
-    <Box padding="400">
-      <InlineStack gap="200" blockAlign="center">
-        <Spinner size="small" />
-        <Text as="p">Loading dashboard...</Text>
-      </InlineStack>
-    </Box>
-  );
-}
-
-  const badgeTone = level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
+  const badgeTone =
+    level === "premium" ? "success" : level === "pro" ? "attention" : "subdued";
 
   const totals = overview?.totals || overview || {};
-  const interactions = Number(totals.interactions ?? totals.events ?? totals.queries ?? 0) || 0;
+  const interactions =
+    Number(totals.interactions ?? totals.events ?? totals.queries ?? 0) || 0;
   const productClicks = Number(totals.productClicks ?? totals.clicks ?? 0);
 
   const usage = overview?.usage || {};
   const used = Number(usage.used ?? 0);
   const limit =
-    usage.limit ?? (level === "free" ? 0 : level === "pro" ? 1000 : level === "premium" ? 10000 : 0);
+    usage.limit ??
+    (level === "free"
+      ? 0
+      : level === "pro"
+      ? 1000
+      : level === "premium"
+      ? 10000
+      : 0);
   const ctr = interactions ? (100 * productClicks) / interactions : 0;
 
-
   // ── Knowledge/indexer: prefer live status; fall back to legacy shapes (settings/overview) ──
-const liveOrLegacy = (
-  indexer ??
-  (
-    (settings && (settings.indexer || settings.indexerStatus)) ||
-    (overview && (overview.indexer || overview.indexerStatus)) ||
-    null
-  )
-);
+  const liveOrLegacy =
+    indexer ??
+    ((settings && (settings.indexer || settings.indexerStatus)) ||
+      (overview && (overview.indexer || overview.indexerStatus)) ||
+      null);
 
-const indexerPhaseRaw = liveOrLegacy?.phase || liveOrLegacy?.status || "";
-const indexerPhase = String(indexerPhaseRaw || "").toLowerCase().replace(/\s+/g, "_");
+  const indexerPhaseRaw = liveOrLegacy?.phase || liveOrLegacy?.status || "";
+  const indexerPhase = String(indexerPhaseRaw || "")
+    .toLowerCase()
+    .replace(/\s+/g, "_");
 
-const totalProducts = Number(liveOrLegacy?.totalProducts ?? liveOrLegacy?.total ?? 0) || 0;
-const importedCount = Number(liveOrLegacy?.importedCount ?? liveOrLegacy?.imported ?? 0) || 0;
-const embeddedCount = Number(liveOrLegacy?.embeddedCount ?? liveOrLegacy?.embedded ?? 0) || 0;
-const updatedAtIso = liveOrLegacy?.updatedAt || liveOrLegacy?.updated || liveOrLegacy?.ts || "";
+  const totalProducts =
+    Number(liveOrLegacy?.totalProducts ?? liveOrLegacy?.total ?? 0) || 0;
+  const importedCount =
+    Number(liveOrLegacy?.importedCount ?? liveOrLegacy?.imported ?? 0) || 0;
+  const embeddedCount =
+    Number(liveOrLegacy?.embeddedCount ?? liveOrLegacy?.embedded ?? 0) || 0;
+  const updatedAtIso =
+    liveOrLegacy?.updatedAt || liveOrLegacy?.updated || liveOrLegacy?.ts || "";
 
-const knowledgeHasCounts = totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
-const coarsePctByPhase = {
-  queued: 5, importing: 10, indexing: 40, embedding: 80, building_kb: 90, complete: 100, error: 0,
-};
-const pctFromDoc = Number(liveOrLegacy?.pct ?? 0);
+  const knowledgeHasCounts =
+    totalProducts > 0 && (importedCount > 0 || embeddedCount > 0);
+  const coarsePctByPhase = {
+    queued: 5,
+    importing: 10,
+    indexing: 40,
+    embedding: 80,
+    building_kb: 90,
+    complete: 100,
+    error: 0,
+  };
+  const pctFromDoc = Number(liveOrLegacy?.pct ?? 0);
 
-const knowledgePct = knowledgeHasCounts
-  ? pct(embeddedCount || importedCount, totalProducts)
-  : (pctFromDoc ? Math.max(0, Math.min(100, pctFromDoc)) : (coarsePctByPhase[indexerPhase] ?? 0));
+  const knowledgePct = knowledgeHasCounts
+    ? pct(embeddedCount || importedCount, totalProducts)
+    : pctFromDoc
+    ? Math.max(0, Math.min(100, pctFromDoc))
+    : coarsePctByPhase[indexerPhase] ?? 0;
 
   return (
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
@@ -390,53 +372,54 @@ const knowledgePct = knowledgeHasCounts
 
       {/* Setup callout — flips to a read-only success state when both quick settings are done */}
       <Box paddingBlockEnd="400">
-  <Card>
-    <Box padding="400">
-      <InlineStack align="space-between" blockAlign="center">
-        <BlockStack gap="100">
-          <Text as="h3" variant="headingSm">
-            {isLive
-              ? "Setup complete — you're live with Refina"
-              : isNewlyActivated
-              ? "Refina activated — you're almost ready"
-              : "Finish setup"}
-          </Text>
-          <Text as="p" tone="subdued">
-            {isLive
-              ? "Refina is now answering your customer queries using your store's enriched knowledge base."
-              : "Complete 3 quick steps: enable the app embed, choose your category, and verify the launcher is visible."}
-          </Text>
-        </BlockStack>
-        <Button
-          variant="primary"
-          onClick={() => navigate(`/setup${qs}`)}
-          disabled={isLive}
-        >
-          {isLive ? "Setup complete ✓" : "Go to setup"}
-        </Button>
-      </InlineStack>
-    </Box>
-  </Card>
-</Box>
-
+        <Card>
+          <Box padding="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text as="h3" variant="headingSm">
+                  {isLive
+                    ? "Setup complete — you're live with Refina"
+                    : isNewlyActivated
+                    ? "Refina activated — you're almost ready"
+                    : "Finish setup"}
+                </Text>
+                <Text as="p" tone="subdued">
+                  {isLive
+                    ? "Refina is now answering your customer queries using your store's enriched knowledge base."
+                    : "Complete 3 quick steps: enable the app embed, choose your category, and verify the launcher is visible."}
+                </Text>
+              </BlockStack>
+              <Button
+                variant="primary"
+                onClick={() => navigate(`/setup${qs}`)}
+                disabled={isLive}
+              >
+                {isLive ? "Setup complete ✓" : "Go to setup"}
+              </Button>
+            </InlineStack>
+          </Box>
+        </Card>
+      </Box>
 
       {/* Existing Home content remains the Overview tab’s content */}
       <Card>
         <Box padding="400">
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">
-            {!hasActivePlan
-              ? "Welcome to Refina"
-              : isNewlyActivated
-              ? "Refina is activated — finish setup to go live"
-              : "Refina overview"}
+              {!hasActivePlan
+                ? "Welcome to Refina"
+                : isNewlyActivated
+                ? "Refina is activated — finish setup to go live"
+                : "Refina overview"}
             </Text>
 
             <InlineStack gap="200" blockAlign="center">
               <Tooltip content={levelLabel}>
                 <Badge tone={badgeTone}>{levelLabel}</Badge>
               </Tooltip>
-              {plan?.status && <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>}
+              {plan?.status && (
+                <Badge tone="subdued">{String(plan.status).toUpperCase()}</Badge>
+              )}
               <Button url={`#/billing${qs}`}>Manage billing</Button>
             </InlineStack>
           </InlineStack>
@@ -462,7 +445,10 @@ const knowledgePct = knowledgeHasCounts
             title="Turn on AI answers with Pro — 2,000 AI requests/mo. 7-day free trial."
             action={{ content: "Upgrade to Pro", url: `#/billing${qs}` }}
           >
-            <p>Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your storefront theme required.</p>
+            <p>
+              Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your
+              storefront theme required.
+            </p>
           </Banner>
         )}
 
@@ -473,7 +459,11 @@ const knowledgePct = knowledgeHasCounts
             title={`You're at ${Math.round(pct(used, limit))}% of your monthly AI allowance`}
             action={{ content: "Manage billing", url: `#/billing${qs}` }}
           >
-            <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Consider upgrading to Premium for higher limits.`}</p>
+            <p>
+              {`${fmt(used)} of ${fmt(
+                limit
+              )} AI requests used this month. Consider upgrading to Premium for higher limits.`}
+            </p>
           </Banner>
         )}
 
@@ -484,7 +474,11 @@ const knowledgePct = knowledgeHasCounts
             title="Pro plan active — AI answers enabled"
             action={{ content: "Manage billing", url: `#/billing${qs}` }}
           >
-            <p>{`${fmt(used)} of ${fmt(limit)} AI requests used this month. Premium unlocks higher limits and advanced analytics.`}</p>
+            <p>
+              {`${fmt(used)} of ${fmt(
+                limit
+              )} AI requests used this month. Premium unlocks higher limits and advanced analytics.`}
+            </p>
           </Banner>
         )}
 
@@ -529,9 +523,13 @@ const knowledgePct = knowledgeHasCounts
                 <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
                 <Badge
                   tone={
-                    (indexer?.phase === "complete") ? "success"
-                    : (indexer?.phase === "error") ? "critical"
-                    : (indexer ? "attention" : "subdued")
+                    indexer?.phase === "complete"
+                      ? "success"
+                      : indexer?.phase === "error"
+                      ? "critical"
+                      : indexer
+                      ? "attention"
+                      : "subdued"
                   }
                 >
                   {indexer?.phase ? indexer.phase.replace(/_/g, " ") : "preparing"}
@@ -548,11 +546,18 @@ const knowledgePct = knowledgeHasCounts
                       <Text as="span" tone="subdued">
                         {(() => {
                           const t = Number(indexer?.totalProducts || 0);
-                          const d = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
+                          const d = Number(
+                            indexer?.embeddedCount || indexer?.importedCount || 0
+                          );
                           if (t > 0) return `${d.toLocaleString()} of ${t.toLocaleString()}`;
                           const coarse = {
-                            queued: 5, importing: 10, indexing: 40,
-                            embedding: 80, building_kb: 90, complete: 100, error: 0,
+                            queued: 5,
+                            importing: 10,
+                            indexing: 40,
+                            embedding: 80,
+                            building_kb: 90,
+                            complete: 100,
+                            error: 0,
                           };
                           const ph = (indexer?.phase || "").toLowerCase();
                           const p = coarse[ph] ?? 0;
@@ -563,13 +568,20 @@ const knowledgePct = knowledgeHasCounts
 
                     {(() => {
                       const t = Number(indexer?.totalProducts || 0);
-                      const d = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
+                      const d = Number(
+                        indexer?.embeddedCount || indexer?.importedCount || 0
+                      );
                       const coarse = {
-                        queued: 5, importing: 10, indexing: 40,
-                        embedding: 80, building_kb: 90, complete: 100, error: 0,
+                        queued: 5,
+                        importing: 10,
+                        indexing: 40,
+                        embedding: 80,
+                        building_kb: 90,
+                        complete: 100,
+                        error: 0,
                       };
                       const ph = (indexer?.phase || "").toLowerCase();
-                      const p = t > 0 ? pct(d, t) : (coarse[ph] ?? 0);
+                      const p = t > 0 ? pct(d, t) : coarse[ph] ?? 0;
                       return <ProgressBar progress={Number.isFinite(p) ? p : 0} size="small" />;
                     })()}
 
@@ -581,7 +593,9 @@ const knowledgePct = knowledgeHasCounts
 
                     {!indexer && !indexerErr && (
                       <Text as="span" tone="subdued">
-                        Tip: If you’ve just installed Refina, the importer and indexer start automatically. You can continue setting up — this will reach “complete” when embeddings are ready.
+                        Tip: If you’ve just installed Refina, the importer and indexer start
+                        automatically. You can continue setting up — this will reach “complete” when
+                        embeddings are ready.
                       </Text>
                     )}
                   </>
@@ -592,86 +606,74 @@ const knowledgePct = knowledgeHasCounts
         </Card>
       </Box>
 
-     {isLive && (
-      <Box paddingBlockStart="400">
-        <Card>
-          <Box padding="400">
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">
-                  Your month at a glance
-                </Text>
-                <Text as="span" tone="subdued" variant="bodySm">
-                  Last 30 days
-                </Text>
-              </InlineStack>
-              <BlockStack gap="150">
+      {isLive && (
+        <Box paddingBlockStart="400">
+          <Card>
+            <Box padding="400">
+              <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="span" tone="subdued">
-                    Smart queries
-                  </Text>
-                  <Text as="span" tone="subdued">
-                    {level === "free" ? "Locked on Free" : `${fmt(used)} / ${fmt(limit)}`}
-                  </Text>
+                  <Text as="h3" variant="headingSm">Your month at a glance</Text>
+                  <Text as="span" tone="subdued" variant="bodySm">Last 30 days</Text>
                 </InlineStack>
-                <ProgressBar progress={level === "free" ? 0 : pct(used, limit)} size="small" />
-                {level === "free" && (
-                  <InlineStack gap="200" blockAlign="center">
-                    <Icon source={CheckIcon} tone="success" />
+                <BlockStack gap="150">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" tone="subdued">Smart queries</Text>
                     <Text as="span" tone="subdued">
-                      Upgrade to Pro to unlock AI-powered recommendations & analytics
+                      {level === "free" ? "Locked on Free" : `${fmt(used)} / ${fmt(limit)}`}
                     </Text>
                   </InlineStack>
-                )}
+                  <ProgressBar progress={level === "free" ? 0 : pct(used, limit)} size="small" />
+                  {level === "free" && (
+                    <InlineStack gap="200" blockAlign="center">
+                      <Icon source={CheckIcon} tone="success" />
+                      <Text as="span" tone="subdued">
+                        Upgrade to Pro to unlock AI-powered recommendations & analytics
+                      </Text>
+                    </InlineStack>
+                  )}
+                </BlockStack>
+                <InlineStack gap="400" wrap>
+                  <Box minWidth="220px" maxWidth="340px" width="100%">
+                    <Card>
+                      <Box padding="300">
+                        <BlockStack gap="050">
+                          <Text as="span" tone="subdued" variant="bodySm">
+                            Customer interactions
+                          </Text>
+                          <Text as="h4" variant="headingLg">{fmt(interactions)}</Text>
+                        </BlockStack>
+                      </Box>
+                    </Card>
+                  </Box>
+                  <Box minWidth="220px" maxWidth="340px" width="100%">
+                    <Card>
+                      <Box padding="300">
+                        <BlockStack gap="050">
+                          <Text as="span" tone="subdued" variant="bodySm">
+                            Product clicks
+                          </Text>
+                          <Text as="h4" variant="headingLg">{fmt(productClicks)}</Text>
+                        </BlockStack>
+                      </Box>
+                    </Card>
+                  </Box>
+                  <Box minWidth="220px" maxWidth="340px" width="100%">
+                    <Card>
+                      <Box padding="300">
+                        <BlockStack gap="050">
+                          <Text as="span" tone="subdued" variant="bodySm">CTR</Text>
+                          <Text as="h4" variant="headingLg">
+                            {`${ctr ? ctr.toFixed(1) : "0.0"}%`}
+                          </Text>
+                        </BlockStack>
+                      </Box>
+                    </Card>
+                  </Box>
+                </InlineStack>
               </BlockStack>
-              <InlineStack gap="400" wrap>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          Customer interactions
-                        </Text>
-                        <Text as="h4" variant="headingLg">
-                          {fmt(interactions)}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          Product clicks
-                        </Text>
-                        <Text as="h4" variant="headingLg">
-                          {fmt(productClicks)}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
-                <Box minWidth="220px" maxWidth="340px" width="100%">
-                  <Card>
-                    <Box padding="300">
-                      <BlockStack gap="050">
-                        <Text as="span" tone="subdued" variant="bodySm">
-                          CTR
-                        </Text>
-                        <Text as="h4" variant="headingLg">
-                          {`${ctr ? ctr.toFixed(1) : "0.0"}%`}
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </Card>
-                </Box>
-              </InlineStack>
-            </BlockStack>
-          </Box>
-        </Card>
-      </Box>
+            </Box>
+          </Card>
+        </Box>
       )}
 
       <Box paddingBlockStart="400">
@@ -679,9 +681,7 @@ const knowledgePct = knowledgeHasCounts
           <Box padding="400">
             <InlineStack align="space-between" blockAlign="center">
               <BlockStack gap="100">
-                <Text as="h3" variant="headingSm">
-                  Unlock more with your plan
-                </Text>
+                <Text as="h3" variant="headingSm">Unlock more with your plan</Text>
                 <Text as="p" tone="subdued">
                   {level === "free"
                     ? "Pro unlocks AI recommendations, analytics, and styling controls."
@@ -709,79 +709,67 @@ const knowledgePct = knowledgeHasCounts
               <Box padding="400">
                 <BlockStack gap="300">
                   <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h3" variant="headingSm">
-                      Recommended next steps
-                    </Text>
+                    <Text as="h3" variant="headingSm">Recommended next steps</Text>
                     <Badge tone={checklistDone === 2 ? "success" : "attention"}>
                       {checklistDone}/2
                     </Badge>
                   </InlineStack>
+
                   <InlineStack align="space-between" gap="150" blockAlign="center">
-  <Text as="span">
-    Set your <strong>tone</strong> in{" "}
-    <a href={`#/settings${qs}`}>Settings</a>
-  </Text>
-  <Icon
-    source={CheckIcon}
-    tone={hasTone ? "success" : "subdued"}
-  />
-</InlineStack>
+                    <Text as="span">
+                      Set your <strong>tone</strong> in{" "}
+                      <a href={`#/settings${qs}`}>Settings</a>
+                    </Text>
+                    <Icon source={CheckIcon} tone={hasTone ? "success" : "subdued"} />
+                  </InlineStack>
+
                   <InlineStack align="space-between" gap="150" blockAlign="center">
-  <Text as="span">
-    Choose your <strong>category</strong> in{" "}
-    <a href={`#/settings${qs}`}>Settings</a>
-  </Text>
-  <Icon
-    source={CheckIcon}
-    tone={hasCategory ? "success" : "subdued"}
-  />
-</InlineStack>
+                    <Text as="span">
+                      Choose your <strong>category</strong> in{" "}
+                      <a href={`#/settings${qs}`}>Settings</a>
+                    </Text>
+                    <Icon source={CheckIcon} tone={hasCategory ? "success" : "subdued"} />
+                  </InlineStack>
                 </BlockStack>
               </Box>
             </Card>
           </Box>
 
-{isLive && (
-          <Box minWidth="320px" maxWidth="520px" width="100%">
-            <Card>
-              <Box padding="400">
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingSm">
-                    Recent activity
-                  </Text>
-                  {logs.length ? (
-                    <BlockStack gap="200">
-                      {logs.map((row, i) => {
-                        const concern = row?.concern || row?.query || "Customer asked…";
-                        const productTitle = row?.topProduct?.title || "";
-                        const when = row?.createdAt || row?.ts || "";
-                        return (
-                          <Box
-                            key={i}
-                            paddingBlock="150"
-                            borderBlockEndWidth={i < logs.length - 1 ? "025" : "0"}
-                          >
-                            <Text as="p">
-                              <strong>{concern}</strong>
-                            </Text>
-                            <Text as="p" tone="subdued">
-                              {productTitle ? `→ ${productTitle}` : " "}
-                              {when ? ` • ${new Date(when).toLocaleString()}` : ""}
-                            </Text>
-                          </Box>
-                        );
-                      })}
-                      <Button url={`#/analytics${qs}`} plain>
-                        See full log
-                      </Button>
-                    </BlockStack>
-                  ) : (
-                    <Text tone="subdued">No activity yet — check back after some traffic.</Text>
-                  )}
-                </BlockStack>
-              </Box>
-            </Card>
-          </Box>
+          {isLive && (
+            <Box minWidth="320px" maxWidth="520px" width="100%">
+              <Card>
+                <Box padding="400">
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">Recent activity</Text>
+                    {logs.length ? (
+                      <BlockStack gap="200">
+                        {logs.map((row, i) => {
+                          const concern = row?.concern || row?.query || "Customer asked…";
+                          const productTitle = row?.topProduct?.title || "";
+                          const when = row?.createdAt || row?.ts || "";
+                          return (
+                            <Box
+                              key={i}
+                              paddingBlock="150"
+                              borderBlockEndWidth={i < logs.length - 1 ? "025" : "0"}
+                            >
+                              <Text as="p"><strong>{concern}</strong></Text>
+                              <Text as="p" tone="subdued">
+                                {productTitle ? `→ ${productTitle}` : " "}
+                                {when ? ` • ${new Date(when).toLocaleString()}` : ""}
+                              </Text>
+                            </Box>
+                          );
+                        })}
+                        <Button url={`#/analytics${qs}`} plain>See full log</Button>
+                      </BlockStack>
+                    ) : (
+                      <Text tone="subdued">No activity yet — check back after some traffic.</Text>
+                    )}
+                  </BlockStack>
+                </Box>
+              </Card>
+            </Box>
           )}
         </InlineStack>
       </Box>
