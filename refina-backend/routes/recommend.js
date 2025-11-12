@@ -62,11 +62,18 @@ async function embedText(text) {
     console.warn("[Embeddings] API Key missing; returning empty vector.");
     return [];
   }
+  console.log("[GenAI][embed] using key =", mask(KEY), "model =", EMBED_MODEL || process.env.GEMINI_EMBED_MODEL || "text-embedding-004");
+
   const url = `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     model: "models/text-embedding-004",
     content: { parts: [{ text: String(text || "") }] },
   };
+
+  const mask = k => (k && k.length >= 12 ? k.slice(0,4)+"…"+k.slice(-4) : String(k||"(none)"));
+console.log("[GenAI][boot] GEMINI_API_KEY =", mask(process.env.GEMINI_API_KEY));
+console.log("[GenAI][boot] GOOGLE_API_KEY =", mask(process.env.GOOGLE_API_KEY));
+
   try {
     const resp = await fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },

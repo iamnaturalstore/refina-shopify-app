@@ -100,6 +100,12 @@ async function getQueryEmbedding(text, { timeoutMs = 12000 } = {}) {
     GEMINI_API_KEY
   )}`;
 
+  const mask = k => (k && k.length >= 12 ? k.slice(0,4)+"…"+k.slice(-4) : String(k||"(none)"));
+console.log("[GenAI][boot] GEMINI_API_KEY =", mask(process.env.GEMINI_API_KEY));
+console.log("[GenAI][boot] GOOGLE_API_KEY =", mask(process.env.GOOGLE_API_KEY));
+
+console.log("[GenAI][embed] using key =", mask(KEY), "model =", EMBED_MODEL || process.env.GEMINI_EMBED_MODEL || "text-embedding-004");
+
   const body = {
     model: `models/${EMBED_MODEL}`,
     content: { parts: [{ text: String(text || "") }] },
