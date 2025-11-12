@@ -364,7 +364,31 @@ app.use('/apps/refina/v1', analyticsIngestRouter);
 
 // Other widget APIs
 app.use('/apps/refina/v1', recommendRouter);
-app.use('/proxy/refina/v1', recommendRouter);
+
+// Helper: if recommendRouter expects shop/storeId in query/body, mirror from the proxy guard
+function injectShopFromProxy(req, _res, next) {
+  // Only fill when missing, so /apps path continues to behave the same
+  const shop = req.storeId || req.shopDomain;
+  if (shop) {
+    // keep both forms for maximum compatibility with existing handlers
+    if (!req.query.shop) req.query.shop = shop;
+    if (!req.query.storeId) req.query.storeId = shop;
+    if (req.body && typeof req.body === 'object') {
+      if (!req.body.shop) req.body.shop = shop;
+      if (!req.body.storeId) req.body.storeId = shop;
+    }
+  }
+  next();
+}
+
+// ✅ App Proxy alias for storefront calls (signature → ratelimit → inject → same router)
+app.use(
+  '/proxy/refina/v1',
+  requireAppProxy,
+  rateLimitAppProxy,
+  injectShopFromProxy,
+  recommendRouter
+);
 
 // 🔒 Ensure API routes are mounted before static/catch-alls (fix 404 regressions)
 // (Moved ABOVE the canonical redirect middleware)
