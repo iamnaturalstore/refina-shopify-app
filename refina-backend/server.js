@@ -1098,6 +1098,53 @@ app.post('/v1/recommend', async (req, res) => {
       source = 'fallback';
     }
 
+    // Added new Shop Minis route
+
+    app.post("/mini/recommend", async (req, res) => {
+  const { query, limit = 3, context } = req.body || {};
+
+  if (!query || typeof query !== "string") {
+    return res.status(400).json({ error: "Missing query" });
+  }
+
+  try {
+    // TODO: call your *real* Refina brain here:
+    // const awesome = await recommendAwesome({ query, limit, context });
+    // and adapt it to the shape below.
+
+    const products = [
+      {
+        id: "demo-1",
+        title: "Brighten Serum",
+        subtitle: "Vitamin C • Gentle • Daily use",
+        imageUrl: "https://via.placeholder.com/112",
+        priceText: "$49.00",
+        pill: "Glow & even tone",
+      },
+      {
+        id: "demo-2",
+        title: "Barrier Restore Cream",
+        subtitle: "Ceramides • Fragrance-free",
+        imageUrl: "https://via.placeholder.com/112",
+        priceText: "$39.00",
+        pill: "Repair & protect",
+      },
+    ].slice(0, limit);
+
+    res.json({
+      products,
+      explanation:
+        "Here are a few products that match what you described. Start with the serum, then layer the barrier cream to repair and protect.",
+      source: "demo",
+      tookMs: 42,
+    });
+  } catch (err) {
+    console.error("Mini recommend backend error", err);
+    res.status(500).json({ error: "Mini recommend failed" });
+  }
+});
+
+
     // pick the top N upfront
     const used = productIds.slice(0, plan === 'free' ? 3 : 8);
 
