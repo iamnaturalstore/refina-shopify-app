@@ -606,44 +606,79 @@ app.post("/mini/recommend", async (req, res) => {
   const started = Date.now();
 
   try {
-    const body = req.body;
+    const body = req.body || {};
+    const { query, products, context } = body;
 
     // Basic validation
-    const errors = validateMiniRecommendRequest(body);
-    if (errors.length > 0) {
+    if (typeof query !== "string" || !query.trim()) {
       return res.status(400).json({
         error: {
           type: "bad_request",
-          message: "Invalid request body",
-          details: errors,
+          message: "query is required and must be a non-empty string",
         },
       });
     }
 
-    const { query, products } = body;
+    if (!Array.isArray(products)) {
+      return res.status(400).json({
+        error: {
+          type: "bad_request",
+          message: "products must be an array (can be empty)",
+        },
+      });
+    }
 
-    // C1 stub logic:
-    // - Take the first 3 products (or fewer if less provided)
-    // - Attach a simple mock "why" explanation
-    const picks = products.slice(0, Math.min(3, products.length)).map((p) => ({
-      id: p.id,
-      title: p.title,
-      image: p.image ?? null,
-      price: p.price ?? null,
-      merchant: p.merchant ?? null,
-      why: "Stub: example explanation for this product (no AI yet).",
-    }));
+    const trimmedQuery = query.trim();
+
+    // Take up to 3 candidates to show back to the user
+    const picks = products.slice(0, 3).map((p) => {
+      const id = p && typeof p.id === "string" ? p.id : "";
+      const title = p && typeof p.title === "string" ? p.title : "Untitled product";
+
+      // Map CandidateProduct -> MiniProduct (UI shape)
+      const imageUrl =
+        (p && (p.image || null)) ?? null;
+
+      let priceText = null;
+      if (p && p.price && typeof p.price.amount === "number" && p.price.currencyCode) {
+        const amount = Number(p.price.amount).toFixed(2);
+        priceText = `${amount} ${String(p.price.currencyCode).toUpperCase()}`;
+      }
+
+      const merchant =
+        (p && (p.merchant || null)) ??
+        (context && context.shopDomain) ??
+        null;
+
+      const pill =
+        merchant && priceText
+          ? `${priceText} • ${merchant}`
+          : priceText || merchant || null;
+
+      return {
+        id,
+        title,
+        subtitle: merchant || undefined,
+        imageUrl: imageUrl || undefined,
+        priceText: priceText || undefined,
+        pill: pill || undefined,
+      };
+    });
+
+    const explanation = picks.length
+      ? `Here are a few options that look like a good match for “${trimmedQuery}”. This is a stubbed response while we finish wiring AI.`
+      : `I couldn’t find any products for “${trimmedQuery}” yet, but this is where Refina’s picks will appear once we have candidates.`;
 
     const tookMs = Date.now() - started;
 
     return res.status(200).json({
       products: picks,
-      summary: "Stubbed recommendation: showing the first few products only.",
+      explanation,
+      source: "mock",
       tookMs,
-      source: "mock", // will become "ai" or "fallback" later
     });
   } catch (err) {
-    console.error("Error in /mini/recommend stub:", err);
+    console.error("Error in /mini/recommend:", err);
     return res.status(500).json({
       error: {
         type: "internal_error",
