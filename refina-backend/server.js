@@ -529,6 +529,131 @@ app.get('/apps/refina/v1/concerns', (_req, res) => {
 
 // (removed duplicate /api/privacy mount here)
 
+// --- Mini /mini/recommend endpoint (C1 stub) ---
+
+/**
+ * Validate the shape of the /mini/recommend request body.
+ * Returns an array of error messages; empty array means "valid".
+ */
+function validateMiniRecommendRequest(body) {
+  const errors = [];
+
+  if (!body || typeof body !== "object") {
+    errors.push("Request body must be a JSON object");
+    return errors;
+  }
+
+  const { query, products } = body;
+
+  // query: required, non-empty string, max 512 chars
+  if (typeof query !== "string" || !query.trim()) {
+    errors.push("query is required and must be a non-empty string");
+  } else if (query.length > 512) {
+    errors.push("query must be at most 512 characters");
+  }
+
+  // products: required, array(1–20)
+  if (!Array.isArray(products)) {
+    errors.push("products must be an array");
+  } else {
+    if (products.length === 0) {
+      errors.push("products must contain at least 1 item");
+    }
+    if (products.length > 20) {
+      errors.push("products must not contain more than 20 items");
+    }
+
+    products.forEach((p, index) => {
+      if (!p || typeof p !== "object") {
+        errors.push(`products[${index}] must be an object`);
+        return;
+      }
+      if (typeof p.id !== "string" || !p.id.trim()) {
+        errors.push(`products[${index}].id is required and must be a non-empty string`);
+      }
+      if (typeof p.title !== "string" || !p.title.trim()) {
+        errors.push(`products[${index}].title is required and must be a non-empty string`);
+      }
+
+      if (p.price != null) {
+        const price = p.price;
+        if (typeof price !== "object") {
+          errors.push(`products[${index}].price must be an object when provided`);
+        } else {
+          if (typeof price.amount !== "number" || !Number.isFinite(price.amount)) {
+            errors.push(`products[${index}].price.amount must be a number when provided`);
+          }
+          if (typeof price.currencyCode !== "string" || !price.currencyCode.trim()) {
+            errors.push(`products[${index}].price.currencyCode must be a non-empty string when provided`);
+          }
+        }
+      }
+
+      if (p.image != null && typeof p.image !== "string") {
+        errors.push(`products[${index}].image must be a string when provided`);
+      }
+      if (p.merchant != null && typeof p.merchant !== "string") {
+        errors.push(`products[${index}].merchant must be a string when provided`);
+      }
+    });
+  }
+
+  return errors;
+}
+
+// C1: stubbed /mini/recommend handler (no Gemini, no Firestore yet)
+app.post("/mini/recommend", async (req, res) => {
+  const started = Date.now();
+
+  try {
+    const body = req.body;
+
+    // Basic validation
+    const errors = validateMiniRecommendRequest(body);
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: {
+          type: "bad_request",
+          message: "Invalid request body",
+          details: errors,
+        },
+      });
+    }
+
+    const { query, products } = body;
+
+    // C1 stub logic:
+    // - Take the first 3 products (or fewer if less provided)
+    // - Attach a simple mock "why" explanation
+    const picks = products.slice(0, Math.min(3, products.length)).map((p) => ({
+      id: p.id,
+      title: p.title,
+      image: p.image ?? null,
+      price: p.price ?? null,
+      merchant: p.merchant ?? null,
+      why: "Stub: example explanation for this product (no AI yet).",
+    }));
+
+    const tookMs = Date.now() - started;
+
+    return res.status(200).json({
+      products: picks,
+      summary: "Stubbed recommendation: showing the first few products only.",
+      tookMs,
+      source: "mock", // will become "ai" or "fallback" later
+    });
+  } catch (err) {
+    console.error("Error in /mini/recommend stub:", err);
+    return res.status(500).json({
+      error: {
+        type: "internal_error",
+        message: "Something went wrong. Please try again.",
+      },
+    });
+  }
+});
+
+
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
   const raw = String((req.query.shop || req.query.storeId || '')).toLowerCase().trim();
@@ -1097,53 +1222,6 @@ app.post('/v1/recommend', async (req, res) => {
       productIds = ranked.slice(0, 8).map((p) => p.id);
       source = 'fallback';
     }
-
-    // Added new Shop Minis route
-
-    app.post("/mini/recommend", async (req, res) => {
-  const { query, limit = 3, context } = req.body || {};
-
-  if (!query || typeof query !== "string") {
-    return res.status(400).json({ error: "Missing query" });
-  }
-
-  try {
-    // TODO: call your *real* Refina brain here:
-    // const awesome = await recommendAwesome({ query, limit, context });
-    // and adapt it to the shape below.
-
-    const products = [
-      {
-        id: "demo-1",
-        title: "Brighten Serum",
-        subtitle: "Vitamin C • Gentle • Daily use",
-        imageUrl: "https://via.placeholder.com/112",
-        priceText: "$49.00",
-        pill: "Glow & even tone",
-      },
-      {
-        id: "demo-2",
-        title: "Barrier Restore Cream",
-        subtitle: "Ceramides • Fragrance-free",
-        imageUrl: "https://via.placeholder.com/112",
-        priceText: "$39.00",
-        pill: "Repair & protect",
-      },
-    ].slice(0, limit);
-
-    res.json({
-      products,
-      explanation:
-        "Here are a few products that match what you described. Start with the serum, then layer the barrier cream to repair and protect.",
-      source: "demo",
-      tookMs: 42,
-    });
-  } catch (err) {
-    console.error("Mini recommend backend error", err);
-    res.status(500).json({ error: "Mini recommend failed" });
-  }
-});
-
 
     // pick the top N upfront
     const used = productIds.slice(0, plan === 'free' ? 3 : 8);
