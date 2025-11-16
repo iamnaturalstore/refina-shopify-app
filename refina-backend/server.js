@@ -1196,34 +1196,143 @@ app.post('/v1/recommend', async (req, res) => {
   }
 });
 
-// --- Chooze Mini: Explain stub (M2 Step A - NO Gemini, NO auth) ---
+// --- Chooze Mini: Explain (M2 - Gemini with safe fallback) ---
 app.post("/mini/explain", async (req, res) => {
+  const t0 = Date.now();
+
   try {
     const body = req.body || {};
     const query = body.query || null;
+    const preferences = body.preferences || {};
     const shortlist = Array.isArray(body.shortlist) ? body.shortlist : [];
 
-    // Collect IDs and build very simple demo reasons
+    // --- 1) Build stub/heuristic result as a safety net ---
     const shortlistedIds = [];
-    const reasons = {};
+    const fallbackReasons = {};
 
     shortlist.forEach((item, index) => {
       if (!item || !item.id) return;
 
       shortlistedIds.push(item.id);
-
       const title = item.title || "this product";
 
       if (index === 0) {
-        reasons[item.id] = `Demo: "${title}" is the standout choice based on price and reviews.`;
+        fallbackReasons[item.id] = `This looks like the standout choice based on price and reviews.`;
       } else {
-        reasons[item.id] = `Demo: "${title}" is also a strong option worth considering.`;
+        fallbackReasons[item.id] = `Also a strong option worth considering.`;
       }
     });
 
-    const summaryLine = query
-      ? `Demo: These look like strong picks for “${query}”.`
-      : "Demo: These look like strong picks for this search.";
+    const fallbackSummaryLine = query
+      ? `Here are the ones that look strongest for “${query}”.`
+      : "Here are the ones that look strongest for this search.";
+
+    // If there's no Gemini configured, just return the fallback and exit early.
+    const apiKey =
+      process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || null;
+
+    if (!apiKey) {
+      console.warn("[Chooze Mini] No Gemini API key; returning fallback explain.");
+      return res.json({
+        summaryLine: fallbackSummaryLine,
+        shortlistedIds,
+        reasons: fallbackReasons,
+      });
+    }
+
+    // --- 2) Call Gemini 2.5 Flash for nicer reasons ---
+    const { GoogleGenerativeAI } = require("@google/generative-ai"); // if you're using ESM imports elsewhere, switch this to `import` at the top
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+    });
+
+    const promptPayload = {
+      query,
+      preferences,
+      shortlist: shortlist.map((item) => ({
+        id: item.id,
+        title: item.title,
+        price: item.price,
+        rating: item.rating ?? null,
+        reviewCount: item.reviewCount ?? null,
+      })),
+    };
+
+    const prompt = `
+You are helping a shopper choose between a few strong product options.
+
+You are given:
+- query: what they searched for
+- preferences: which factors matter (price, reviews, etc.)
+- shortlist: 3–5 strong candidates, each with id, title, price, rating, reviewCount.
+
+Respond ONLY as strict JSON with this shape (no markdown, no extra keys):
+
+{
+  "summaryLine": "One sentence summary for the whole shortlist.",
+  "reasons": {
+    "id1": "Why this is one of the best ones, in 1–2 short sentences.",
+    "id2": "…",
+    "id3": "…"
+  }
+}
+
+Keep it concise and shopper-friendly. Do not change the shortlist; only explain why each one is good.
+
+Here is the input (JSON):
+
+${JSON.stringify(promptPayload)}
+    `.trim();
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    const text = result?.response?.text?.();
+    if (!text) {
+      console.warn("[Chooze Mini] Explain: empty Gemini response; using fallback.");
+      return res.json({
+        summaryLine: fallbackSummaryLine,
+        shortlistedIds,
+        reasons: fallbackReasons,
+      });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      console.warn("[Chooze Mini] Explain: failed to parse JSON; using fallback.", e);
+      return res.json({
+        summaryLine: fallbackSummaryLine,
+        shortlistedIds,
+        reasons: fallbackReasons,
+      });
+    }
+
+    const summaryLine =
+      typeof parsed.summaryLine === "string" && parsed.summaryLine.trim()
+        ? parsed.summaryLine.trim()
+        : fallbackSummaryLine;
+
+    const reasons =
+      parsed.reasons && typeof parsed.reasons === "object"
+        ? parsed.reasons
+        : fallbackReasons;
+
+    const tookMs = Date.now() - t0;
+    if (tookMs > 500) {
+      console.log(`[Chooze Mini] /mini/explain (Gemini) took ${tookMs}ms`);
+    }
 
     return res.json({
       summaryLine,
@@ -1231,9 +1340,9 @@ app.post("/mini/explain", async (req, res) => {
       reasons,
     });
   } catch (err) {
-    console.error("[Chooze Mini] /mini/explain stub error", err);
+    console.error("[Chooze Mini] /mini/explain error", err);
     return res.status(500).json({
-      error: "mini_explain_stub_failed",
+      error: "mini_explain_failed",
     });
   }
 });
