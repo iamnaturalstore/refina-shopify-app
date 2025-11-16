@@ -529,166 +529,6 @@ app.get('/apps/refina/v1/concerns', (_req, res) => {
 
 // (removed duplicate /api/privacy mount here)
 
-// --- Mini /mini/recommend endpoint (C1 stub) ---
-
-/**
- * Validate the shape of the /mini/recommend request body.
- * Returns an array of error messages; empty array means "valid".
- */
-function validateMiniRecommendRequest(body) {
-  const errors = [];
-
-  if (!body || typeof body !== "object") {
-    errors.push("Request body must be a JSON object");
-    return errors;
-  }
-
-  const { query, products } = body;
-
-  // query: required, non-empty string, max 512 chars
-  if (typeof query !== "string" || !query.trim()) {
-    errors.push("query is required and must be a non-empty string");
-  } else if (query.length > 512) {
-    errors.push("query must be at most 512 characters");
-  }
-
-  // products: required, array(1–20)
-  if (!Array.isArray(products)) {
-    errors.push("products must be an array");
-  } else {
-    if (products.length === 0) {
-      errors.push("products must contain at least 1 item");
-    }
-    if (products.length > 20) {
-      errors.push("products must not contain more than 20 items");
-    }
-
-    products.forEach((p, index) => {
-      if (!p || typeof p !== "object") {
-        errors.push(`products[${index}] must be an object`);
-        return;
-      }
-      if (typeof p.id !== "string" || !p.id.trim()) {
-        errors.push(`products[${index}].id is required and must be a non-empty string`);
-      }
-      if (typeof p.title !== "string" || !p.title.trim()) {
-        errors.push(`products[${index}].title is required and must be a non-empty string`);
-      }
-
-      if (p.price != null) {
-        const price = p.price;
-        if (typeof price !== "object") {
-          errors.push(`products[${index}].price must be an object when provided`);
-        } else {
-          if (typeof price.amount !== "number" || !Number.isFinite(price.amount)) {
-            errors.push(`products[${index}].price.amount must be a number when provided`);
-          }
-          if (typeof price.currencyCode !== "string" || !price.currencyCode.trim()) {
-            errors.push(`products[${index}].price.currencyCode must be a non-empty string when provided`);
-          }
-        }
-      }
-
-      if (p.image != null && typeof p.image !== "string") {
-        errors.push(`products[${index}].image must be a string when provided`);
-      }
-      if (p.merchant != null && typeof p.merchant !== "string") {
-        errors.push(`products[${index}].merchant must be a string when provided`);
-      }
-    });
-  }
-
-  return errors;
-}
-
-// C1: stubbed /mini/recommend handler (no Gemini, no Firestore yet)
-app.post("/mini/recommend", async (req, res) => {
-  const started = Date.now();
-
-  try {
-    const body = req.body || {};
-    const { query, products, context } = body;
-
-    // Basic validation
-    if (typeof query !== "string" || !query.trim()) {
-      return res.status(400).json({
-        error: {
-          type: "bad_request",
-          message: "query is required and must be a non-empty string",
-        },
-      });
-    }
-
-    if (!Array.isArray(products)) {
-      return res.status(400).json({
-        error: {
-          type: "bad_request",
-          message: "products must be an array (can be empty)",
-        },
-      });
-    }
-
-    const trimmedQuery = query.trim();
-
-    // Take up to 3 candidates to show back to the user
-    const picks = products.slice(0, 3).map((p) => {
-      const id = p && typeof p.id === "string" ? p.id : "";
-      const title = p && typeof p.title === "string" ? p.title : "Untitled product";
-
-      // Map CandidateProduct -> MiniProduct (UI shape)
-      const imageUrl =
-        (p && (p.image || null)) ?? null;
-
-      let priceText = null;
-      if (p && p.price && typeof p.price.amount === "number" && p.price.currencyCode) {
-        const amount = Number(p.price.amount).toFixed(2);
-        priceText = `${amount} ${String(p.price.currencyCode).toUpperCase()}`;
-      }
-
-      const merchant =
-        (p && (p.merchant || null)) ??
-        (context && context.shopDomain) ??
-        null;
-
-      const pill =
-        merchant && priceText
-          ? `${priceText} • ${merchant}`
-          : priceText || merchant || null;
-
-      return {
-        id,
-        title,
-        subtitle: merchant || undefined,
-        imageUrl: imageUrl || undefined,
-        priceText: priceText || undefined,
-        pill: pill || undefined,
-      };
-    });
-
-    const explanation = picks.length
-      ? `Here are a few options that look like a good match for “${trimmedQuery}”. This is a stubbed response while we finish wiring AI.`
-      : `I couldn’t find any products for “${trimmedQuery}” yet, but this is where Refina’s picks will appear once we have candidates.`;
-
-    const tookMs = Date.now() - started;
-
-    return res.status(200).json({
-      products: picks,
-      explanation,
-      source: "mock",
-      tookMs,
-    });
-  } catch (err) {
-    console.error("Error in /mini/recommend:", err);
-    return res.status(500).json({
-      error: {
-        type: "internal_error",
-        message: "Something went wrong. Please try again.",
-      },
-    });
-  }
-});
-
-
 // Canonicalize to <shop>.myshopify.com for Admin/Billing routes
 function canonicalizeShopParam(req, _res, next) {
   const raw = String((req.query.shop || req.query.storeId || '')).toLowerCase().trim();
@@ -1353,6 +1193,48 @@ app.post('/v1/recommend', async (req, res) => {
   } finally {
     const ms = Date.now() - t0;
     if (ms > 500) console.log(`[BFF] /v1/recommend took ${ms}ms`);
+  }
+});
+
+// --- Chooze Mini: Explain stub (M2 Step A - NO Gemini, NO auth) ---
+app.post("/mini/explain", async (req, res) => {
+  try {
+    const body = req.body || {};
+    const query = body.query || null;
+    const shortlist = Array.isArray(body.shortlist) ? body.shortlist : [];
+
+    // Collect IDs and build very simple demo reasons
+    const shortlistedIds = [];
+    const reasons = {};
+
+    shortlist.forEach((item, index) => {
+      if (!item || !item.id) return;
+
+      shortlistedIds.push(item.id);
+
+      const title = item.title || "this product";
+
+      if (index === 0) {
+        reasons[item.id] = `Demo: "${title}" is the standout choice based on price and reviews.`;
+      } else {
+        reasons[item.id] = `Demo: "${title}" is also a strong option worth considering.`;
+      }
+    });
+
+    const summaryLine = query
+      ? `Demo: These look like strong picks for “${query}”.`
+      : "Demo: These look like strong picks for this search.";
+
+    return res.json({
+      summaryLine,
+      shortlistedIds,
+      reasons,
+    });
+  } catch (err) {
+    console.error("[Chooze Mini] /mini/explain stub error", err);
+    return res.status(500).json({
+      error: "mini_explain_stub_failed",
+    });
   }
 });
 
