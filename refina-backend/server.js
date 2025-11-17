@@ -1222,8 +1222,20 @@ app.post('/v1/recommend', async (req, res) => {
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_EXPLAIN_MODEL = "models/gemini-2.5-flash";
+
+// Allow env to be "gemini-2.5-flash" OR "models/gemini-2.5-flash"
+const GEMINI_EXPLAIN_MODEL_RAW =
+  process.env.GEMINI_EXPLAIN_MODEL ||
+  process.env.GEMINI_MODEL ||
+  "gemini-2.5-flash";
+
+const GEMINI_EXPLAIN_MODEL = GEMINI_EXPLAIN_MODEL_RAW.startsWith("models/")
+  ? GEMINI_EXPLAIN_MODEL_RAW
+  : `models/${GEMINI_EXPLAIN_MODEL_RAW}`;
+
 const EXPLAIN_TIMEOUT_MS = 8000;
+
+
 
 /**
  * Build the prompt we send to Gemini.
@@ -1377,17 +1389,18 @@ async function callGeminiExplain(payload) {
     };
 
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/${GEMINI_EXPLAIN_MODEL}:generateContent`,
-      {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY,
-        },
-        body: JSON.stringify(body),
-      }
-    );
+  `https://generativelanguage.googleapis.com/v1beta/${GEMINI_EXPLAIN_MODEL}:generateContent`,
+  {
+    method: "POST",
+    signal: controller.signal,
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": GEMINI_API_KEY, // keep this, NOT Bearer
+    },
+    body: JSON.stringify(body),
+  }
+);
+
 
     clearTimeout(timeout);
 
@@ -1401,13 +1414,18 @@ async function callGeminiExplain(payload) {
     const data = await resp.json();
 
     const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      data?.candidates?.[0]?.output_text ||
-      "";
+  data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+  data?.candidates?.[0]?.output_text ||
+  "";
 
-    if (!text || typeof text !== "string") {
-      throw new Error("No text in Gemini explain response");
-    }
+if (!text || typeof text !== "string") {
+  console.error(
+    "[Chooze Mini] Gemini explain: no text in response",
+    JSON.stringify(data).slice(0, 500)
+  );
+  throw new Error("No text in Gemini explain response");
+}
+
 
     let parsed;
     try {
