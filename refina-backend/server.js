@@ -1377,7 +1377,7 @@ async function callGeminiExplain(payload) {
     };
 
     const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${GEMINI_EXPLAIN_MODEL}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1/models/${GEMINI_EXPLAIN_MODEL}:generateContent`,
       {
         method: "POST",
         signal: controller.signal,
