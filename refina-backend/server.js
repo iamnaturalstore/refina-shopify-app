@@ -1222,8 +1222,7 @@ app.post('/v1/recommend', async (req, res) => {
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_EXPLAIN_MODEL =
-  process.env.GEMINI_EXPLAIN_MODEL || "models/gemini-1.5-flash-001";
+const GEMINI_EXPLAIN_MODEL = "models/gemini-2.5-flash";
 const EXPLAIN_TIMEOUT_MS = 8000;
 
 /**
@@ -1384,7 +1383,7 @@ async function callGeminiExplain(payload) {
         signal: controller.signal,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${GEMINI_API_KEY}`,
+          "x-goog-api-key": GEMINI_API_KEY,
         },
         body: JSON.stringify(body),
       }
