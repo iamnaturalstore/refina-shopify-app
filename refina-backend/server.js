@@ -30,6 +30,7 @@ import {
   expandConcernToIngredients,
   getIngredientFacts,
 } from './bff/lib/knowledge.js';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Utilities
 import { toMyshopifyDomain } from './utils/resolveStore.js';
@@ -1241,7 +1242,6 @@ app.post("/mini/explain", async (req, res) => {
     }
 
     // --- 2) Call Gemini 2.5 Flash for nicer reasons ---
-    const { GoogleGenerativeAI } = require("@google/generative-ai"); // if you're using ESM imports elsewhere, switch this to `import` at the top
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
