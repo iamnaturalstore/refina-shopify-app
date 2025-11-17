@@ -1197,155 +1197,267 @@ app.post('/v1/recommend', async (req, res) => {
   }
 });
 
-// --- Chooze Mini: Explain (M2 - Gemini with safe fallback) ---
-app.post("/mini/explain", async (req, res) => {
-  const t0 = Date.now();
+// --- Chooze Mini: Explain (M4 – Gemini JSON explain, hybrid search/cart) ---
 
-  try {
-    const body = req.body || {};
-    const query = body.query || null;
-    const preferences = body.preferences || {};
-    const shortlist = Array.isArray(body.shortlist) ? body.shortlist : [];
+/**
+ * ChoozeExplainRequest (from buildExplainRequest.ts):
+ * {
+ *   query: string | null;
+ *   preferences: { ... };
+ *   items: Array<{
+ *     id: string;
+ *     title: string;
+ *     price: { amount: number; currencyCode: string };
+ *     shopName?: string;
+ *     rating?: number | null;
+ *     reviewCount?: number | null;
+ *     discountPct: number;
+ *     ratingStrength: number;
+ *     trustedShop: boolean;
+ *     totalScore: number;
+ *     roleHint?: string;      // "best_overall" | "best_value" | ...
+ *     reasonText?: string;    // heuristic reason from engine
+ *   }>;
+ * }
+ */
 
-    // --- 1) Build stub/heuristic result as a safety net ---
-    const shortlistedIds = [];
-    const fallbackReasons = {};
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_EXPLAIN_MODEL =
+  process.env.GEMINI_EXPLAIN_MODEL || "models/gemini-1.5-flash-001";
+const EXPLAIN_TIMEOUT_MS = 8000;
 
-    shortlist.forEach((item, index) => {
-      if (!item || !item.id) return;
+/**
+ * Build the prompt we send to Gemini.
+ * We send the items + preferences as JSON and ask for a strict JSON response.
+ */
+function buildExplainPrompt(payload) {
+  const { query, preferences, items } = payload;
 
-      shortlistedIds.push(item.id);
-      const title = item.title || "this product";
+  const mode =
+    !query || (items && items.length > 3)
+      ? "cart_compare"
+      : "search_shortlist";
 
-      if (index === 0) {
-        fallbackReasons[item.id] = `This looks like the standout choice based on price and reviews.`;
-      } else {
-        fallbackReasons[item.id] = `Also a strong option worth considering.`;
-      }
-    });
+  return `
+You are "Chooze", a calm, helpful shopping assistant.
 
-    const fallbackSummaryLine = query
-      ? `Here are the ones that look strongest for “${query}”.`
-      : "Here are the ones that look strongest for this search.";
+You receive a JSON payload with:
+- "mode": either "search_shortlist" or "cart_compare"
+- "query": what the shopper searched for (may be null in cart compare mode)
+- "preferences": optional emphasis flags (price, reviews, trusted shops, relevance, new vs proven)
+- "items": an array of products the engine has already scored.
 
-    // If there's no Gemini configured, just return the fallback and exit early.
-    const apiKey =
-      process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || null;
+Each item has:
+- "id": product ID (string)
+- "title": product title
+- "price": { "amount": number, "currencyCode": string }
+- "shopName": optional string
+- "rating": average rating (0–5, may be null)
+- "reviewCount": number of reviews (may be null)
+- "discountPct": 0..1 (0.25 means ~25% off)
+- "ratingStrength": normalized quality score (0..1)
+- "trustedShop": boolean
+- "totalScore": engine score summarising price, reviews, discount, and trust
+- "roleHint": one of "best_overall", "best_value", "best_reviews", "trusted_shop", "balanced"
+- "reasonText": an existing short heuristic reason from the engine.
 
-    if (!apiKey) {
-      console.warn("[Chooze Mini] No Gemini API key; returning fallback explain.");
-      return res.json({
-        summaryLine: fallbackSummaryLine,
-        shortlistedIds,
-        reasons: fallbackReasons,
-      });
-    }
+Your job:
+1. Read all items and preferences.
+2. Decide which 2–4 items are worth talking about.
+3. Write a short, human explanation for each chosen item, grounded ONLY in the fields you received.
+4. Write ONE concise summary line that explains how you approached the trade-offs.
 
-    // --- 2) Call Gemini 2.5 Flash for nicer reasons ---
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-    });
-
-    const promptPayload = {
-      query,
-      preferences,
-      shortlist: shortlist.map((item) => ({
-        id: item.id,
-        title: item.title,
-        price: item.price,
-        rating: item.rating ?? null,
-        reviewCount: item.reviewCount ?? null,
-      })),
-    };
-
-    const prompt = `
-You are helping a shopper choose between a few strong product options.
-
-You are given:
-- query: what they searched for
-- preferences: which factors matter (price, reviews, etc.)
-- shortlist: 3–5 strong candidates, each with id, title, price, rating, reviewCount.
-
-Respond ONLY as strict JSON with this shape (no markdown, no extra keys):
+VERY IMPORTANT:
+- You MUST return VALID JSON ONLY. No markdown, no extra commentary.
+- Use this exact shape:
 
 {
-  "summaryLine": "One sentence summary for the whole shortlist.",
+  "shortlistedIds": ["id-1", "id-2", "id-3"],
   "reasons": {
-    "id1": "Why this is one of the best ones, in 1–2 short sentences.",
-    "id2": "…",
-    "id3": "…"
-  }
+    "id-1": "Short human explanation tailored to the shopper's preferences.",
+    "id-2": "Another explanation...",
+    "id-3": "..."
+  },
+  "summaryLine": "One short sentence summarising the overall picks."
 }
 
-Keep it concise and shopper-friendly. Do not change the shortlist; only explain why each one is good.
+Rules:
+- "shortlistedIds" must be a subset of the provided item ids.
+- "reasons" must only contain keys that are in "shortlistedIds".
+- "summaryLine" must be a single sentence, 12–28 words, no bullet points.
+- Do NOT invent fields or product attributes that are not implied by the numbers you see.
+- Respect preferences: if emphasizePrice is true, talk more about value and price; if emphasizeReviews is true, talk more about ratings, etc.
+- In "cart_compare" mode, assume the shopper already picked these items and wants help choosing between them.
+- In "search_shortlist" mode, assume the shopper just searched and you’re explaining why these are the best 2–3.
+`;
 
-Here is the input (JSON):
+}
 
-${JSON.stringify(promptPayload)}
-    `.trim();
+/**
+ * Normalise / guard the model's response so the Mini never explodes
+ * if Gemini drifts slightly.
+ */
+function normalizeExplainResponse(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
 
-    const result = await model.generateContent({
+  const safe = {};
+
+  if (Array.isArray(raw.shortlistedIds)) {
+    safe.shortlistedIds = raw.shortlistedIds
+      .filter((id) => typeof id === "string")
+      .slice(0, 4); // tiny safety cap
+  }
+
+  if (raw.reasons && typeof raw.reasons === "object") {
+    const reasons = {};
+    for (const [key, val] of Object.entries(raw.reasons)) {
+      if (typeof key === "string" && typeof val === "string") {
+        // Trim very long essays
+        reasons[key] = val.length > 480 ? val.slice(0, 480) + "…" : val;
+      }
+    }
+    if (Object.keys(reasons).length > 0) {
+      safe.reasons = reasons;
+    }
+  }
+
+  if (typeof raw.summaryLine === "string") {
+    const trimmed = raw.summaryLine.trim();
+    if (trimmed) {
+      safe.summaryLine =
+        trimmed.length > 220 ? trimmed.slice(0, 220) + "…" : trimmed;
+    }
+  }
+
+  return safe;
+}
+
+/**
+ * Low-level call to Gemini in JSON mode.
+ */
+async function callGeminiExplain(payload) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), EXPLAIN_TIMEOUT_MS);
+
+  try {
+    const mode =
+      !payload.query || (payload.items && payload.items.length > 3)
+        ? "cart_compare"
+        : "search_shortlist";
+
+    const userJson = JSON.stringify({
+      mode,
+      query: payload.query,
+      preferences: payload.preferences || {},
+      items: payload.items || [],
+    });
+
+    const prompt = buildExplainPrompt(payload);
+
+    const body = {
       contents: [
         {
           role: "user",
-          parts: [{ text: prompt }],
+          parts: [
+            { text: prompt },
+            { text: "\n\nHere is the JSON payload:\n" + userJson },
+          ],
         },
       ],
       generationConfig: {
         responseMimeType: "application/json",
+        temperature: 0.35,
+        maxOutputTokens: 512,
       },
-    });
+    };
 
-    const text = result?.response?.text?.();
-    if (!text) {
-      console.warn("[Chooze Mini] Explain: empty Gemini response; using fallback.");
-      return res.json({
-        summaryLine: fallbackSummaryLine,
-        shortlistedIds,
-        reasons: fallbackReasons,
-      });
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/${GEMINI_EXPLAIN_MODEL}:generateContent`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${GEMINI_API_KEY}`,
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    clearTimeout(timeout);
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      throw new Error(
+        `Gemini explain error: ${resp.status} ${resp.statusText} – ${text}`
+      );
+    }
+
+    const data = await resp.json();
+
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      data?.candidates?.[0]?.output_text ||
+      "";
+
+    if (!text || typeof text !== "string") {
+      throw new Error("No text in Gemini explain response");
     }
 
     let parsed;
     try {
       parsed = JSON.parse(text);
-    } catch (e) {
-      console.warn("[Chooze Mini] Explain: failed to parse JSON; using fallback.", e);
-      return res.json({
-        summaryLine: fallbackSummaryLine,
-        shortlistedIds,
-        reasons: fallbackReasons,
-      });
+    } catch (err) {
+      throw new Error("Failed to parse Gemini JSON: " + err.message);
     }
 
-    const summaryLine =
-      typeof parsed.summaryLine === "string" && parsed.summaryLine.trim()
-        ? parsed.summaryLine.trim()
-        : fallbackSummaryLine;
-
-    const reasons =
-      parsed.reasons && typeof parsed.reasons === "object"
-        ? parsed.reasons
-        : fallbackReasons;
-
-    const tookMs = Date.now() - t0;
-    if (tookMs > 500) {
-      console.log(`[Chooze Mini] /mini/explain (Gemini) took ${tookMs}ms`);
-    }
-
-    return res.json({
-      summaryLine,
-      shortlistedIds,
-      reasons,
-    });
+    return normalizeExplainResponse(parsed);
   } catch (err) {
-    console.error("[Chooze Mini] /mini/explain error", err);
-    return res.status(500).json({
-      error: "mini_explain_failed",
-    });
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
+/**
+ * Express route: Chooze Mini Explain
+ *
+ * Expects: ChoozeExplainRequest in req.body
+ * Returns: ChoozeExplainResponse
+ */
+app.post("/mini/explain", async (req, res) => {
+  try {
+    const payload = req.body;
+
+    if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
+      return res.json({});
+    }
+
+    // Hard guard: avoid accidentally sending huge payloads
+    if (payload.items.length > 24) {
+      payload.items = payload.items.slice(0, 24);
+    }
+
+    const explain = await callGeminiExplain(payload);
+
+    // Final guard: always return a harmless object
+    if (!explain || typeof explain !== "object") {
+      return res.json({});
+    }
+
+    return res.json(explain);
+  } catch (err) {
+    console.error("[Chooze Mini] /mini/explain error:", err);
+    // Never break the Mini – just return empty so client falls back to heuristics.
+    return res.json({});
   }
 });
+
 
 // ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
