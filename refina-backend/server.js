@@ -1504,16 +1504,26 @@ if (!text || typeof text !== "string") {
  */
 app.post("/mini/explain", async (req, res) => {
   try {
-    const payload = req.body;
+    const payload = req.body || {};
 
-    if (!payload || !Array.isArray(payload.items) || payload.items.length === 0) {
+    // 🔧 NEW: normalise items vs shortlist so both shapes work
+    let items = Array.isArray(payload.items)
+      ? payload.items
+      : Array.isArray(payload.shortlist)
+      ? payload.shortlist
+      : [];
+
+    if (!items.length) {
       return res.json({});
     }
 
     // Hard guard: avoid accidentally sending huge payloads
-    if (payload.items.length > 24) {
-      payload.items = payload.items.slice(0, 24);
+    if (items.length > 24) {
+      items = items.slice(0, 24);
     }
+
+    // Ensure callGeminiExplain sees items on payload
+    payload.items = items;
 
     const explain = await callGeminiExplain(payload);
 
