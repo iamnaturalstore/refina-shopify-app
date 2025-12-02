@@ -15,15 +15,12 @@ import {
   Spinner,
 } from "@shopify/polaris";
 import { CheckIcon } from "@shopify/polaris-icons";
-import { api, billingApi } from "../api/client.js";
+
+import { api, billingApi, buildEmbeddedUrl } from "../api/client.js";
 import app from "../appBridge";
 import { Redirect } from "@shopify/app-bridge/actions";
-import { buildEmbeddedUrl } from "../api/client"; // adjust relative path if needed
 
-import { useEffect, useState, useMemo } from "react";
-import { Tooltip, Spinner } from "@shopify/polaris";
-import { api } from "../api/client";
-
+import { useEffect, useMemo, useState } from "react";
 
 
 const PENDING_KEY = "refina:billing:pending";

@@ -286,83 +286,93 @@ export default function Setup() {
           )}
         </Layout.Section>
 
-        {/* Knowledge / Indexer status (read-only mirror of Home; tolerant of missing fields) */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center" padding="300">
-                <Text as="h3" variant="headingSm">Product Knowledge Build</Text>
-                <Badge tone={ix?.phase === "complete" ? "success" : ix?.phase === "error" ? "critical" : "subdued"}>
-                  {ix?.phase || "preparing"}
-                </Badge>
-              </InlineStack>
-              <BlockStack gap="200" paddingInline="300" paddingBlockEnd="300">
-                <Text tone="subdued">
-                  Sync imports products, builds embeddings, and triggers enrichment. You can continue setup — progress will update here.
-                </Text>
-                {syncMsg && <Text tone="subdued">{syncMsg}</Text>}
-                {ix && (
-                  <Text tone="subdued">
-                    {`Progress: ${ix.pct ?? 0}%`}{" "}
-                    {typeof ix.importedCount === "number" && typeof ix.totalProducts === "number"
-                      ? `(${ix.importedCount}/${ix.totalProducts})`
-                      : ""}
-                    {ix.updatedAt ? ` • Last updated: ${new Date(ix.updatedAt).toLocaleTimeString()}` : ""}
-                  </Text>
-                )}
-                <InlineStack gap="200">
-                  <Button variant="primary" onClick={startSync} loading={syncBusy} disabled={syncBusy || (ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error")}>
-                    {ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error" ? "Sync in progress…" : "Sync products & build KB"}
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        {/* Step 1: Choose your plan (copy/link only; no billing logic changes) */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">1) Choose your plan</Text>
-                <Badge tone="subdued">Recommended</Badge>
-              </InlineStack>
-              <Text as="p" tone="subdued">
-                Free works out of the box. Pro & Premium enable AI answers, analytics, and styling controls.
-              </Text>
-              <InlineStack gap="300" wrap={false}>
-                <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-
-        {/* Step 2: Enable Theme App Embed */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">2) Enable the Theme App Embed</Text>
-                <Badge tone="subdued">Required</Badge>
-              </InlineStack>
-              <Text as="p">
-                We’ll open the Theme Editor in Shopify. Toggle the Refina <strong>App embed</strong>, then click <strong>Save</strong>.
-              </Text>
-              <InlineStack gap="300" wrap={false}>
-                <Button variant="primary" url={`https://${shop}/admin/themes/current/editor?context=apps&target=newAppsSection/app-embed`} external>Open Theme Editor</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        {/* Step 3: Choose your Category */}
+       {/* Step 1: Choose your plan (copy/link only; no billing logic changes) */}
 <Layout.Section>
   <Card>
     <BlockStack gap="400">
       <InlineStack align="space-between" blockAlign="center">
-        <Text as="h3" variant="headingSm">3) Choose your store category</Text>
+        <Text as="h3" variant="headingSm">1) Choose your plan</Text>
+        <Badge tone="subdued">Recommended</Badge>
+      </InlineStack>
+      <Text as="p" tone="subdued">
+        Pick a plan to unlock AI. <strong>Lite</strong>, <strong>Pro</strong>, or <strong>Premium</strong>. We’ll check your catalog size before activating Lite.
+      </Text>
+      <InlineStack gap="300" wrap={false}>
+        <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
+      </InlineStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
+
+{/* Step 2: Product Knowledge Build (indexer status; tolerant of missing fields) */}
+<Layout.Section>
+  <Card>
+    <BlockStack gap="300">
+      <InlineStack align="space-between" blockAlign="center" padding="300">
+        <Text as="h3" variant="headingSm">2) Product Knowledge Build</Text>
+        <Badge tone={ix?.phase === "complete" ? "success" : ix?.phase === "error" ? "critical" : "subdued"}>
+          {ix?.phase || "preparing"}
+        </Badge>
+      </InlineStack>
+      <BlockStack gap="200" paddingInline="300" paddingBlockEnd="300">
+        <Text tone="subdued">
+          Sync imports products, builds embeddings, and triggers enrichment. You can continue setup — progress will update here.
+        </Text>
+        {syncMsg && <Text tone="subdued">{syncMsg}</Text>}
+        {ix && (
+          <Text tone="subdued">
+            {`Progress: ${ix.pct ?? 0}%`}{" "}
+            {typeof ix.importedCount === "number" && typeof ix.totalProducts === "number"
+              ? `(${ix.importedCount}/${ix.totalProducts})`
+              : ""}
+            {ix.updatedAt ? ` • Last updated: ${new Date(ix.updatedAt).toLocaleTimeString()}` : ""}
+          </Text>
+        )}
+        <InlineStack gap="200">
+          <Button
+            variant="primary"
+            onClick={startSync}
+            loading={syncBusy}
+            disabled={syncBusy || (ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error")}
+          >
+            {ix && ix.phase && ix.phase !== "complete" && ix.phase !== "error" ? "Sync in progress…" : "Sync products & build KB"}
+          </Button>
+        </InlineStack>
+      </BlockStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
+
+{/* Step 3: Enable Theme App Embed */}
+<Layout.Section>
+  <Card>
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h3" variant="headingSm">3) Enable the Theme App Embed</Text>
+        <Badge tone="subdued">Required</Badge>
+      </InlineStack>
+      <Text as="p">
+        We’ll open the Theme Editor in Shopify. Toggle the Refina <strong>App embed</strong>, then click <strong>Save</strong>.
+      </Text>
+      <InlineStack gap="300" wrap={false}>
+        <Button
+          variant="primary"
+          url={`https://${shop}/admin/themes/current/editor?context=apps&target=newAppsSection/app-embed`}
+          external
+        >
+          Open Theme Editor
+        </Button>
+      </InlineStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
+
+{/* Step 4: Choose your Category */}
+<Layout.Section>
+  <Card>
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h3" variant="headingSm">4) Choose your store category</Text>
         {String(category || "").trim().length > 0 ? (
           <Badge tone="success">Complete</Badge>
         ) : (
@@ -392,41 +402,40 @@ export default function Setup() {
   </Card>
 </Layout.Section>
 
+{/* Step 5 (optional): Verify launcher */}
+<Layout.Section>
+  <Card>
+    <BlockStack gap="400">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="h3" variant="headingSm">5) Verify the launcher is visible</Text>
+        <Badge tone="subdued">Check</Badge>
+      </InlineStack>
+      <Text as="p" tone="subdued">
+        Open your storefront preview and look for the Refina launcher (usually bottom-right). If it’s hidden, ensure the App embed is enabled and saved.
+      </Text>
+      <InlineStack gap="300" wrap={false}>
+        <Button url={`https://${shop}/?refina_preview=1`} external>Open storefront preview</Button>
+        <Button url={`#/billing${qs}`} variant="tertiary">Manage plan</Button>
+      </InlineStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
 
-        {/* Step 4: Verify launcher */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="h3" variant="headingSm">4) Verify the launcher is visible</Text>
-                <Badge tone="subdued">Check</Badge>
-              </InlineStack>
-              <Text as="p" tone="subdued">
-                Open your storefront preview and look for the Refina launcher (usually bottom-right). If it’s hidden, ensure the App embed is enabled and saved.
-              </Text>
-              <InlineStack gap="300" wrap={false}>
-                <Button url={`https://${shop}/?refina_preview=1`} external>Open storefront preview</Button>
-                <Button url={`#/billing${qs}`} variant="tertiary">Manage plan</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-
-        {/* Helpful footer */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="300">
-              <Text as="p" tone="subdued">
-                Tip: All admin links are embedded. Theme Editor opens as a Shopify Admin page; storefront opens in a new tab.
-              </Text>
-              <Divider />
-              <InlineStack gap="200">
-                <Button url={`#/${qs}`} variant="secondary">Back to Home</Button>
-                <Button url={`#/billing${qs}`} variant="secondary">Go to Billing</Button>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+{/* Helpful footer */}
+<Layout.Section>
+  <Card>
+    <BlockStack gap="300">
+      <Text as="p" tone="subdued">
+        Tip: All admin links are embedded. Theme Editor opens as a Shopify Admin page; storefront opens in a new tab.
+      </Text>
+      <Divider />
+      <InlineStack gap="200">
+        <Button url={`#/${qs}`} variant="secondary">Back to Home</Button>
+        <Button url={`#/billing${qs}`} variant="secondary">Go to Billing</Button>
+      </InlineStack>
+    </BlockStack>
+  </Card>
+</Layout.Section>
       </Layout>
     </Page>
   );
