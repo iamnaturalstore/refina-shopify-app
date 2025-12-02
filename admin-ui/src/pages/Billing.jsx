@@ -256,17 +256,36 @@ React.useEffect(() => {
     };
   }, []);
 
-  async function subscribe(which /* "premium" | "pro" */, interval /* "monthly" | "annual" */) {
+  async function subscribe(which /* "premium" | "pro" | "lite" */, interval /* "monthly" | "annual" */) {
   try {
-    setBusy(true); setError(""); setReauthUrl("");
+    setBusy(true);
+    setError("");
+    setReauthUrl("");
 
-    if (which === "pro") {
-      // Pro → create subscription via /api/billing/subscribe (monthly only at launch)
-      const resp = await api.post("/api/billing/subscribe", { plan: "pro" });
+    // Normalize inputs
+    const plan = String(which || "").toLowerCase();
+    const safeInterval = interval === "annual" ? "annual" : "monthly";
+
+    // Lite + Pro → unified subscribe endpoint (plan-based)
+    if (plan === "lite" || plan === "pro") {
+      const resp = await api.post("/api/billing/subscribe", {
+        plan,           // "lite" or "pro"
+        interval: safeInterval, // backend can ignore or use
+      });
+
       const json = resp?.data || {};
-      const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
+      const url =
+        json?.confirmationUrl ||
+        json?.url ||
+        json?.confirmation_url ||
+        json?.redirectUrl;
+
       if (!url) throw new Error("No confirmation URL returned");
-      try { localStorage.setItem(PENDING_KEY, which); } catch {}
+
+      try {
+        localStorage.setItem(PENDING_KEY, plan);
+      } catch {}
+
       redirectTop(url);
       return;
     }
@@ -274,10 +293,25 @@ React.useEffect(() => {
     // Premium (existing protocol) → use /api/billing/upgrade with body
     const sep = window.location.href.includes("?") ? "&" : "?";
     const returnUrl = `${window.location.href}${sep}billing=success`;
-    const { data: json } = await billingApi.upgrade({ returnUrl, interval });
-    const url = json?.confirmationUrl || json?.url || json?.confirmation_url || json?.redirectUrl;
+
+    const { data: json } = await billingApi.upgrade({
+      returnUrl,
+      interval: safeInterval,
+    });
+
+    const url =
+      json?.confirmationUrl ||
+      json?.url ||
+      json?.confirmation_url ||
+      json?.redirectUrl;
+
     if (!url) throw new Error("No confirmation URL returned");
-    try { localStorage.setItem(PENDING_KEY, which); } catch {}
+
+    try {
+      // fall back to original "which" if plan was empty
+      localStorage.setItem(PENDING_KEY, plan || which);
+    } catch {}
+
     redirectTop(url);
   } catch (e) {
     console.error("[Billing] Subscribe/Upgrade failed:", e);
