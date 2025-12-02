@@ -898,7 +898,7 @@ async function loadProductsForScoring(storeId, ids = []) {
         Number(trims.maxProducts || 999) <= 14 &&
         Number(trims.charBudget || 999999) <= 20000;
 
-      const isPro = lvlA === "pro" || lvlB === "pro" || longFormOff || proLikeTrims;
+      const isPro = (lvlA === "pro" || lvlB === "pro" || lvlA === "lite" || lvlB === "lite" || longFormOff || proLikeTrims);
       if (!isPro) return payload;
 
       const products = Array.isArray(payload.products) ? payload.products : [];

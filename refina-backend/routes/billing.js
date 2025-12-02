@@ -265,28 +265,43 @@ async function readActiveSubscriptions(client) {
 }
 
 function inferPlanFromSubs(subs) {
+  // Defaults
   let level = "free";
   let status = "NONE";
   let activeId = null;
+
+  // Read plan names from env (fallbacks to your public labels)
+  const liteName = String(process.env.SHOPIFY_BILLING_LITE_NAME || "Lite").toLowerCase();
   const proName = String(process.env.SHOPIFY_BILLING_PRO_NAME || "Pro").toLowerCase();
   const premiumName = String(process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium").toLowerCase();
-  for (const s of subs || []) {
+  const enterpriseName = String(process.env.SHOPIFY_BILLING_ENTERPRISE_NAME || "Enterprise").toLowerCase();
+
+  // Normalize active subs
+  const activeSubs = (subs || []).filter(s => String(s?.status || "").toUpperCase() === "ACTIVE");
+
+  // Map each active sub to a normalized level if we can detect it by name
+  const detected = activeSubs.map(s => {
     const n = String(s?.name || "").toLowerCase();
-    const st = String(s?.status || "UNKNOWN").toUpperCase();
-    if (st !== "ACTIVE") continue;
-    if (premiumName && n.includes(premiumName)) {
-      level = "premium";
-      status = st;
-      activeId = s?.id || activeId;
-      break;
-    }
-    if (proName && n.includes(proName)) {
-      level = "pro";
-      status = st;
-      activeId = s?.id || activeId;
-      break;
-    }
+    const id = s?.id || null;
+
+    // Use includes() to tolerate Shopify's "App Subscription: <Plan>" variants
+    if (enterpriseName && n.includes(enterpriseName)) return { level: "enterprise", id };
+    if (premiumName && n.includes(premiumName))     return { level: "premium", id };
+    if (proName && n.includes(proName))             return { level: "pro", id };
+    if (liteName && n.includes(liteName))           return { level: "lite", id };
+    return { level: null, id };
+  }).filter(d => !!d.level);
+
+  // Choose highest priority if multiple are somehow active
+  const priority = ["enterprise", "premium", "pro", "lite", "free"];
+  const picked = detected.sort((a, b) => priority.indexOf(a.level) - priority.indexOf(b.level))[0];
+
+  if (picked) {
+    level = picked.level;
+    status = "ACTIVE";
+    activeId = picked.id;
   }
+
   return { level, status, activeId };
 }
 
@@ -549,7 +564,7 @@ router.post("/subscribe", async (req, res) => {
 
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
     const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    const target = normalized === "pro" ? "pro" : "premium";
+    const target = ["lite","pro","premium"].includes(normalized) ? normalized : "premium";
 
     const existing = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
@@ -567,15 +582,21 @@ router.post("/subscribe", async (req, res) => {
 
     const returnUrl = `${origin}/api/billing/activated?shop=${encodeURIComponent(shop)}`;
 
-    const PLAN = target === "pro"
-      ? {
-          name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
-          amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "19.00"),
-        }
-      : {
-          name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
-          amount: String(process.env.SHOPIFY_BILLING_PREMIUM_PRICE || "49.00"),
-        };
+    const PLAN =
+  target === "lite"
+    ? {
+        name: process.env.SHOPIFY_BILLING_LITE_NAME || "Lite",
+        amount: String(process.env.SHOPIFY_BILLING_LITE_PRICE || "9.00"),
+      }
+  : target === "pro"
+    ? {
+        name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
+        amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "39.00"),
+      }
+    : {
+        name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
+        amount: String(process.env.SHOPIFY_BILLING_PREMIUM_PRICE || "79.00"),
+      };
 
     const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]
@@ -668,11 +689,11 @@ router.post("/upgrade", async (req, res) => {
       ? {
           name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
           // Pro annual not offered at launch; use monthly price
-          amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "19.00"),
+          amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "39.00"),
         }
       : {
           name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
-          amount: isAnnual ? "490.00" : "49.00", // preserve existing Premium annual logic
+          amount: isAnnual ? "790.00" : "79.00", // preserve existing Premium annual logic
         };
     const testFlag =
       ["BILLING_TEST", "BILLING_TEST_MODE", "SHOPIFY_BILLING_TEST", "SHOPIFY_BILLING_TEST_MODE"]

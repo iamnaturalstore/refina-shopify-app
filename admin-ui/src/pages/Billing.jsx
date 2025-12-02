@@ -20,33 +20,50 @@ import app from "../appBridge";
 import { Redirect } from "@shopify/app-bridge/actions";
 import { buildEmbeddedUrl } from "../api/client"; // adjust relative path if needed
 
+import { useEffect, useState, useMemo } from "react";
+import { Tooltip, Spinner } from "@shopify/polaris";
+import { api } from "../api/client";
+
+
 
 const PENDING_KEY = "refina:billing:pending";
 
 // ── Plan meta (EDIT here to change prices/blurbs) ────────────────────────
 const PLAN_DETAILS = {
+  lite: {
+    label: "Lite",
+    priceMonthly: "$9/mo",
+    priceAnnualNote: "", // No annual at launch
+    tooltip: "Lite — Core AI on a lean setup • 1 placement • up to 500 products",
+    ribbon: "Starter",
+    features: [
+      "Core AI answers (lean)",
+      "Up to 500 products",
+      "Per-minute ceiling 8",
+    ],
+  },
   pro: {
     label: "Pro",
-    priceMonthly: "$19/mo",
+    priceMonthly: "$39/mo",
     priceAnnualNote: "", // Pro annual not offered at launch
-    tooltip: "Pro — 2,000 AI requests/mo • per-minute 10 • core AI answers",
-    ribbon: "Great for getting started",
+    tooltip: "Pro — Richer answers • more placements • deeper analytics",
+    ribbon: "Great for growing stores",
     features: [
-      "Core AI answers",
-      "2,000 requests per month",
+      "Richer AI answers + explanations",
+      "Up to 5,000 products",
       "Per-minute ceiling 10",
     ],
   },
   premium: {
     label: "Premium",
-    priceMonthly: "$49/mo",
-    priceAnnualNote: "or $490/yr",
-    tooltip: "Premium — Advanced AI • styling & analytics • priority support",
+    priceMonthly: "$79/mo",
+    priceAnnualNote: "or $790/yr",
+    tooltip: "Premium — Advanced AI quality • full styling • deep analytics • priority support",
     ribbon: "Best value",
     features: [
-      "Advanced AI quality",
-      "Styling controls & analytics",
-      "Higher limits + priority support",
+      "Advanced AI reasoning & quality",
+      "Full styling & placements",
+      "Priority support + deep analytics",
     ],
   },
 };
@@ -54,17 +71,18 @@ const PLAN_DETAILS = {
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
+  if (v === "lite") return "lite";
   if (v === "pro") return "pro";
   if (v === "premium" || v === "pro+") return "premium";
-  if (v === "plus") return "plus";
+  if (v === "plus") return "premium"; // alias legacy "plus" to premium
   return "free";
 }
 function labelFromLevel(level) {
   const v = normalizeLevel(level);
+  if (v === "lite") return "Lite";
   if (v === "pro") return "Pro";
   if (v === "premium") return "Premium";
-  if (v === "plus") return "Plus";
-  return "Free";
+  return v === "free" ? "Free" : v;
 }
 function parsePlanResponse(jsonResponse) {
   const p = jsonResponse?.plan || jsonResponse || {};
@@ -117,6 +135,38 @@ export default function Billing() {
   const [reauthUrl, setReauthUrl] = React.useState(""); // show reauth banner when present
   const pollRef = React.useRef(null);
   const timeoutRef = React.useRef(null);
+
+  // Lite cap gating (fetch from existing indexer status API)
+const [catalogSize, setCatalogSize] = useState(null);     // number | null
+const [catalogLoading, setCatalogLoading] = useState(false);
+const [catalogError, setCatalogError] = useState("");
+
+const LITE_CAP = 500;
+
+// On mount, fetch catalog size from indexer status (same endpoint used in Setup.jsx)
+useEffect(() => {
+  let on = true;
+  (async () => {
+    setCatalogLoading(true);
+    setCatalogError("");
+    try {
+      // fresh=1 mirrors the Setup.jsx polling style
+      const { data } = await api.get(`/api/indexer/status?fresh=1`);
+      const total = Number(data?.indexer?.totalProducts ?? 0);
+      if (on) setCatalogSize(Number.isFinite(total) ? total : 0);
+    } catch (e) {
+      if (on) setCatalogError(e?.message || "Failed to check catalog size");
+    } finally {
+      if (on) setCatalogLoading(false);
+    }
+  })();
+  return () => { on = false; };
+}, []);
+
+// Decide if Lite should be disabled
+const liteOverCap = useMemo(() => {
+  return typeof catalogSize === "number" && catalogSize > LITE_CAP;
+}, [catalogSize]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -293,6 +343,30 @@ const premiumMeta = PLAN_DETAILS.premium;
   }
 
   function PlanTile({ id, meta, current, onChoose, allowAnnual = true }) {
+    const isLite = id === "lite";
+const [liteErr, setLiteErr] = useState("");
+
+async function handleChoose(interval) {
+  if (!onChoose) return;
+  if (isLite) {
+    setLiteErr("");
+    try {
+      const ts = Date.now();
+      const { data } = await api.get(`/api/indexer/status?fresh=1&ts=${ts}`);
+      const total = Number(data?.indexer?.totalProducts ?? 0);
+      if (total > 500) {
+        setLiteErr(
+          `Lite is limited to 500 products. Your catalog has ${total}. Please choose Pro or Premium.`
+        );
+        return;
+      }
+    } catch (e) {
+      setLiteErr("Could not verify catalog size. Please try again.");
+      return;
+    }
+  }
+  onChoose(id, interval);
+}
   const isCurrent = current === id;
   return (
     <Card>
@@ -328,25 +402,31 @@ const premiumMeta = PLAN_DETAILS.premium;
 
         <InlineStack gap="200" align="start">
           <Button
-            variant="primary"
-            disabled={Boolean(isCurrent || !onChoose)}
-            onClick={() => onChoose?.(id, "monthly")}
-          >
-            {isCurrent && currentInterval === "monthly"
-              ? `Current (Monthly)`
-              : `Choose Monthly`}
-          </Button>
+  variant="primary"
+  disabled={Boolean(isCurrent || !onChoose)}
+  onClick={() => handleChoose("monthly")}
+>
+  {isCurrent && currentInterval === "monthly"
+    ? `Current (Monthly)`
+    : `Choose Monthly`}
+</Button>
+
           {allowAnnual && (
-            <Button
-              disabled={Boolean(isCurrent || !onChoose)}
-              onClick={() => onChoose?.(id, "annual")}
-            >
-              {isCurrent && currentInterval === "annual"
-                ? `Current (Annual)`
-                : `Choose Annual`}
-            </Button>
-          )}
+  <Button
+    disabled={Boolean(isCurrent || !onChoose)}
+    onClick={() => handleChoose("annual")}
+  >
+    {isCurrent && currentInterval === "annual"
+      ? `Current (Annual)`
+      : `Choose Annual`}
+  </Button>
+)}
         </InlineStack>
+        {isLite && liteErr && (
+  <div style={{ marginTop: 8 }}>
+    <Text tone="critical" as="p">{liteErr}</Text>
+  </div>
+)}
       </BlockStack>
     </Card>
   );
@@ -406,7 +486,48 @@ const premiumMeta = PLAN_DETAILS.premium;
             </InlineStack>
           </InlineStack>
 
+          {/* Catalog-size precheck (non-blocking) */}
+{catalogLoading ? (
+  <InlineStack align="start" blockAlign="center" gap="200">
+    <Spinner size="small" />
+    <Text tone="subdued">Checking your catalog size…</Text>
+  </InlineStack>
+) : (
+  <Text tone="subdued">
+    {typeof catalogSize === "number"
+      ? `Catalog: ${catalogSize.toLocaleString()} products`
+      : catalogError
+      ? `Couldn’t verify catalog size: ${catalogError}`
+      : `Catalog: —`}
+  </Text>
+)}
+
           <InlineStack gap="400" wrap>
+  {/* Lite (monthly only) */}
+  <Box minWidth="320px" maxWidth="520px" width="100%">
+    <Tooltip
+      content={
+        liteOverCap
+          ? `Your catalog (${(catalogSize ?? 0).toLocaleString()}) exceeds Lite’s ${LITE_CAP} cap. Choose Pro or Premium.`
+          : catalogLoading
+          ? "Still checking your catalog size. We’ll verify before activating Lite."
+          : ""
+      }
+      dismissOnMouseOut
+    >
+      <div style={{ opacity: liteOverCap ? 0.5 : 1 }}>
+        <PlanTile
+          id="lite"
+          meta={PLAN_DETAILS.lite}
+          current={currentLevel}
+          // Disable by removing the handler when over cap; keep UI visible
+          onChoose={liteOverCap ? null : subscribe}
+          allowAnnual={false}
+        />
+      </div>
+    </Tooltip>
+  </Box>
+
   {/* Pro (monthly only) */}
   <Box minWidth="320px" maxWidth="520px" width="100%">
     <PlanTile

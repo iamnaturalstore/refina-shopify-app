@@ -31,11 +31,12 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const docMonthly = Number(plan?.entitlements?.quota?.monthlyRequests ?? NaN);
   const docPerMin = Number(plan?.entitlements?.quota?.perMinuteCeiling ?? NaN);
 
-  const defaultsByLevel = {
+    const defaultsByLevel = {
     free:    { monthly: 0,     perMin: 0,  maxProducts: 0,  charBudget: 8000 },
-    pro:     { monthly: 2000,  perMin: 10, maxProducts: 14, charBudget: 18000 },
+    lite:    { monthly: 1000,  perMin: 8,  maxProducts: 10, charBudget: 16000 }, // NEW: Lite
+    pro:     { monthly: 5000,  perMin: 10, maxProducts: 14, charBudget: 18000 },
     premium: { monthly: 10000, perMin: 20, maxProducts: 24, charBudget: 28000 },
-    plus:    { monthly: 25000, perMin: 30, maxProducts: 36, charBudget: 38000 }, // 32–40 → pick 36 center
+    plus:    { monthly: 25000, perMin: 30, maxProducts: 36, charBudget: 38000 }, // legacy, safe to keep
   };
   const def = defaultsByLevel[level] || defaultsByLevel.free;
 
@@ -43,12 +44,12 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const perMinuteCeiling = Number.isFinite(docPerMin) ? docPerMin : def.perMin;
 
   // 2) Determine ON/OFF
-  const aiEnabled = (level === "pro" || level === "premium" || level === "plus") && status === "ACTIVE";
+  const aiEnabled = (level === "lite" || level === "pro" || level === "premium" || level === "plus") && status === "ACTIVE";
   if (!aiEnabled) {
     return {
       state: "off",
       message:
-        'Turn on AI answers with Pro — 2,000 AI requests/mo, $19. 7-day trial.',
+        'Enable AI answers with Lite ($9) or Pro ($39). 7-day Premium trial included.',
       trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
     };
   }
@@ -105,10 +106,10 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const curMonthly = Number(freshPlan?.usage?.requestsThisPeriod ?? 0);
 
   if (monthlyRequests > 0 && curMonthly >= monthlyRequests) {
-    const msg =
+        const msg =
       level === "premium"
-        ? "You’re above 80% this month. Talk to us about Plus."
-        : "You’ve reached your plan’s monthly limit. Consider upgrading for more AI answers.";
+        ? "You’ve reached this month’s limit. Contact us to increase limits or move to Enterprise."
+        : "You’ve reached your plan’s monthly limit. Upgrade for more AI answers.";
     return {
       state: "limited",
       message: msg,
