@@ -357,7 +357,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     process.env.BILLING_TRIAL_DAYS ||
     (/[?&]shop=(?:refina-app-demo\.myshopify\.com|jqr0b0-je\.myshopify\.com)/i.test(String(returnUrl))
       ? (process.env.DEMO_TRIAL_DAYS || 365)
-      : 7
+      : 14
     )
   ),
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
