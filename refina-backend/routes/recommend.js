@@ -35,6 +35,29 @@ function norm(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i
 function cosine(a, b) { const na = norm(a), nb = norm(b); if (!na || !nb) return 0; return dot(a, b) / (na * nb); }
 function pick(obj, keys) { const o = {}; for (const k of keys) o[k] = obj[k]; return o; }
 
+// ─── In-memory cache for product embeddings ─────────────────────────────────
+// Keyed by storeId + cacheEpoch so bumping cacheEpoch in storeSettings blows it away.
+const EMBEDDINGS_CACHE = new Map();
+
+function getEmbeddingsCache(storeId, cacheEpoch) {
+  const key = `${storeId || ""}::${cacheEpoch || "none"}`;
+  const hit = EMBEDDINGS_CACHE.get(key);
+  if (hit && Array.isArray(hit) && hit.length) return hit;
+
+  // If epoch changed, clear old entries for this store (defensive, avoids leaks).
+  for (const k of EMBEDDINGS_CACHE.keys()) {
+    if (k.startsWith(`${storeId || ""}::`) && k !== key) {
+      EMBEDDINGS_CACHE.delete(k);
+    }
+  }
+  return null;
+}
+
+function setEmbeddingsCache(storeId, cacheEpoch, data) {
+  const key = `${storeId || ""}::${cacheEpoch || "none"}`;
+  EMBEDDINGS_CACHE.set(key, Array.isArray(data) ? data : []);
+}
+
 // ─── URL/image helpers ───────────────────────────────────────────────────────
 function ensureAbsolute(u, storeId) {
   const url = String(u || "").trim();
@@ -86,11 +109,18 @@ async function embedText(text) {
   }
 }
 
-async function loadEmbeddings(storeId) {
+async function loadEmbeddings(storeId, cacheEpoch) {
+  // First try in-memory cache (per process, super fast)
+  const cached = getEmbeddingsCache(storeId, cacheEpoch);
+  if (cached) return cached;
+
   // Read only the vector field to avoid pulling large entities/evidence payloads.
   const col = db.collection("productEmbeddings").doc(storeId).collection("items");
   const snap = await col.select("vector").get(); // field mask trims payload drastically
-  return snap.docs.map(d => ({ id: d.id, vector: d.get("vector") || [] }));
+  const allEmb = snap.docs.map(d => ({ id: d.id, vector: d.get("vector") || [] }));
+
+  setEmbeddingsCache(storeId, cacheEpoch, allEmb);
+  return allEmb;
 }
 
 
@@ -321,10 +351,13 @@ router.post("/recommend", async (req, res) => {
     const cacheEpoch = settings?.cacheEpoch || null;
 
     // Deterministic catalogue fallback (plan-off / limited / guard error)
-    async function deterministicFallback(guard) {
-      const concernNormLocal = normConcern(concern);
+async function deterministicFallback(guard) {
+  const concernNormLocal = normConcern(concern);
 
-      const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
+  const [qVec, allEmb] = await Promise.all([
+    embedText(concern),
+    loadEmbeddings(storeId, cacheEpoch),
+  ]);
       if (!allEmb.length || !qVec.length) {
         return res.json({
           productIds: [],
@@ -433,21 +466,20 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Embedding retrieval
-       // Embedding retrieval (measure concern embedding vs catalogue embeddings separately)
-    const tEmbedStart = Date.now();
-    const qVecPromise = embedText(concern).then((v) => {
-      timings.embedMs = Date.now() - tEmbedStart;
-      return v;
-    });
+    // Embedding retrieval (measure concern embedding vs catalogue embeddings separately)
+const tEmbedStart = Date.now();
+const qVecPromise = embedText(concern).then((v) => {
+  timings.embedMs = Date.now() - tEmbedStart;
+  return v;
+});
 
-    const tEmbLoadStart = Date.now();
-    const allEmbPromise = loadEmbeddings(storeId).then((v) => {
-      timings.embLoadMs = Date.now() - tEmbLoadStart;
-      return v;
-    });
+const tEmbLoadStart = Date.now();
+const allEmbPromise = loadEmbeddings(storeId, cacheEpoch).then((v) => {
+  timings.embLoadMs = Date.now() - tEmbLoadStart;
+  return v;
+});
 
-    const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
+const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
 
     if (!allEmb.length || !qVec.length) {
       const tookMs = Date.now() - started;
