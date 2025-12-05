@@ -297,6 +297,15 @@ router.post("/recommend", async (req, res) => {
   let llmMs = 0;
   const attempts = [];
 
+  // Timing buckets for latency profiling (non-functional)
+  const timings = {
+    embedMs: 0,      // concern → embedding
+    embLoadMs: 0,    // load product embeddings from Firestore
+    docScoreMs: 0,   // load top-30 skinny docs
+    scoreMs: 0,      // ruleScore / constraints / finalists
+    docEnrichMs: 0,  // final loadProductsByIds for display
+  };
+
   try {
     const { storeId, concern } = req.body || {};
     if (!storeId || !concern) {
@@ -425,8 +434,34 @@ router.post("/recommend", async (req, res) => {
     }
 
     // Embedding retrieval
-    const [qVec, allEmb] = await Promise.all([embedText(concern), loadEmbeddings(storeId)]);
+       // Embedding retrieval (measure concern embedding vs catalogue embeddings separately)
+    const tEmbedStart = Date.now();
+    const qVecPromise = embedText(concern).then((v) => {
+      timings.embedMs = Date.now() - tEmbedStart;
+      return v;
+    });
+
+    const tEmbLoadStart = Date.now();
+    const allEmbPromise = loadEmbeddings(storeId).then((v) => {
+      timings.embLoadMs = Date.now() - tEmbLoadStart;
+      return v;
+    });
+
+    const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
+
     if (!allEmb.length || !qVec.length) {
+      const tookMs = Date.now() - started;
+      try {
+        console.warn("[Refina][recommend] timings (no-vectors)", {
+          storeId,
+          tookMs,
+          ...timings,
+          llmMs,
+          stage: "no-vectors",
+          cacheHit: false,
+        });
+      } catch (_) {}
+
       return res.json({
         productIds: [],
         products: [],
@@ -434,7 +469,7 @@ router.post("/recommend", async (req, res) => {
         followUps: [],
         awesome: null,
         source: "no-vectors",
-        tookMs: Date.now() - started,
+        tookMs,
       });
     }
 
@@ -444,9 +479,13 @@ router.post("/recommend", async (req, res) => {
       .sort((a, b) => b.sim - a.sim)
       .slice(0, 30);
 
-    const topIds = scored.map(s => s.id);
-    const topDocs = await loadProductsForScoring(storeId, topIds);
+        const topIds = scored.map(s => s.id);
 
+    const tDocScoreStart = Date.now();
+    const topDocs = await loadProductsForScoring(storeId, topIds);
+    timings.docScoreMs = Date.now() - tDocScoreStart;
+
+        const tScoreStart = Date.now();
 
     // Map id → doc + cosine
     const byId = new Map();
@@ -470,6 +509,8 @@ router.post("/recommend", async (req, res) => {
 
     // Finalists (plan-capped)
     filtered.sort((a, b) => b.finalScore - a.finalScore);
+    timings.scoreMs = Date.now() - tScoreStart;
+
     const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 40));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
@@ -700,6 +741,20 @@ const prompt2 = needWiden
         };
       });
 
+            const tookMs = Date.now() - started;
+
+      try {
+        console.warn("[Refina][recommend] timings", {
+          storeId,
+          tookMs,
+          ...timings,
+          llmMs,
+          candidateCount: finalists.length,
+          cacheHit: false,
+          source: "gemini-fallback",
+        });
+      } catch (_) {}
+
       return res.json({
         productIds: fallbackIds,
         products,
@@ -707,9 +762,18 @@ const prompt2 = needWiden
         followUps: [],
         awesome: null,
         source: "gemini-fallback",
-        tookMs: Date.now() - started,
+        tookMs,
         limitMessage: guard?.message || null,
-        __debug: { raced, llmMs, budgetMs: LLM_BUDGET_MS, candidateCount: finalists.length, validator: "fail", rawHead, attempts },
+        __debug: {
+          raced,
+          llmMs,
+          budgetMs: LLM_BUDGET_MS,
+          candidateCount: finalists.length,
+          validator: "fail",
+          rawHead,
+          attempts,
+          timings,
+        },
       });
     }
 
@@ -717,7 +781,10 @@ const prompt2 = needWiden
     let outIds = vr.value.productIds.filter((id) => allow.has(String(id)));
     if (!outIds.length) outIds = finalists.slice(0, 3).map((p) => String(p.id));
 
+        const tEnrichStart = Date.now();
     const enrichedDocs = await loadProductsByIds(storeId, outIds);
+    timings.docEnrichMs = Date.now() - tEnrichStart;
+
     const products = enrichedDocs.map((p) => {
       const title = p.title || p.name || "";
       const price = p.price != null ? p.price : undefined;
@@ -745,6 +812,8 @@ const prompt2 = needWiden
       }
     }
 
+        const tookMs = Date.now() - started;
+
     const payload = {
       productIds: outIds,
       products,
@@ -760,13 +829,35 @@ const prompt2 = needWiden
       },
       copy: vr.value.copy || { why: "", rationale: "", extras: "" },
       reasonsById,
-      tookMs: Date.now() - started,
+      tookMs,
       source: "gemini",
       limitMessage: guard?.message || null,
-      __debug: { raced, llmMs, budgetMs: LLM_BUDGET_MS, candidateCount: finalists.length, validator: "ok", rawHead, attempts },
+      __debug: {
+        raced,
+        llmMs,
+        budgetMs: LLM_BUDGET_MS,
+        candidateCount: finalists.length,
+        validator: "ok",
+        rawHead,
+        attempts,
+        timings,
+      },
     };
 
     try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}
+
+    // Single summary log line for profiling
+    try {
+      console.warn("[Refina][recommend] timings", {
+        storeId,
+        tookMs,
+        ...timings,
+        llmMs,
+        candidateCount: finalists.length,
+        cacheHit: false,
+        source: "gemini",
+      });
+    } catch (_) {}
 
     const responsePayload = transformToBasicIfNeeded(payload, guard);
     return res.json(responsePayload);
