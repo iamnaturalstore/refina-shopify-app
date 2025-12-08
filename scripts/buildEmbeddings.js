@@ -40,9 +40,15 @@ function buildProductText(p) {
   return bits.filter(Boolean).join(" • ");
 }
 
+const EMBEDDING_MODEL =
+  process.env.EMBEDDING_MODEL ||
+  "gemini-embedding-001";
+
+// Create once (avoid per-call instantiation)
+const embedModel = genAI.getGenerativeModel({ model: EMBEDDING_MODEL });
+
 async function embed(text) {
-  const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-  const res = await model.embedContent(text);
+  const res = await embedModel.embedContent(text);
   return res.embedding.values;
 }
 
@@ -69,17 +75,18 @@ async function run() {
 
     const vec = await embed(text);
     await embCol.doc(d.id).set({
-      vector: vec,
-      dim: vec.length,
-      textPreview: text.slice(0, 200),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      meta: {
-        productTypeNorm: p.productTypeNorm || "",
-        domain: p.domain || "",
-        price: p.price ?? null,
-        tags: p.tagsLC || p.tags || [],
-      },
-    }, { merge: true });
+  vector: vec,
+  dim: vec.length,
+  model: EMBEDDING_MODEL, // <-- add this
+  textPreview: text.slice(0, 200),
+  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  meta: {
+    productTypeNorm: p.productTypeNorm || "",
+    domain: p.domain || "",
+    price: p.price ?? null,
+    tags: p.tagsLC || p.tags || [],
+  },
+}, { merge: true });
 
     done++;
     if (done % 50 === 0) console.log(`…embedded ${done}/${snap.size}`);

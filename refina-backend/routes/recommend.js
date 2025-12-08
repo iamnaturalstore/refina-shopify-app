@@ -76,6 +76,10 @@ function pickPrimaryImage(p, storeId) {
 }
 
 // ─── Embeddings via REST (vectors) ───────────────────────────────────────────
+const EMBEDDING_MODEL =
+  process.env.EMBEDDING_MODEL ||
+  "gemini-embedding-001";
+
 async function embedText(text) {
   const apiKey =
     process.env.GEMINI_API_KEY ||
@@ -85,21 +89,27 @@ async function embedText(text) {
     console.warn("[Embeddings] API Key missing; returning empty vector.");
     return [];
   }
-  const url = `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${encodeURIComponent(apiKey)}`;
+
+  const modelName = String(EMBEDDING_MODEL).replace(/^models\//, "");
+  const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(modelName)}:embedContent?key=${encodeURIComponent(apiKey)}`;
+
   const body = {
-    model: "models/text-embedding-004",
     content: { parts: [{ text: String(text || "") }] },
   };
+
   try {
     const resp = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+
     if (!resp.ok) {
       const txt = await resp.text().catch(() => "");
       console.error("[Embeddings] HTTP", resp.status, txt.slice(0, 300));
       return [];
     }
+
     const data = await resp.json();
     const vals = Array.isArray(data?.embedding?.values) ? data.embedding.values : [];
     return vals.map(Number).filter(n => Number.isFinite(n));
@@ -543,7 +553,7 @@ const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
     filtered.sort((a, b) => b.finalScore - a.finalScore);
     timings.scoreMs = Date.now() - tScoreStart;
 
-    const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 40));
+    const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 16));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
 
