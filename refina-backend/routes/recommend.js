@@ -127,7 +127,10 @@ async function loadEmbeddings(storeId, cacheEpoch) {
   // Read only the vector field to avoid pulling large entities/evidence payloads.
   const col = db.collection("productEmbeddings").doc(storeId).collection("items");
   const snap = await col.select("vector").get(); // field mask trims payload drastically
-  const allEmb = snap.docs.map(d => ({ id: d.id, vector: d.get("vector") || [] }));
+  const allEmb = snap.docs.map(d => ({
+  id: d.id,
+  vector: Float32Array.from(d.get("vector") || []),
+}));
 
   setEmbeddingsCache(storeId, cacheEpoch, allEmb);
   return allEmb;
