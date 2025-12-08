@@ -91,7 +91,7 @@ async function embedText(text) {
   }
 
   const modelName = String(EMBEDDING_MODEL).replace(/^models\//, "");
-  const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(modelName)}:embedContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:embedContent?key=${encodeURIComponent(apiKey)}`;
 
   const body = {
     content: { parts: [{ text: String(text || "") }] },
