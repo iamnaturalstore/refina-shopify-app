@@ -210,7 +210,6 @@ RESPONSE JSON SCHEMA (STRICT):
     "id": "<productId-from-candidates>",
     "score": 0.0,
     "reasons": ["short, specific reason 1", "reason 2"],
-    "howToUse": ["short step 1", "short step 2"],
     "tagsMatched": ["match1", "match2"]
   },
   "alternatives": [
@@ -223,15 +222,14 @@ RESPONSE JSON SCHEMA (STRICT):
   "explanation": {
     "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
     "friendlyParagraph": "3–4 sentences in our concierge voice explaining *why this fits you*.",
-    "expertBullets": ["Ingredient rationale 1", "Rationale 2"],
-    "usageTips": ["AM/PM tip", "Layering tip"]
+    "expertBullets": ["Ingredient rationale 1", "Rationale 2"]
   },
 
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
   "copy": {
     "why": "Use explanation.friendlyParagraph or oneLiner.",
     "rationale": "Join expertBullets into a compact rationale.",
-    "extras": "Join usageTips or provide sensible usage guidance."
+    "extras": "Optional short usage guidance if truly helpful."
   }
 }
 `.trim();
