@@ -379,14 +379,15 @@ router.post("/recommend", async (req, res) => {
     const strictness = settings?.aiControls?.promptStrictness || "balanced";
     const cacheEpoch = settings?.cacheEpoch || null;
 
-    // Deterministic catalogue fallback (plan-off / limited / guard error)
+        // Deterministic catalogue fallback (plan-off / limited / guard error)
     async function deterministicFallback(guard) {
-    const concernNormLocal = normConcern(concern);
+      const concernNormLocal = normConcern(concern);
 
-    const [qVec, allEmb] = await Promise.all([
-      embedText(concern),
-      loadEmbeddings(storeId, cacheEpoch),
-    ]);
+      const [qVec, allEmb] = await Promise.all([
+        embedText(concern),
+        loadEmbeddings(storeId, cacheEpoch),
+      ]);
+
       if (!allEmb.length || !qVec.length) {
         return res.json({
           productIds: [],
@@ -400,11 +401,10 @@ router.post("/recommend", async (req, res) => {
         });
       }
 
-      // Precompute once per request
       const qNorm = normFromSq(normSq(qVec));
 
       // Top-30 by cosine (optimized: precomputed query norm)
-      const scored = allEmb
+      const scoredEmb = allEmb
         .map((e) => ({
           id: e.id,
           sim: cosineWithQueryNorm(qVec, qNorm, e.vector || []),
@@ -412,15 +412,10 @@ router.post("/recommend", async (req, res) => {
         .sort((a, b) => b.sim - a.sim)
         .slice(0, 30);
 
-      const scored = allEmb
-        .map(e => ({ id: e.id, sim: cosineWithQueryNorm(qVec, qNorm, e.vector || []) }))
-        .sort((a, b) => b.sim - a.sim)
-        .slice(0, 30);
-
-      const topIds = scored.map(s => s.id);
+      const topIds = scoredEmb.map((s) => s.id);
 
       const topDocs = await loadProductsForScoring(storeId, topIds);
-      const byId = new Map(scored.map(s => [String(s.id), s.sim]));
+      const byId = new Map(scoredEmb.map((s) => [String(s.id), s.sim]));
       const constraints = detectConstraints(concernNormLocal);
 
       const filtered = [];
@@ -429,39 +424,54 @@ router.post("/recommend", async (req, res) => {
           (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
           (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
           [];
+
         if (constraints.flags?.avoidEO && hasEO(ingNorm)) continue;
+
         const sim = byId.get(String(p.id)) || 0;
         const rs = ruleScore(p, constraints, concernNormLocal);
         if (rs === -Infinity) continue;
+
         const finalScore = 0.7 * sim + 0.3 * rs;
         filtered.push({ p, sim, rs, finalScore });
       }
+
       filtered.sort((a, b) => b.finalScore - a.finalScore);
 
       const capN = Math.min(guard?.trim?.maxProducts || 12, 12);
-      const finalists = filtered.slice(0, capN).map(x => x.p);
-      const outIds = finalists.slice(0, 6).map(p => String(p.id));
+      const finalists = filtered.slice(0, capN).map((x) => x.p);
+      const outIds = finalists.slice(0, 6).map((p) => String(p.id));
       const enriched = await loadProductsByIds(storeId, outIds);
 
       const products = enriched.map((p) => {
         const title = p.title || p.name || "";
         const price = p.price != null ? p.price : undefined;
-        const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+        const price_formatted =
+          p.price_formatted || p.priceFormatted || undefined;
+
         let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
         if (!urlCandidate && p.path) urlCandidate = p.path;
+
         const url = ensureAbsolute(urlCandidate, storeId);
         const image = pickPrimaryImage(p, storeId);
         const description = p.description || p.body_html || "";
+
         return {
-          id: p.id, title, price, ...(price_formatted ? { price_formatted } : {}),
-          image, image_url: image, url, description,
+          id: p.id,
+          title,
+          price,
+          ...(price_formatted ? { price_formatted } : {}),
+          image,
+          image_url: image,
+          url,
+          description,
         };
       });
 
       return res.json({
         productIds: outIds,
         products,
-        explanation: guard?.message || "Here are strong matches from your catalogue.",
+        explanation:
+          guard?.message || "Here are strong matches from your catalogue.",
         followUps: [],
         awesome: null,
         source: guard?.state === "off" ? "ai-off" : "limit-exceeded",
@@ -510,19 +520,19 @@ router.post("/recommend", async (req, res) => {
     }
 
     // Embedding retrieval (measure concern embedding vs catalogue embeddings separately)
-const tEmbedStart = Date.now();
-const qVecPromise = embedText(concern).then((v) => {
-  timings.embedMs = Date.now() - tEmbedStart;
-  return v;
-});
+    const tEmbedStart = Date.now();
+    const qVecPromise = embedText(concern).then((v) => {
+      timings.embedMs = Date.now() - tEmbedStart;
+      return v;
+    });
 
-const tEmbLoadStart = Date.now();
-const allEmbPromise = loadEmbeddings(storeId, cacheEpoch).then((v) => {
-  timings.embLoadMs = Date.now() - tEmbLoadStart;
-  return v;
-});
+    const tEmbLoadStart = Date.now();
+    const allEmbPromise = loadEmbeddings(storeId, cacheEpoch).then((v) => {
+      timings.embLoadMs = Date.now() - tEmbLoadStart;
+      return v;
+    });
 
-const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
+    const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
 
     if (!allEmb.length || !qVec.length) {
       const tookMs = Date.now() - started;
