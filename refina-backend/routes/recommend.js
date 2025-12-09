@@ -556,7 +556,7 @@ const [qVec, allEmb] = await Promise.all([qVecPromise, allEmbPromise]);
     filtered.sort((a, b) => b.finalScore - a.finalScore);
     timings.scoreMs = Date.now() - tScoreStart;
 
-    const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 16));
+    const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 12));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
 
