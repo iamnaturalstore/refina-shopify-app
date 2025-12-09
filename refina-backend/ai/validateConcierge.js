@@ -48,19 +48,25 @@ export function validateConciergeResponse(raw) {
     .slice(0, 4);
 
   // ── Explanation (object form) ──────────────────────────────────────────────
-  const explanation = {
-    oneLiner:          shortStr(obj?.explanation?.oneLiner || "", 220),
-    friendlyParagraph: shortStr(obj?.explanation?.friendlyParagraph || "", 800),
-    expertBullets:     arr(obj?.explanation?.expertBullets).map(x => shortStr(x, 200)).slice(0, 8),
-    usageTips:         arr(obj?.explanation?.usageTips).map(x => shortStr(x, 160)).slice(0, 8),
-  };
+const explanation = {
+  oneLiner:          shortStr(obj?.explanation?.oneLiner || "", 220),
+  friendlyParagraph: shortStr(obj?.explanation?.friendlyParagraph || "", 800),
+  expertBullets:     arr(obj?.explanation?.expertBullets).map(x => shortStr(x, 200)).slice(0, 8),
+};
 
-  // ── Copy (back-compat mirrors) ─────────────────────────────────────────────
-  const copy = {
-    why:       shortStr(obj?.copy?.why || explanation.oneLiner || explanation.friendlyParagraph || "", 800),
-    rationale: shortStr(obj?.copy?.rationale || arr(explanation.expertBullets).join(" • "), 800),
-    extras:    shortStr(obj?.copy?.extras || arr(explanation.usageTips).join(" • "), 600),
-  };
+// ── Copy (back-compat mirrors) ─────────────────────────────────────────────
+const copy = {
+  why:       shortStr(obj?.copy?.why || explanation.oneLiner || explanation.friendlyParagraph || "", 800),
+  rationale: shortStr(obj?.copy?.rationale || arr(explanation.expertBullets).join(" • "), 800),
+  extras: shortStr(
+  obj?.copy?.extras ||
+  arr(explanation.expertBullets).join(" • ") ||
+  explanation.friendlyParagraph ||
+  explanation.oneLiner ||
+  "",
+  600
+),
+};
 
   // ── Build productIds robustly ──────────────────────────────────────────────
   const modelIds = arr(obj?.productIds).map(s).filter(Boolean);
