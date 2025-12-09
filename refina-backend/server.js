@@ -773,20 +773,36 @@ function coerceToContract(obj = {}) {
     howToUse: Array.isArray(primary.howToUse) ? primary.howToUse.slice(0, 6).map(String) : [],
     tagsMatched: Array.isArray(primary.tagsMatched) ? primary.tagsMatched.slice(0, 8).map(String) : [],
   };
-  const safeAlts = alts
-    .slice(0, 2)
-    .map((a) => ({ id: String(a.id || '').trim(), when: String(a.when || '').trim(), reasons: Array.isArray(a.reasons) ? a.reasons.slice(0, 3).map(String) : [] }))
-    .filter((a) => a.id);
-  const safeExpl = {
-    oneLiner: String(explanation.oneLiner || '').trim(),
-    friendlyParagraph: String(explanation.friendlyParagraph || '').trim(),
-    expertBullets: Array.isArray(explanation.expertBullets) ? explanation.expertBullets.slice(0, 6).map(String) : [],
-    usageTips: Array.isArray(explanation.usageTips) ? explanation.usageTips.slice(0, 6).map(String) : [],
-  };
-  const productIds = [safePrimary.id, ...safeAlts.map((a) => a.id)].filter(Boolean);
-  const explanationFlat = safeExpl.friendlyParagraph || safeExpl.oneLiner || '';
-  return { primary: safePrimary, alternatives: safeAlts, explanation: safeExpl, productIds, explanationFlat };
-}
+  
+ const safeAlts = alts
+  .slice(0, 2)
+  .map((a) => ({
+    id: String(a.id || "").trim(),
+    when: String(a.when || "").trim(),
+    reasons: Array.isArray(a.reasons)
+      ? a.reasons.slice(0, 3).map(String)
+      : [],
+  }))
+  .filter((a) => a.id);
+
+const safeExpl = {
+  oneLiner: String(explanation.oneLiner || "").trim(),
+  friendlyParagraph: String(explanation.friendlyParagraph || "").trim(),
+  expertBullets: Array.isArray(explanation.expertBullets)
+    ? explanation.expertBullets.slice(0, 6).map(String)
+    : [],
+};
+
+const productIds = [safePrimary.id, ...safeAlts.map((a) => a.id)].filter(Boolean);
+const explanationFlat = safeExpl.friendlyParagraph || safeExpl.oneLiner || "";
+
+return {
+  primary: safePrimary,
+  alternatives: safeAlts,
+  explanation: safeExpl,
+  productIds,
+  explanationFlat,
+};
 
 app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async (req, res) => {
   const t0 = Date.now();

@@ -66,49 +66,47 @@ function bad(msg) { return { ok: false, errors: [msg] }; }
 // Matches buildGeminiPrompt contract used in the recommender.
 // ─────────────────────────────────────────────────────────────
 export const ConciergeResponseSchema = {
-type: "OBJECT",
-properties: {
-primary: {
-type: "OBJECT",
-properties: {
-id: { type: "STRING" },
-score: { type: "NUMBER" },
-reasons: { type: "ARRAY", items: { type: "STRING" } },
-howToUse: { type: "ARRAY", items: { type: "STRING" } },
-tagsMatched: { type: "ARRAY", items: { type: "STRING" } },
-},
-required: ["id"],
-},
-alternatives: {
-type: "ARRAY",
-items: {
-type: "OBJECT",
-properties: {
-id: { type: "STRING" },
-when: { type: "STRING" },
-reasons: { type: "ARRAY", items: { type: "STRING" } },
-},
-required: ["id"],
-},
-},
-explanation: {
-type: "OBJECT",
-properties: {
-oneLiner: { type: "STRING" },
-friendlyParagraph: { type: "STRING" },
-expertBullets: { type: "ARRAY", items: { type: "STRING" } },
-usageTips: { type: "ARRAY", items: { type: "STRING" } },
-},
-},
-productIds: { type: "ARRAY", items: { type: "STRING" } },
-copy: {
-type: "OBJECT",
-properties: {
-why: { type: "STRING" },
-rationale: { type: "STRING" },
-extras: { type: "STRING" },
-},
-},
-},
-required: ["primary", "productIds"],
+  type: "OBJECT",
+  properties: {
+    primary: {
+      type: "OBJECT",
+      properties: {
+        id: { type: "STRING" },
+        score: { type: "NUMBER" },
+        reasons: { type: "ARRAY", items: { type: "STRING" } },
+        tagsMatched: { type: "ARRAY", items: { type: "STRING" } },
+      },
+      required: ["id"],
+    },
+    alternatives: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          id: { type: "STRING" },
+          when: { type: "STRING" },
+          reasons: { type: "ARRAY", items: { type: "STRING" } },
+        },
+        required: ["id"],
+      },
+    },
+    explanation: {
+      type: "OBJECT",
+      properties: {
+        oneLiner: { type: "STRING" },
+        friendlyParagraph: { type: "STRING" },
+        expertBullets: { type: "ARRAY", items: { type: "STRING" } },
+      },
+    },
+    productIds: { type: "ARRAY", items: { type: "STRING" } },
+    copy: {
+      type: "OBJECT",
+      properties: {
+        why: { type: "STRING" },
+        rationale: { type: "STRING" },
+        extras: { type: "STRING" },
+      },
+    },
+  },
+  required: ["primary", "productIds"],
 };

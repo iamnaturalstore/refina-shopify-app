@@ -121,18 +121,17 @@ function buildCopyFromAwesome(awesome, fallbackExplanation = "") {
       extras: "",
     };
   }
+
   const oneLiner = awesome.explanation?.oneLiner || "";
   const friendly = awesome.explanation?.friendlyParagraph || "";
+
   const expertBullets = Array.isArray(awesome.explanation?.expertBullets)
     ? awesome.explanation.expertBullets.join(" ")
-    : "";
-  const usageTips = Array.isArray(awesome.explanation?.usageTips)
-    ? awesome.explanation.usageTips.join(" ")
     : "";
 
   const why = friendly || oneLiner || "";
   const rationale = awesome.copy?.rationale || expertBullets || "";
-  const extras = awesome.copy?.extras || usageTips || "";
+  const extras = awesome.copy?.extras || "";
 
   return { why, rationale, extras };
 }
