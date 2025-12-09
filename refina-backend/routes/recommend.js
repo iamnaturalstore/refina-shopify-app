@@ -35,6 +35,22 @@ function norm(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i
 function cosine(a, b) { const na = norm(a), nb = norm(b); if (!na || !nb) return 0; return dot(a, b) / (na * nb); }
 function pick(obj, keys) { const o = {}; for (const k of keys) o[k] = obj[k]; return o; }
 
+// NEW helpers for faster scoring with precomputed query norm
+function normSq(a) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * a[i];
+  return s;
+}
+function normFromSq(sq) {
+  return Math.sqrt(sq || 0);
+}
+function cosineWithQueryNorm(qVec, qNorm, docVec) {
+  const nb = norm(docVec);
+  if (!qNorm || !nb) return 0;
+  return dot(qVec, docVec) / (qNorm * nb);
+}
+
+
 // ─── In-memory cache for product embeddings ─────────────────────────────────
 // Keyed by storeId + cacheEpoch so bumping cacheEpoch in storeSettings blows it away.
 const EMBEDDINGS_CACHE = new Map();
@@ -364,13 +380,13 @@ router.post("/recommend", async (req, res) => {
     const cacheEpoch = settings?.cacheEpoch || null;
 
     // Deterministic catalogue fallback (plan-off / limited / guard error)
-async function deterministicFallback(guard) {
-  const concernNormLocal = normConcern(concern);
+    async function deterministicFallback(guard) {
+    const concernNormLocal = normConcern(concern);
 
-  const [qVec, allEmb] = await Promise.all([
-    embedText(concern),
-    loadEmbeddings(storeId, cacheEpoch),
-  ]);
+    const [qVec, allEmb] = await Promise.all([
+      embedText(concern),
+      loadEmbeddings(storeId, cacheEpoch),
+    ]);
       if (!allEmb.length || !qVec.length) {
         return res.json({
           productIds: [],
@@ -384,11 +400,25 @@ async function deterministicFallback(guard) {
         });
       }
 
+      // Precompute once per request
+      const qNorm = normFromSq(normSq(qVec));
+
+      // Top-30 by cosine (optimized: precomputed query norm)
       const scored = allEmb
-        .map(e => ({ id: e.id, sim: cosine(qVec, (e.vector || [])) }))
+        .map((e) => ({
+          id: e.id,
+          sim: cosineWithQueryNorm(qVec, qNorm, e.vector || []),
+        }))
         .sort((a, b) => b.sim - a.sim)
         .slice(0, 30);
+
+      const scored = allEmb
+        .map(e => ({ id: e.id, sim: cosineWithQueryNorm(qVec, qNorm, e.vector || []) }))
+        .sort((a, b) => b.sim - a.sim)
+        .slice(0, 30);
+
       const topIds = scored.map(s => s.id);
+
       const topDocs = await loadProductsForScoring(storeId, topIds);
       const byId = new Map(scored.map(s => [String(s.id), s.sim]));
       const constraints = detectConstraints(concernNormLocal);
@@ -926,6 +956,9 @@ const prompt2 = needWiden
 // Uses chunks of 10 to stay within Firestore "in" limits.
 // Skinny scorer fetch: vector-friendly field mask, no "where ... in".
 // Falls back to full-doc fetch if fieldMask isn't supported.
+// Read only the tiny set of fields needed for ruleScore/constraints.
+// Skinny scorer fetch: vector-friendly field mask.
+// Falls back to full-doc fetch if fieldMask isn't supported.
 async function loadProductsForScoring(storeId, ids = []) {
   if (!ids.length) return [];
   const col = db.collection("products").doc(storeId).collection("items");
@@ -953,17 +986,17 @@ async function loadProductsForScoring(storeId, ids = []) {
     "keywords",
   ];
 
-  // Helper to do a masked getAll in chunks (keeps payload tiny)
   const chunk = (arr, n) => {
     const out = [];
     for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
     return out;
   };
 
+  const refs = ids.map((id) => col.doc(String(id)));
   const out = [];
+
   try {
-    // Some SDKs prefer <= 50 per getAll for best latency
-    for (const batch of chunk(ids.map(id => col.doc(String(id))), 50)) {
+    for (const batch of chunk(refs, 50)) {
       // eslint-disable-next-line no-await-in-loop
       const snaps = await db.getAll(...batch, { fieldMask });
       for (const s of snaps) {
@@ -972,9 +1005,8 @@ async function loadProductsForScoring(storeId, ids = []) {
     }
     return out;
   } catch {
-    // Fallback: hydrate winners fully (still chunked, still batched)
     const fallback = [];
-    for (const batch of chunk(ids.map(id => col.doc(String(id))), 50)) {
+    for (const batch of chunk(refs, 50)) {
       // eslint-disable-next-line no-await-in-loop
       const snaps = await db.getAll(...batch);
       for (const s of snaps) {
@@ -984,8 +1016,6 @@ async function loadProductsForScoring(storeId, ids = []) {
     return fallback;
   }
 }
-
-
 
   function clampCachedPayload(payload, guard) {
     try {

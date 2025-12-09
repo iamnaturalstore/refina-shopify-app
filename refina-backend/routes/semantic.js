@@ -1,6 +1,6 @@
 // refina-backend/routes/semantic.js
 // Admin-only AI health probes and semantic helpers.
-// - Embeddings via REST (v1) using text-embedding-004 (no SDK here).
+// - Embeddings via REST (v1) using tgemini-embedding-001 (no SDK here).
 // - Firestore via shared db wrapper (consistent with the rest of backend).
 // - Includes a strict JSON-mode ping endpoint to verify SDK path for generation.
 
@@ -56,7 +56,7 @@ const GEMINI_API_KEY =
   process.env.VITE_GEMINI_API_KEY ||
   "";
 
-const EMBED_MODEL = (process.env.GEMINI_EMBED_MODEL || "text-embedding-004").trim(); // e.g. "text-embedding-004"
+const EMBED_MODEL = (process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001").trim(); // e.g. "gemini-embedding-001"
 const TOP_N = Number(process.env.SEMANTIC_TOPN || 200);
 const TTL_MS = Number(process.env.SEMANTIC_CACHE_TTL_MS || 5 * 60 * 1000);
 
