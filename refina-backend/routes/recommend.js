@@ -35,6 +35,76 @@ function norm(a) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * a[i
 function cosine(a, b) { const na = norm(a), nb = norm(b); if (!na || !nb) return 0; return dot(a, b) / (na * nb); }
 function pick(obj, keys) { const o = {}; for (const k of keys) o[k] = obj[k]; return o; }
 
+// ─────────────────────────────────────────────────────────────
+// Phase 2 — Capsule v1 (in-memory, low-churn)
+// Goal: high-signal, low-token product objects for prompt input.
+// This does NOT change Firestore schema or indexer/enrichment.
+// ─────────────────────────────────────────────────────────────
+
+function arr(x, max = 12) {
+  if (!Array.isArray(x)) return [];
+  return x.map(v => String(v).trim()).filter(Boolean).slice(0, max);
+}
+
+function str(x, max = 240) {
+  const s = String(x ?? "");
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+// Rough EO detection fallback (beauty pack can override later)
+function hasEssentialOilSignal(p = {}) {
+  const tags = arr(p.tags, 80).join(" ").toLowerCase();
+  const ing = arr(p.ingredientsNormalized, 80).join(" ").toLowerCase();
+  const text = `${tags} ${ing} ${String(p.title || "").toLowerCase()}`;
+  return /\b(essential oil|lavender|tea tree|eucalyptus|peppermint|citrus|ros(e)?mary|ylang)\b/.test(text);
+}
+
+/**
+ * buildCapsuleFromProduct(product)
+ * Keeps only what the model needs to rank + explain.
+ * We intentionally do NOT send long HTML descriptions.
+ * descriptionShort stays available for UI usage elsewhere.
+ */
+function buildCapsuleFromProduct(p = {}) {
+  const capsule = {
+    id: String(p.id ?? p.productId ?? ""),
+    title: str(p.title || p.name, 120),
+    productType: str(p.productType, 60),
+
+    // High-signal lists
+    keywords: arr(p.keywords, 12),
+    benefits: arr(p.benefits, 8),
+    ingredients: arr(p.ingredientsNormalized || p.ingredients, 20),
+
+    // Lightweight fit flags (derive from existing fields if present)
+    skinFitTags: arr(p.skinFitTags, 10),
+
+    // Avoidance flags (derive if not already stored)
+    avoidFlags: {
+      essentialOils: Boolean(p.avoidFlags?.essentialOils) || hasEssentialOilSignal(p),
+    },
+
+    // 1-line usage if you have it
+    usage: str(p.usage, 120),
+  };
+
+  // If you rely on tags for fallback heuristics, keep a tiny subset
+  // but cap aggressively to avoid token bloat.
+  if (!capsule.keywords.length && Array.isArray(p.tags)) {
+    capsule.keywords = arr(p.tags, 10).map(t => t.toLowerCase());
+  }
+
+  return capsule;
+}
+
+function capsuleCharCount(capsules = []) {
+  try {
+    return JSON.stringify(capsules).length;
+  } catch {
+    return 0;
+  }
+}
+
 // NEW helpers for faster scoring with precomputed query norm
 function normSq(a) {
   let s = 0;
@@ -611,6 +681,9 @@ if (guard?.state === "off" || guard?.state === "limited") {
     const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 12));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
+    // Phase 2 — Convert finalists to Capsules (in-memory)
+    const capsules = (finalists || []).map(buildCapsuleFromProduct);
+
 
     // Compact shape for prompt
     function compactForPrompt(p) {
@@ -783,20 +856,25 @@ async function buildKBIngredientFacts(storeId, finalistIds) {
   return out.slice(0, 24);
 }
 
-const tFactsStart = Date.now();
-
 // Phase 1.5 throttle: facts only for Top-3 finalists (not the whole list)
+const tFactsStart = Date.now();
 const finalistIdsForFacts = finalists.slice(0, 3).map(p => String(p.id));
 const ingredientFacts = await buildKBIngredientFacts(storeId, finalistIdsForFacts);
-
 timings.factsMs = Date.now() - tFactsStart;
+
+// Phase 2 — Capsules-first prompt build
+const capsulesStage1 = (forStage1 || []).map(buildCapsuleFromProduct);
+const capsulesStage2 = (forStage2 || []).map(buildCapsuleFromProduct);
 
 const prompt1 = buildGeminiPrompt({
   concern,
   normalizedConcern: concernNorm,
   category,
   tone,
-  products: forStage1,
+
+  // IMPORTANT: keep key name `products` to avoid prompt-builder churn
+  products: capsulesStage1,
+
   ingredientFacts,
 });
 
@@ -809,10 +887,19 @@ const prompt2 = needWiden
       normalizedConcern: concernNorm,
       category,
       tone,
-      products: forStage2,
+
+      // Phase 2 — widened capsules
+      products: capsulesStage2,
+
       ingredientFacts,
     })
   : null;
+
+// Capsule debug (Phase 2)
+try {
+  debugCapsuleCount = capsulesStage1.length;
+  debugCapsuleChars = capsuleCharCount(capsulesStage1);
+} catch {}
 
 
     // Single call (gemini.js handles JSON mode/retries)
