@@ -574,6 +574,8 @@ if (cached) {
       cacheHit: true,
       promptChars,
       timings,
+      capsuleCount: capsulesStage1?.length ?? 0,
+      capsuleChars: capsuleCharCount(capsulesStage1),
     },
   });
 }
@@ -975,6 +977,8 @@ try {
           cacheKey: ck,
           cacheEpoch,
           promptChars,
+          capsuleCount: capsulesStage1?.length ?? 0,
+          capsuleChars: capsuleCharCount(capsulesStage1),
         },
       });
     }
@@ -1046,6 +1050,8 @@ try {
         cacheKey: ck,
         cacheEpoch,
         promptChars,
+        capsuleCount: capsulesStage1?.length ?? 0,
+        capsuleChars: capsuleCharCount(capsulesStage1),
       },
     };
 
