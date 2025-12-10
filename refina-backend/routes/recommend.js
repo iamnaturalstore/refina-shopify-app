@@ -577,7 +577,6 @@ if (cached) {
       capsuleCount: 0,
       capsuleChars: 0,
     },
-    },
   });
 }
 
