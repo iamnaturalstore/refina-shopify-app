@@ -357,13 +357,16 @@ router.post("/recommend", async (req, res) => {
   const attempts = [];
 
   // Timing buckets for latency profiling (non-functional)
-  const timings = {
-    embedMs: 0,      // concern → embedding
-    embLoadMs: 0,    // load product embeddings from Firestore
-    docScoreMs: 0,   // load top-30 skinny docs
-    scoreMs: 0,      // ruleScore / constraints / finalists
-    docEnrichMs: 0,  // final loadProductsByIds for display
-  };
+const timings = {
+  embedMs: 0,      // concern → embedding
+  embLoadMs: 0,    // load product embeddings from Firestore
+  docScoreMs: 0,   // load top-30 skinny docs
+  scoreMs: 0,      // ruleScore / constraints / finalists
+  factsMs: 0,      // KB ingredient facts assembly (should shrink in v1.5)
+  docEnrichMs: 0,  // final loadProductsByIds for display
+};
+
+let promptChars = 0;
 
   try {
     const { storeId, concern } = req.body || {};
@@ -480,44 +483,53 @@ router.post("/recommend", async (req, res) => {
       });
     }
 
-    // Billing & Limits Gate (before cache/model)
-    let guard = null;
-    try {
-      guard = await aiGuard({
-        storeId,
-        intent: "recommend",
-        longForm: false,
-        expectedPromptChars: 12000,
-      });
-    } catch (e) {
-      console.error("[recommend] aiGuard error, serving fallback:", e?.message || e);
-      const pseudoGuard = {
-        state: "limited",
-        message: "The assistant is warming up. Here are strong matches from your catalogue.",
-        trim: { maxProducts: 12, charBudget: 28000 },
-      };
-      return await deterministicFallback(pseudoGuard);
-    }
+    // Cache (EARLY) — avoid paying aiGuard on hits
+const concernNorm = normConcern(concern);
+const ck = cacheKey(storeId, concernNorm);
+const cached = await readCache(storeId, ck, cacheEpoch);
+if (cached) {
+  // No guard yet — keep cached payload intact and fast.
+  let shaped = clampCachedPayload(cached, null);
+  shaped = transformToBasicIfNeeded(shaped, null);
 
-    if (guard?.state === "off" || guard?.state === "limited") {
-      return await deterministicFallback(guard);
-    }
+  return res.json({
+    ...shaped,
+    source: "cache",
+    cacheHit: true,
+    limitMessage: null,
+    tookMs: Date.now() - started,
+    __debug: {
+      cacheKey: ck,
+      cacheEpoch,
+      cacheHit: true,
+      promptChars,
+      timings,
+    },
+  });
+}
 
-    // Cache
-    const concernNorm = normConcern(concern);
-    const ck = cacheKey(storeId, concernNorm);
-    const cached = await readCache(storeId, ck, cacheEpoch);
-    if (cached) {
-      let shaped = clampCachedPayload(cached, guard);
-      shaped = transformToBasicIfNeeded(shaped, guard);
-      return res.json({
-        ...shaped,
-        source: "cache",
-        cacheHit: true,
-        limitMessage: guard?.message || null,
-        tookMs: Date.now() - started,
-      });
-    }
+// Billing & Limits Gate
+let guard = null;
+try {
+  guard = await aiGuard({
+    storeId,
+    intent: "recommend",
+    longForm: false,
+    expectedPromptChars: 12000,
+  });
+} catch (e) {
+  console.error("[recommend] aiGuard error, serving fallback:", e?.message || e);
+  const pseudoGuard = {
+    state: "limited",
+    message: "The assistant is warming up. Here are strong matches from your catalogue.",
+    trim: { maxProducts: 12, charBudget: 28000 },
+  };
+  return await deterministicFallback(pseudoGuard);
+}
+
+if (guard?.state === "off" || guard?.state === "limited") {
+  return await deterministicFallback(guard);
+}
 
     // Embedding retrieval (measure concern embedding vs catalogue embeddings separately)
     const tEmbedStart = Date.now();
@@ -771,8 +783,13 @@ async function buildKBIngredientFacts(storeId, finalistIds) {
   return out.slice(0, 24);
 }
 
-const finalistIdsForFacts = finalists.map(p => String(p.id));
+const tFactsStart = Date.now();
+
+// Phase 1.5 throttle: facts only for Top-3 finalists (not the whole list)
+const finalistIdsForFacts = finalists.slice(0, 3).map(p => String(p.id));
 const ingredientFacts = await buildKBIngredientFacts(storeId, finalistIdsForFacts);
+
+timings.factsMs = Date.now() - tFactsStart;
 
 const prompt1 = buildGeminiPrompt({
   concern,
@@ -783,8 +800,18 @@ const prompt1 = buildGeminiPrompt({
   ingredientFacts,
 });
 
+// Track prompt size for debug
+try { promptChars = String(prompt1 || "").length; } catch {}
+
 const prompt2 = needWiden
-  ? buildGeminiPrompt({ concern, normalizedConcern: concernNorm, category, tone, products: forStage2, ingredientFacts })
+  ? buildGeminiPrompt({
+      concern,
+      normalizedConcern: concernNorm,
+      category,
+      tone,
+      products: forStage2,
+      ingredientFacts,
+    })
   : null;
 
 
@@ -858,6 +885,9 @@ const prompt2 = needWiden
           rawHead,
           attempts,
           timings,
+          cacheKey: ck,
+          cacheEpoch,
+          promptChars,
         },
       });
     }
@@ -926,6 +956,9 @@ const prompt2 = needWiden
         rawHead,
         attempts,
         timings,
+        cacheKey: ck,
+        cacheEpoch,
+        promptChars,
       },
     };
 
