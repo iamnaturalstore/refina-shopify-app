@@ -572,10 +572,11 @@ if (cached) {
       cacheKey: ck,
       cacheEpoch,
       cacheHit: true,
-      promptChars,
+      promptChars: 0,
       timings,
-      capsuleCount: capsulesStage1?.length ?? 0,
-      capsuleChars: capsuleCharCount(capsulesStage1),
+      capsuleCount: 0,
+      capsuleChars: 0,
+    },
     },
   });
 }
