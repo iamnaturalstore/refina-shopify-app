@@ -354,12 +354,39 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     amount: typeof amount === "number" ? amount : Number(amount),
     currency,
     trialDays: Number(
-    process.env.BILLING_TRIAL_DAYS ||
-    (/[?&]shop=(?:refina-app-demo\.myshopify\.com|jqr0b0-je\.myshopify\.com)/i.test(String(returnUrl))
-      ? (process.env.DEMO_TRIAL_DAYS || 365)
-      : 14
-    )
-  ),
+  // 1) Demo stores → 365 days
+  (process.env.DEMO_TRIAL_SHOPS &&
+    new RegExp(
+      `(?:[?&]shop=)(?:${String(process.env.DEMO_TRIAL_SHOPS)
+        .split(",")
+        .map(s => s.trim().toLowerCase().replace(/\./g, "\\."))
+        .filter(Boolean)
+        .join("|")})`,
+      "i"
+    ).test(String(returnUrl))
+  )
+    ? (process.env.DEMO_TRIAL_DAYS || 365)
+    : (
+        // 2) Friendly pilot stores → 90 days
+        (process.env.FRIENDLY_TRIAL_SHOPS &&
+          new RegExp(
+            `(?:[?&]shop=)(?:${String(process.env.FRIENDLY_TRIAL_SHOPS)
+              .split(",")
+              .map(s => s.trim().toLowerCase().replace(/\./g, "\\."))
+              .filter(Boolean)
+              .join("|")})`,
+            "i"
+          ).test(String(returnUrl))
+        )
+          ? (process.env.FRIENDLY_TRIAL_DAYS || 90)
+          : (
+              // 3) Everyone else → default trial
+              process.env.SHOPIFY_BILLING_TRIAL_DAYS ||
+              process.env.BILLING_TRIAL_DAYS ||
+              14
+            )
+      )
+),
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
 
@@ -369,6 +396,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
       amount: variables.amount,
       currency: variables.currency,
       returnUrl: variables.returnUrl,
+      shop: (() => { try { return new URL(String(variables.returnUrl)).searchParams.get("shop"); } catch { return null; } })(),
       test: variables.test,
       trialDays: variables.trialDays,
       replacementBehavior: variables.replacementBehavior,
