@@ -193,6 +193,11 @@ Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes" : "no"}${factsBlock}
 
 OUTPUT REQUIREMENTS:
+- Do NOT repeat the same idea twice. No duplicated sentences or paragraphs.
+- Keep each section distinct:
+  - explanation.friendlyParagraph = warm summary + why the 3 fit (no copy/paste restating).
+  - explanation.expertBullets = short evidence chips (fragments), NOT full sentences from friendlyParagraph.
+  - primary.reasons / alternatives.reasons = product-specific proof only.
 - Return STRICT JSON only (no markdown, no backticks, no commentary).
 - Choose EXACTLY 3 product IDs from candidates: primary + 2 alternatives.
 - Ensure productIds is ordered: [primary, alt1, alt2].
@@ -217,9 +222,9 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   },
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
   "copy": {
-    "why": "Use explanation.friendlyParagraph or oneLiner.",
-    "rationale": "Join expertBullets into a compact rationale.",
-    "extras": "Optional short usage guidance if truly helpful."
+    "why": "",
+    "rationale": "",
+    "extras": ""
   }
 }
 `.trim();

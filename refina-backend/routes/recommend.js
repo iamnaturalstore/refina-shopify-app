@@ -1026,20 +1026,49 @@ try {
 
         const tookMs = Date.now() - started;
 
+        // Canonical explanation text (prevents duplicated paragraphs in UI when multiple fields overlap)
+function dedupeConsecutiveParagraphs(s) {
+  const parts = String(s || "")
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const out = [];
+  for (const p of parts) {
+    if (!out.length || out[out.length - 1] !== p) out.push(p);
+  }
+  return out.join("\n\n");
+}
+
+const friendlyParagraph = dedupeConsecutiveParagraphs(
+  vr.value?.explanation?.friendlyParagraph || ""
+).trim();
+
+const oneLiner = String(vr.value?.explanation?.oneLiner || "").trim();
+
+const explanationText = (
+  friendlyParagraph ||
+  oneLiner ||
+  "Here are the strongest matches for your concern."
+).trim();
+
+// Hard-disable copy fields to avoid UI double-rendering overlapping text blocks
+const safeCopy = { why: "", rationale: "", extras: "" };
+
+
     const payload = {
       productIds: outIds,
       products,
-      explanation:
-        (vr.value?.explanation?.oneLiner || vr.value?.copy?.why || "Here are the strongest matches for your concern.").trim(),
+      explanation: explanationText,
       followUps: [],
       awesome: {
         primary: vr.value.primary,
         alternatives: vr.value.alternatives,
         explanation: vr.value.explanation,
-        copy: vr.value.copy,
+        copy: safeCopy,
         productIds: outIds,
       },
-      copy: vr.value.copy || { why: "", rationale: "", extras: "" },
+      copy: safeCopy,
       reasonsById,
       tookMs,
       source: "gemini",
