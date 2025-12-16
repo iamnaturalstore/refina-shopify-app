@@ -210,6 +210,7 @@ OUTPUT REQUIREMENTS:
 - Choose EXACTLY 3 product IDs from candidates: primary + 2 alternatives.
 - Ensure productIds is ordered: [primary, alt1, alt2].
 - Keep reasons short, concrete, and grounded in candidate fields.
+- copy.why is REQUIRED and must be the canonical long-form narrative used by the UI.
 
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
@@ -227,12 +228,15 @@ RESPONSE JSON SHAPE (STRICT KEYS):
     { "id": "<altId-2>", "when": "sensitive | budget | premium | lighter texture | family-size | colour/material match", "reasons": ["short, concrete reason"] }
   ],
   "explanation": {
-    "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
-    "friendlyParagraph": "Exactly 2 paragraphs separated by a blank line. Paragraph 1: overview of why these 3 were chosen (problem→solution framing, grounded). Paragraph 2: explicitly state why the Top Pick is #1 (grounded reasons), then position each alternative in 1 sentence; include a brief how-to tip as a short clause (not a whole extra paragraph).",
+    "oneLiner": "<ONE sentence only. Optional. If unsure, return empty string.>",
     "expertBullets": ["Short evidence chip 1", "Evidence chip 2", "Optional: How-to tip chip"]
   },
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
-  "copy": { "why": "", "rationale": "", "extras": "" }
+  "copy": {
+    "why": "<REQUIRED. Exactly 2 paragraphs separated by ONE blank line. Paragraph 1: warm overview of how you approached the concern and why these 3 were chosen (problem→solution framing, grounded in candidate fields). Paragraph 2: why the Top Pick is #1 (grounded), then position alt1 in 1 sentence and alt2 in 1 sentence; include a brief how-to tip as a short clause (not a third paragraph).>",
+    "rationale": "<Optional. If provided, keep it short (1–2 sentences) and do not repeat copy.why. Otherwise empty string.>",
+    "extras": "<Optional. Only if truly helpful. Otherwise empty string.>"
+  }
 }
 `.trim();
 }
