@@ -114,8 +114,8 @@ function normSq(a) {
 function normFromSq(sq) {
   return Math.sqrt(sq || 0);
 }
-function cosineWithQueryNorm(qVec, qNorm, docVec) {
-  const nb = norm(docVec);
+function cosineWithQueryNorm(qVec, qNorm, docVec, docNorm) {
+  const nb = Number.isFinite(docNorm) ? docNorm : norm(docVec);
   if (!qNorm || !nb) return 0;
   return dot(qVec, docVec) / (qNorm * nb);
 }
@@ -125,15 +125,19 @@ function cosineWithQueryNorm(qVec, qNorm, docVec) {
 // Keyed by storeId + cacheEpoch so bumping cacheEpoch in storeSettings blows it away.
 const EMBEDDINGS_CACHE = new Map();
 
+// Single-flight: coalesce concurrent loads per store+epoch
+const EMBEDDINGS_INFLIGHT = new Map();
+
 function getEmbeddingsCache(storeId, cacheEpoch) {
   const key = `${storeId || ""}::${cacheEpoch || "none"}`;
   const hit = EMBEDDINGS_CACHE.get(key);
   if (hit && Array.isArray(hit) && hit.length) return hit;
 
-  // If epoch changed, clear old entries for this store (defensive, avoids leaks).
+   // If epoch changed, clear old entries for this store (defensive, avoids leaks).
   for (const k of EMBEDDINGS_CACHE.keys()) {
     if (k.startsWith(`${storeId || ""}::`) && k !== key) {
       EMBEDDINGS_CACHE.delete(k);
+      EMBEDDINGS_INFLIGHT.delete(k);
     }
   }
   return null;
@@ -210,18 +214,40 @@ async function loadEmbeddings(storeId, cacheEpoch) {
   const cached = getEmbeddingsCache(storeId, cacheEpoch);
   if (cached) return cached;
 
-  // Read only the vector field to avoid pulling large entities/evidence payloads.
-  const col = db.collection("productEmbeddings").doc(storeId).collection("items");
-  const snap = await col.select("vector").get(); // field mask trims payload drastically
-  const allEmb = snap.docs.map(d => ({
-  id: d.id,
-  vector: Float32Array.from(d.get("vector") || []),
-}));
+  const key = `${storeId || ""}::${cacheEpoch || "none"}`;
 
-  setEmbeddingsCache(storeId, cacheEpoch, allEmb);
-  return allEmb;
+  // Single-flight: if a load is already in progress for this store+epoch, await it
+  const inflight = EMBEDDINGS_INFLIGHT.get(key);
+  if (inflight) return await inflight;
+
+  const p = (async () => {
+    // Read only the vector field to avoid pulling large entities/evidence payloads.
+    const col = db
+      .collection("productEmbeddings")
+      .doc(storeId)
+      .collection("items");
+
+    const snap = await col.select("vector").get(); // field mask trims payload drastically
+
+    const allEmb = snap.docs.map((d) => {
+  const vec = Float32Array.from(d.get("vector") || []);
+  const docNorm = normFromSq(normSq(vec));
+  return { id: d.id, vector: vec, docNorm };
+});
+
+    setEmbeddingsCache(storeId, cacheEpoch, allEmb);
+    return allEmb;
+  })();
+
+  EMBEDDINGS_INFLIGHT.set(key, p);
+
+  try {
+    return await p;
+  } finally {
+    // Always clear in-flight entry (success or failure) so we don’t poison the cache
+    EMBEDDINGS_INFLIGHT.delete(key);
+  }
 }
-
 
 async function loadProductsByIds(storeId, ids) {
   // Batch read via getAll to avoid 1-by-1 round trips.
@@ -519,16 +545,42 @@ let promptChars = 0;
 
       const qNorm = normFromSq(normSq(qVec));
 
-      // Top-30 by cosine (optimized: precomputed query norm)
-      const scoredEmb = allEmb
-        .map((e) => ({
-          id: e.id,
-          sim: cosineWithQueryNorm(qVec, qNorm, e.vector || []),
-        }))
-        .sort((a, b) => b.sim - a.sim)
-        .slice(0, 30);
+      // Top-30 by cosine (Top-K; avoids sorting the whole embedding list)
+const K = 30;
+const scoredEmb = [];
+let minIdx = -1;
+let minSim = Infinity;
 
-      const topIds = scoredEmb.map((s) => s.id);
+for (const e of allEmb) {
+  const sim = cosineWithQueryNorm(qVec, qNorm, e.vector || [], e.docNorm);
+  if (scoredEmb.length < K) {
+    scoredEmb.push({ id: e.id, sim });
+    if (sim < minSim) {
+      minSim = sim;
+      minIdx = scoredEmb.length - 1;
+    }
+    continue;
+  }
+
+  if (sim <= minSim) continue;
+
+  scoredEmb[minIdx] = { id: e.id, sim };
+
+  // Recompute current minimum (K is tiny; this is cheap and stable)
+  minSim = Infinity;
+  minIdx = -1;
+  for (let i = 0; i < scoredEmb.length; i++) {
+    const s = scoredEmb[i].sim;
+    if (s < minSim) {
+      minSim = s;
+      minIdx = i;
+    }
+  }
+}
+
+// Sort only the Top-K
+scoredEmb.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)));
+
 
       const topDocs = await loadProductsForScoring(storeId, topIds);
       const byId = new Map(scoredEmb.map((s) => [String(s.id), s.sim]));
@@ -686,11 +738,43 @@ if (guard?.state === "off" || guard?.state === "limited") {
       });
     }
 
-    // Top-60 by cosine - changed to 30
-    const scored = allEmb
-      .map(e => ({ id: e.id, sim: cosine(qVec, e.vector || []) }))
-      .sort((a, b) => b.sim - a.sim)
-      .slice(0, 30);
+    // Top-60 by cosine - changed to 30 (Top-K; avoids sorting the whole embedding list)
+const K = 30;
+const qNorm = normFromSq(normSq(qVec));
+const scored = [];
+let minIdx = -1;
+let minSim = Infinity;
+
+for (const e of allEmb) {
+  const sim = cosineWithQueryNorm(qVec, qNorm, e.vector || [], e.docNorm);
+  if (scored.length < K) {
+    scored.push({ id: e.id, sim });
+    if (sim < minSim) {
+      minSim = sim;
+      minIdx = scored.length - 1;
+    }
+    continue;
+  }
+
+  if (sim <= minSim) continue;
+
+  scored[minIdx] = { id: e.id, sim };
+
+  // Recompute current minimum (K is tiny; this is cheap and stable)
+  minSim = Infinity;
+  minIdx = -1;
+  for (let i = 0; i < scored.length; i++) {
+    const s = scored[i].sim;
+    if (s < minSim) {
+      minSim = s;
+      minIdx = i;
+    }
+  }
+}
+
+// Sort only the Top-K
+scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)));
+
 
         const topIds = scored.map(s => s.id);
 
