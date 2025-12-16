@@ -137,7 +137,7 @@ export function buildGeminiPrompt({
 }) {
   const concernTokens = tokensFrom(normalizedConcern);
   const compact = (Array.isArray(products) ? products : [])
-    .slice(0, 120)
+    .slice(0, 24)
     .map((p) => productToCompact(p, constraints, concernTokens));
 
   const middleWord = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
@@ -166,45 +166,39 @@ export function buildGeminiPrompt({
   }
   if (constraints.notes) constraintLines.push(`- Notes: ${String(constraints.notes)}`);
 
-  return `
-You are Refina, a thoughtful, precise shopping concierge for a ${String(category || "retail")} Shopify store.
-Language: Australian English.
-Be specific, ingredient-aware, and concise. Avoid medical claims or diagnoses.
+    // Optional facts block (kept out of the prompt when empty to save tokens)
+  const factsText = formatIngredientFacts(ingredientFacts);
+  const factsBlock = factsText
+    ? `\nINGREDIENT FACTS (optional; may be empty):\n${factsText}\n`
+    : "";
+
+    return `
+You are Refina, a precise shopping concierge for a ${String(category || "retail")} Shopify store.
+Write in Australian English. Tone guidance: ${toneHint}
+Safety: Avoid medical claims/diagnoses. If the concern sounds medical, be cautious and suggest patch testing or consulting a professional.
 
 CUSTOMER CONCERN (raw): ${String(concern || "").trim()}
 ${normalizedConcern ? `CUSTOMER CONCERN (normalized): ${normalizedConcern}` : ""}
 
 ${constraintLines.length ? `CONSTRAINTS:\n${constraintLines.join("\n")}` : ""}
 
-You have a candidate set of store products (JSON array).
-Each product includes normalized fields and a small "tinyFacts" hint blob.
-Consider **only** these:
-${JSON.stringify(compact, null, 2)}
+GROUNDING RULES (NON-NEGOTIABLE):
+- Use ONLY the candidate products provided below. Do not invent products, specs, ingredients, claims, reviews, ratings, prices, or availability.
+- If a hard constraint (e.g., “avoid essential oils”, “fragrance-free”) cannot be verified from the candidate fields, do NOT assume. Prefer candidates with explicit signals; otherwise state the limitation briefly.
 
-Selection rubric (in priority order):
-1) Match the requested **type / routine step** when present (productType_norm or usageStep).
-2) Address the customer’s **concern(s)** and relevant **audience** (e.g., skin/hair type, age if mentioned).
-3) Support your picks with concrete ${middleWord}/benefits; corroborate with tags/keywords/description.
-4) Prefer fewer, higher-confidence picks; do not force weak matches. Do not invent products.
-
-Behaviour rules:
-- ${toneHint}
-- **Lead paragraph must not name any product.** Make it a warm overview of *how* you approached the concern.
-- If nothing is a strong fit, choose the closest 1–3 items and say they are “closest matches” for the concern. Do not say there are no products.
-- Never recommend searching outside this catalogue and do not apologise. Keep a helpful, neutral tone when confidence is low.
-- Write original, benefit-led phrasing (do not quote product text). Speak in second person (“you”).
-- Include concise, actionable how-to steps for the top pick or per routine step.
-- Base all statements only on provided product fields. No fabrication.
-- Avoid irrelevant categories (e.g., hair/body items for facial concerns unless explicitly relevant).
-- Return **STRICT JSON only** (no markdown/backticks, no commentary).
+CANDIDATES_JSON (capsules; consider ONLY these):
+${JSON.stringify(compact)}
 
 Rank mode: ${rankLabel}
-Routine mode: ${routineMode ? "yes (AM/PM guidance expected)" : "no (single-pick acceptable)"}
+Routine mode: ${routineMode ? "yes" : "no"}${factsBlock}
 
-Ingredient facts (curated; brief):
-${formatIngredientFacts(ingredientFacts)}
+OUTPUT REQUIREMENTS:
+- Return STRICT JSON only (no markdown, no backticks, no commentary).
+- Choose EXACTLY 3 product IDs from candidates: primary + 2 alternatives.
+- Ensure productIds is ordered: [primary, alt1, alt2].
+- Keep reasons short, concrete, and grounded in capsule fields (keywords/benefits/ingredients/avoidFlags/usage/productType/price/tags).
 
-RESPONSE JSON SCHEMA (STRICT):
+RESPONSE JSON SHAPE (STRICT KEYS):
 {
   "primary": {
     "id": "<productId-from-candidates>",
@@ -213,18 +207,14 @@ RESPONSE JSON SCHEMA (STRICT):
     "tagsMatched": ["match1", "match2"]
   },
   "alternatives": [
-    {
-      "id": "<altId-from-candidates>",
-      "when": "budget | sensitive | premium | lighter texture",
-      "reasons": ["short, concrete reason"]
-    }
+    { "id": "<altId-1>", "when": "sensitive | budget | premium | lighter texture | family-size | colour/material match", "reasons": ["short, concrete reason"] },
+    { "id": "<altId-2>", "when": "sensitive | budget | premium | lighter texture | family-size | colour/material match", "reasons": ["short, concrete reason"] }
   ],
   "explanation": {
-    "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
-    "friendlyParagraph": "3–4 sentences in our concierge voice explaining *why this fits you*.",
-    "expertBullets": ["Ingredient rationale 1", "Rationale 2"]
+    "oneLiner": "Warm one-sentence summary tailored to the concern.",
+    "friendlyParagraph": "3–4 sentences in Refina voice explaining why these fit, grounded in candidate fields.",
+    "expertBullets": ["Grounded rationale 1", "Grounded rationale 2"]
   },
-
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
   "copy": {
     "why": "Use explanation.friendlyParagraph or oneLiner.",

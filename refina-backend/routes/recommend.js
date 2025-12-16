@@ -341,6 +341,49 @@ async function writeCache(storeId, key, payload, epoch) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// Phase 3A: Facts micro-cache + gating
+// ─────────────────────────────────────────────────────────────
+const FACTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const factsCache = new Map(); // key -> { value, expiresAt }
+
+function factsCacheGet(key) {
+  const hit = factsCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    factsCache.delete(key);
+    return null;
+  }
+  return hit.value || null;
+}
+
+function factsCacheSet(key, value) {
+  factsCache.set(key, { value, expiresAt: Date.now() + FACTS_CACHE_TTL_MS });
+}
+
+function shouldFetchIngredientFacts({ constraints, category }) {
+  // Only pay the facts tax when it materially matters (Phase 3A scope).
+  if (String(category || "") !== "Beauty") return false;
+
+  const age = typeof constraints?.age === "number" ? constraints.age : null;
+  const flags = constraints?.flags || {};
+  const step = String(constraints?.step || "").trim();
+
+  return Boolean(
+    step ||
+      (age != null && age >= 55) ||
+      flags.sensitive ||
+      flags.avoidEO ||
+      flags.rosacea ||
+      flags.redness ||
+      flags.photoaging ||
+      flags.pigmentation ||
+      flags.acne ||
+      flags.dry ||
+      flags.oily
+  );
+}
+
 // ─── PDP FAST PATHS (GET) ────────────────────────────────────────────────────
 const router = express.Router();
 
@@ -555,6 +598,7 @@ let promptChars = 0;
 
     // Cache (EARLY) — avoid paying aiGuard on hits
 const concernNorm = normConcern(concern);
+const constraints = detectConstraints(concernNorm);
 const ck = cacheKey(storeId, concernNorm);
 const cached = await readCache(storeId, ck, cacheEpoch);
 if (cached) {
@@ -659,7 +703,6 @@ if (guard?.state === "off" || guard?.state === "limited") {
     // Map id → doc + cosine
     const byId = new Map();
     for (const s of scored) byId.set(String(s.id), s.sim);
-    const constraints = detectConstraints(concernNorm);
 
     // Hard allergen filter (EO) when asked to avoid fragrance/EO/sensitive
     const filtered = [];
@@ -755,114 +798,77 @@ if (guard?.state === "off" || guard?.state === "limited") {
       forStage2 = forStage2.slice(0, forStage2.length - 1);
     }
 
-    // (NEW) KB-driven facts: assemble from productEmbeddings + product entities doc
-function uniq(arr) {
-  const seen = new Set(); const out = [];
-  for (const x of arr) { const k = String(x).toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(x); } }
-  return out;
-}
+// Phase 1.5 + Phase 3A: conditional Knowledge Pack facts + micro-cache
+let ingredientFacts = {};
+const wantFacts = shouldFetchIngredientFacts({
+  constraints,
+  category,
+  concernNorm,
+});
 
-// Build a convenient lookup for embeddings rows (id and/or productId)
-const embById = new Map();
-for (const e of allEmb) {
-  const key1 = String(e.id || e.docId || e._id || e.productId || "");
-  if (key1) embById.set(key1, e);
-  if (e.productId) embById.set(String(e.productId), e);
-}
+if (wantFacts) {
+  const finalistIdsForFacts = finalists.slice(0, 3).map((p) => String(p.id || ""));
+  const factsKeyParts = [
+    storeId,
+    cacheEpoch || "none",
+    category || "",
+    constraints.step || "",
+    constraints.flags?.sensitive ? "sens" : "",
+    constraints.flags?.avoidEO ? "avoidEO" : "",
+    String(constraints.age || ""),
+    finalistIdsForFacts.join(","),
+    concernNorm,
+  ];
+  const factsKey = factsKeyParts.join("|");
 
-// Pull “facts” doc under products/{storeId}/items/{id}/entities (single doc with keyed facts)
-async function loadProductFactsDoc(storeId, pid) {
-  try {
-    const ref = db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection
-      ? db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection("entities") // in case it was modeled as a collection
-      : null;
+  const cachedFacts = factsCacheGet(factsKey);
+  if (cachedFacts) {
+    ingredientFacts = cachedFacts;
+    timings.factsMs = 1;
+  } else {
+    const tFactsStart = Date.now();
+    try {
+      // Expand concern + top finalists into ingredient slugs
+      const hints = await expandConcernToIngredients(concernNorm, finalists.slice(0, 3));
+      const rawSlugs =
+        Array.isArray(hints?.slugs)
+          ? hints.slugs
+          : Array.isArray(hints?.fromConcern?.slugs)
+          ? hints.fromConcern.slugs
+          : [];
 
-    // Prefer a single doc at .../items/{pid}/entities
-    const entDoc = await db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection
-      ? null
-      : await db.collection("products").doc(storeId).collection("items").doc(String(pid)).get().then(s => {
-          // When “entities” is a nested map on the product doc, return that map.
-          const d = s.exists ? (s.data() || {}) : {};
-          return (d && d.entities && typeof d.entities === "object") ? d.entities : null;
+      const slugs = Array.from(
+        new Set(
+          rawSlugs
+            .map((s) => String(s || "").trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      );
+
+      if (slugs.length) {
+        // NOTE: getIngredientFacts returns the object format expected by buildGeminiPrompt.formatIngredientFacts
+        ingredientFacts = (await getIngredientFacts(storeId, slugs.slice(0, 12))) || {};
+      } else {
+        ingredientFacts = {};
+      }
+
+      factsCacheSet(factsKey, ingredientFacts);
+    } catch (e) {
+      ingredientFacts = {};
+      try {
+        console.warn("[recommend] ingredient facts skipped (error)", {
+          storeId,
+          msg: String(e?.message || e),
         });
-
-    if (entDoc && typeof entDoc === "object") return entDoc;
-
-    // Fallback: if entities was stored as a subcollection with one doc named "entities"
-    if (ref) {
-      const entSnap = await db.collection("products").doc(storeId).collection("items").doc(String(pid)).collection("entities").doc("entities").get();
-      if (entSnap.exists) return entSnap.data() || null;
+      } catch (_) {}
+    } finally {
+      timings.factsMs = Date.now() - tFactsStart;
     }
-  } catch (_) {}
-  return null;
+  }
+} else {
+  // Explicit: skipped facts
+  timings.factsMs = 0;
 }
-
-// Merge evidence lines from embedding row + product “entities” doc into {slug, evidence[]} items
-async function buildKBIngredientFacts(storeId, finalistIds) {
-  const facts = new Map(); // slug -> Set(evidence)
-
-  // 1) From productEmbeddings
-  for (const pid of finalistIds) {
-    const emb = embById.get(String(pid));
-    if (emb) {
-      const ent = Array.isArray(emb.entities) ? emb.entities : [];
-      const evs = Array.isArray(emb.evidence) ? emb.evidence : [];
-      // evidence may be [{slug, evidence:[...]}, ...] or flat strings; handle both
-      const evMap = new Map();
-      for (const ev of evs) {
-        if (ev && typeof ev === "object" && ev.slug) {
-          evMap.set(String(ev.slug), Array.isArray(ev.evidence) ? ev.evidence : []);
-        } else if (typeof ev === "string") {
-          // If only strings, attribute to a generic “note” for the unioned slug later
-          evMap.set("__generic__", (evMap.get("__generic__") || []).concat(ev));
-        }
-      }
-      for (const slug of ent) {
-        const k = String(slug).trim();
-        if (!k) continue;
-        if (!facts.has(k)) facts.set(k, new Set());
-        const bag = facts.get(k);
-        const lines = evMap.get(k) || evMap.get("__generic__") || [];
-        for (const line of lines) if (line && String(line).trim()) bag.add(String(line).trim());
-      }
-    }
-  }
-
-  // 2) From product entities doc at products/.../items/{pid}/entities
-  for (const pid of finalistIds) {
-    const entsDoc = await loadProductFactsDoc(storeId, pid);
-    if (entsDoc && typeof entsDoc === "object") {
-      for (const [slug, obj] of Object.entries(entsDoc)) {
-        const k = String(slug).trim();
-        if (!k) continue;
-        if (!facts.has(k)) facts.set(k, new Set());
-        const bag = facts.get(k);
-        // Prefer explicit fields commonly present in your schema
-        const lines = [];
-        if (obj?.fact) lines.push(obj.fact);
-        if (Array.isArray(obj?.evidence)) lines.push(...obj.evidence);
-        if (obj?.name) lines.push(String(obj.name));
-        if (Array.isArray(obj?.synonyms)) lines.push(...obj.synonyms);
-        for (const line of lines) if (line && String(line).trim()) bag.add(String(line).trim());
-      }
-    }
-  }
-
-  // Shape into the prompt format: [{ slug, evidence: [ ..unique lines.. ] }]
-  const out = [];
-  for (const [slug, set] of facts.entries()) {
-    const ev = Array.from(set).slice(0, 6); // cap per-slug evidence to keep prompt lean
-    if (ev.length) out.push({ slug, evidence: ev });
-  }
-  // Keep it reasonable in total size
-  return out.slice(0, 24);
-}
-
-// Phase 1.5 throttle: facts only for Top-3 finalists (not the whole list)
-const tFactsStart = Date.now();
-const finalistIdsForFacts = finalists.slice(0, 3).map(p => String(p.id));
-const ingredientFacts = await buildKBIngredientFacts(storeId, finalistIdsForFacts);
-timings.factsMs = Date.now() - tFactsStart;
 
 // Phase 2 — Capsules-first prompt build
 const capsulesStage1 = (forStage1 || []).map(buildCapsuleFromProduct);
