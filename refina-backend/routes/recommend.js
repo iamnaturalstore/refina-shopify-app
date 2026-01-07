@@ -810,6 +810,29 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
     const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 12));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
+
+    // DEBUG (temporary): verify what the model is being shown
+try {
+  console.log("[Recommend] plan+trim", {
+    level: String(plan?.level || guard?.level || "").toLowerCase(),
+    status: String(plan?.status || "").toUpperCase(),
+    maxProducts: guard?.trim?.maxProducts,
+    charBudget: guard?.trim?.charBudget,
+    finalists: finalists.length,
+  });
+
+  console.log(
+    "[Recommend] finalists top12",
+    finalists.slice(0, 12).map((p) => ({
+      id: String(p.id),
+      title: p.title || p.name || "",
+      productType: p.productType || "",
+      productType_norm: p.productType_norm || p.productTypeNormalized || p.productTypeNormalized || "",
+      tagsTop: Array.isArray(p.tags) ? p.tags.slice(0, 6) : [],
+    }))
+  );
+} catch {}
+
     // Phase 2 — Convert finalists to Capsules (in-memory)
     const capsules = (finalists || []).map(buildCapsuleFromProduct);
 
