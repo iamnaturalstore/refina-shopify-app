@@ -272,6 +272,7 @@ function inferPlanFromSubs(subs) {
 
   // Read plan names from env (fallbacks to your public labels)
   const liteName = String(process.env.SHOPIFY_BILLING_LITE_NAME || "Lite").toLowerCase();
+  const growthName = String(process.env.SHOPIFY_BILLING_GROWTH_NAME || "Growth").toLowerCase();
   const proName = String(process.env.SHOPIFY_BILLING_PRO_NAME || "Pro").toLowerCase();
   const premiumName = String(process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium").toLowerCase();
   const enterpriseName = String(process.env.SHOPIFY_BILLING_ENTERPRISE_NAME || "Enterprise").toLowerCase();
@@ -288,12 +289,13 @@ function inferPlanFromSubs(subs) {
     if (enterpriseName && n.includes(enterpriseName)) return { level: "enterprise", id };
     if (premiumName && n.includes(premiumName))     return { level: "premium", id };
     if (proName && n.includes(proName))             return { level: "pro", id };
+    if (growthName && n.includes(growthName))       return { level: "growth", id };
     if (liteName && n.includes(liteName))           return { level: "lite", id };
     return { level: null, id };
   }).filter(d => !!d.level);
 
   // Choose highest priority if multiple are somehow active
-  const priority = ["enterprise", "premium", "pro", "lite", "free"];
+  const priority = ["enterprise", "premium", "pro", "growth", "lite", "free"];
   const picked = detected.sort((a, b) => priority.indexOf(a.level) - priority.indexOf(b.level))[0];
 
   if (picked) {
@@ -592,7 +594,7 @@ router.post("/subscribe", async (req, res) => {
 
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
     const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    const target = ["lite","pro","premium"].includes(normalized) ? normalized : "premium";
+    const target = ["lite","growth","pro","premium"].includes(normalized) ? normalized : "premium";
 
     const existing = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
@@ -616,6 +618,13 @@ router.post("/subscribe", async (req, res) => {
         name: process.env.SHOPIFY_BILLING_LITE_NAME || "Lite",
         amount: String(process.env.SHOPIFY_BILLING_LITE_PRICE || "9.00"),
       }
+
+  : target === "growth"
+   ? {
+        name: process.env.SHOPIFY_BILLING_GROWTH_NAME || "Growth",
+        amount: String(process.env.SHOPIFY_BILLING_GROWTH_PRICE || "19.00"),
+     }
+
   : target === "pro"
     ? {
         name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",

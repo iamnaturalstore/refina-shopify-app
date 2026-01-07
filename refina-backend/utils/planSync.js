@@ -25,7 +25,7 @@ function canonicalize({ shopDomain }) {
 // Only normalize to our supported set; everything else → 'free'
 function normalizeLevel(raw) {
   const v = String(raw || "").trim().toLowerCase();
-  return (["lite","pro","premium","plus","enterprise"].includes(v)) ? v : "free";
+  return (["lite","growth","pro","premium","plus","enterprise"].includes(v)) ? v : "free";
 }
 
 /**

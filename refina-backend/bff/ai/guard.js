@@ -33,7 +33,8 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
 
     const defaultsByLevel = {
     free:    { monthly: 0,     perMin: 0,  maxProducts: 0,  charBudget: 8000 },
-    lite:    { monthly: 1000,  perMin: 8,  maxProducts: 10, charBudget: 16000 }, // NEW: Lite
+    lite:    { monthly: 500,   perMin: 8,  maxProducts: 10, charBudget: 16000 }, // NEW: Lite
+    growth:  { monthly: 2000,  perMin: 9,  maxProducts: 12, charBudget: 17000 },
     pro:     { monthly: 5000,  perMin: 10, maxProducts: 14, charBudget: 18000 },
     premium: { monthly: 10000, perMin: 20, maxProducts: 24, charBudget: 28000 },
     plus:    { monthly: 25000, perMin: 30, maxProducts: 36, charBudget: 38000 }, // legacy, safe to keep
@@ -44,12 +45,12 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const perMinuteCeiling = Number.isFinite(docPerMin) ? docPerMin : def.perMin;
 
   // 2) Determine ON/OFF
-  const aiEnabled = (level === "lite" || level === "pro" || level === "premium" || level === "plus") && status === "ACTIVE";
+  const aiEnabled = (level === "lite" || level === "growth" || level === "pro" || level === "premium" || level === "plus") && status === "ACTIVE";
   if (!aiEnabled) {
     return {
       state: "off",
       message:
-        'Enable AI answers with Lite ($9) or Pro ($39). 7-day Premium trial included.',
+        'Enable AI answers with Lite ($9), Growth ($19), Pro ($39), or Premium ($79).',
       trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
     };
   }
