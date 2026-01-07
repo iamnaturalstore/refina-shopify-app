@@ -119,7 +119,12 @@
   function getPayload(root, overrides = {}) {
     const ds = root.dataset || {};
     const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4].filter(Boolean).map(s => s.trim());
-
+    // BUTTON: always start blank in the drawer (no PDP context prefill)
+    if (btn) {
+      base.prefill = "";
+      base.intent = null;
+    }
+    
     const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
     const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
     const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
@@ -292,12 +297,12 @@
       b.className = "refina-dw-chip";
       b.textContent = c;
       b.addEventListener("click", () => {
-        const ctx = basePayload.productTitle ? ` — “${basePayload.productTitle}”` : "";
-        input.value = input.value ? `${input.value} ${c}${ctx}` : `${c}${ctx}`;
-        const maybeIntent = mapChipToIntent(c);
-        if (maybeIntent) basePayload.intent = maybeIntent;
-        input.focus();
-      });
+      // Only insert the chip text; keep PDP context out of the message field
+      input.value = input.value ? `${input.value} ${c}` : `${c}`;
+      const maybeIntent = mapChipToIntent(c);
+      if (maybeIntent) basePayload.intent = maybeIntent;
+      input.focus();
+    });
       chipsBox.appendChild(b);
     });
 
@@ -412,17 +417,19 @@
     const base = getPayload(root);
 
     if (chip) {
-      const chipText = (chip.textContent || "").trim();
-      base.prefill = chipText
-        ? (base.productTitle ? `${chipText} — “${base.productTitle}”` : chipText)
-        : base.prefill = chipText || "";
-      const maybeIntent = mapChipToIntent(chipText);
-      if (maybeIntent) base.intent = maybeIntent;
-      if (maybeIntent === "alt-cheaper" && !base.priceCap) {
-        const rawCap = (root.dataset.priceCap || "").trim();
-        if (rawCap) base.priceCap = rawCap;
-      }
-    }
+  const chipText = (chip.textContent || "").trim();
+
+  // CHIP: prefill with chip text only (no PDP product title appended)
+  base.prefill = chipText || "";
+
+  const maybeIntent = mapChipToIntent(chipText);
+  if (maybeIntent) base.intent = maybeIntent;
+
+  if (maybeIntent === "alt-cheaper" && !base.priceCap) {
+    const rawCap = (root.dataset.priceCap || "").trim();
+    if (rawCap) base.priceCap = rawCap;
+  }
+}
 
     // Seed verdict/peek (first time the shopper clicks)
     hydrateVerdictAndPeek(root);
