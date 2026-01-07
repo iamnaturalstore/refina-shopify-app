@@ -488,9 +488,9 @@ const premiumMeta = PLAN_DETAILS.premium;
   </Button>
 )}
         </InlineStack>
-        {isLite && liteErr && (
+        {isCapPlan && capErr && (
   <div style={{ marginTop: 8 }}>
-    <Text tone="critical" as="p">{liteErr}</Text>
+    <Text tone="critical" as="p">{capErr}</Text>
   </div>
 )}
       </BlockStack>
