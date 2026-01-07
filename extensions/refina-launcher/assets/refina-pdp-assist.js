@@ -255,60 +255,57 @@
 }
 
   function openDrawerFrom(root, basePayload) {
-    const radiusPx = root?.dataset?.styleRadius || "16px";
-    const accentName = root?.dataset?.styleAccent || "violet";
-    const host = ensureDrawer(radiusPx);
-    const aside = host.querySelector(".refina-dw");
-    const input = host.querySelector("[data-input]");
-    const chipsBox = host.querySelector("[data-chips]");
-    const titleEl = host.querySelector(".refina-dw-title");
-    const subEl = host.querySelector("[data-sub]");
-    const ctxEl = host.querySelector("[data-context]");
-    const ctaBtn = host.querySelector("[data-continue]");
+  const radiusPx = root?.dataset?.styleRadius || "16px";
+  const accentName = root?.dataset?.styleAccent || "violet";
 
-    // Mint contextId at drawer open
-    basePayload.contextId = basePayload.contextId || uuid();
+  // IMPORTANT: pass accentName into ensureDrawer
+  const host = ensureDrawer(radiusPx, accentName);
 
-    // Header copy (from block)
-    titleEl.textContent =
-      (basePayload.headline && basePayload.headline.trim()) ||
-      "Tell us a bit more";
-    subEl.textContent = (basePayload.subcopy || "").trim();
+  const aside = host.querySelector(".refina-dw");
+  const input = host.querySelector("[data-input]");
+  const chipsBox = host.querySelector("[data-chips]");
+  const titleEl = host.querySelector(".refina-dw-title");
+  const subEl = host.querySelector("[data-sub]");
+  const ctxEl = host.querySelector("[data-context]");
+  const ctaBtn = host.querySelector("[data-continue]");
 
-    // CTA label from block (fallback to "Continue")
-    ctaBtn.textContent =
-      (basePayload.buttonText && basePayload.buttonText.trim()) ||
-      "Continue";
+  basePayload.contextId = basePayload.contextId || uuid();
 
-    // Context hint (product)
-    ctxEl.textContent = basePayload.productTitle
-      ? `Using “${basePayload.productTitle}” as context`
-      : "";
+  titleEl.textContent =
+    (basePayload.headline && basePayload.headline.trim()) || "Tell us a bit more";
+  subEl.textContent = (basePayload.subcopy || "").trim();
 
-    // Seed input with payload.prefill
-    // Start empty unless a chip provided a prefill
-      input.value = (basePayload.prefill || "").trim();
+  ctaBtn.textContent =
+    (basePayload.buttonText && basePayload.buttonText.trim()) || "Continue";
 
-    // Render chips (merchant chips from block)
-    chipsBox.innerHTML = "";
-    (basePayload.chips || []).forEach((c) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "refina-dw-chip";
-      b.textContent = c;
-      b.addEventListener("click", () => {
-      // Only insert the chip text; keep PDP context out of the message field
+  // You can keep or remove this hint; it doesn't inject into the input.
+  ctxEl.textContent = basePayload.productTitle ? `Using “${basePayload.productTitle}” as context` : "";
+
+  // Start empty unless a chip provided a prefill
+  input.value = (basePayload.prefill || "").trim();
+
+  // Render chips (merchant chips from block)
+  chipsBox.innerHTML = "";
+  (basePayload.chips || []).forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "refina-dw-chip";
+    b.textContent = c;
+
+    b.addEventListener("click", () => {
+      // Only insert chip text; do NOT append PDP product title
       input.value = input.value ? `${input.value} ${c}` : `${c}`;
       const maybeIntent = mapChipToIntent(c);
       if (maybeIntent) basePayload.intent = maybeIntent;
       input.focus();
     });
-      chipsBox.appendChild(b);
-    });
 
-    // Open drawer
-    host.classList.add("is-open");
-    try { aside.focus(); } catch {}
+    chipsBox.appendChild(b);
+  });
+
+  // Open drawer
+  host.classList.add("is-open");
+  try { aside.focus(); } catch {}
 
     // Close handlers
     const close = () => host.classList.remove("is-open");
@@ -405,38 +402,46 @@
     try { await fetch(`/apps/refina/v1/recommend?${qs2.toString()}`, { credentials: "same-origin" }); } catch {}
   }
 
-  // Click delegate (button + chips) → open drawer
-  document.addEventListener("click", (ev) => {
+  document.addEventListener(
+  "click",
+  (ev) => {
     const root = ev.target.closest("[data-refina-pdp-assist]");
     if (!root) return;
 
-    const btn  = ev.target.closest(".refina-pdp-assist__button");
+    const btn = ev.target.closest(".refina-pdp-assist__button");
     const chip = ev.target.closest(".refina-pdp-assist__chip");
     if (!btn && !chip) return;
 
     const base = getPayload(root);
 
+    // BUTTON: always open drawer with empty input
+    if (btn) {
+      base.prefill = "";
+      base.intent = null;
+    }
+
+    // CHIP: open drawer with chip text only (no PDP title appended)
     if (chip) {
-  const chipText = (chip.textContent || "").trim();
+      const chipText = (chip.textContent || "").trim();
+      base.prefill = chipText || "";
 
-  // CHIP: prefill with chip text only (no PDP product title appended)
-  base.prefill = chipText || "";
+      const maybeIntent = mapChipToIntent(chipText);
+      if (maybeIntent) base.intent = maybeIntent;
 
-  const maybeIntent = mapChipToIntent(chipText);
-  if (maybeIntent) base.intent = maybeIntent;
+      if (maybeIntent === "alt-cheaper" && !base.priceCap) {
+        const rawCap = (root.dataset.priceCap || "").trim();
+        if (rawCap) base.priceCap = rawCap;
+      }
+    }
 
-  if (maybeIntent === "alt-cheaper" && !base.priceCap) {
-    const rawCap = (root.dataset.priceCap || "").trim();
-    if (rawCap) base.priceCap = rawCap;
-  }
-}
-
-    // Seed verdict/peek (first time the shopper clicks)
+    // Seed verdict/peek (best-effort, non-blocking)
     hydrateVerdictAndPeek(root);
 
     // Open the drawer instead of launching immediately
     openDrawerFrom(root, base);
-  }, { passive: true });
+  },
+  { passive: true }
+);
 
   // On load, pre-hydrate verdict (no blocking)
   document.addEventListener("DOMContentLoaded", () => {
