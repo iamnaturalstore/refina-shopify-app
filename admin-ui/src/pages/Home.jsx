@@ -23,16 +23,31 @@ import { useLocation, useNavigate } from "react-router-dom"; // NEW
 // ── helpers ──────────────────────────────────────────────────────────────
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
+
+  // premium (allow common aliases)
   if (/\bpremium\b/.test(v) || /\bpro\s*\+|\bpro\W*plus\b/.test(v)) return "premium";
+
+  // pro
   if (/\bpro\b/.test(v)) return "pro";
+
+  // growth
+  if (/\bgrowth\b/.test(v)) return "growth";
+
+  // lite
+  if (/\blite\b/.test(v)) return "lite";
+
   return "free";
 }
+
 function labelFromLevel(level) {
-  const v = (level || "").toLowerCase();
-  if (v === "premium" || v === "pro+") return "Premium";
+  const v = normalizeLevel(level);
+  if (v === "premium") return "Premium";
   if (v === "pro") return "Pro";
+  if (v === "growth") return "Growth";
+  if (v === "lite") return "Lite";
   return "Free";
 }
+
 function parsePlanResponse(j) {
   const p = j?.plan || j || {};
   return {
