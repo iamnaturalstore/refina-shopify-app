@@ -117,46 +117,43 @@
   }
 
   function getPayload(root, overrides = {}) {
-    const ds = root.dataset || {};
-    const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4].filter(Boolean).map(s => s.trim());
-    // BUTTON: always start blank in the drawer (no PDP context prefill)
-    if (btn) {
-      base.prefill = "";
-      base.intent = null;
-    }
-    
-    const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
-    const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
-    const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
+  const ds = root.dataset || {};
+  const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4]
+    .filter(Boolean)
+    .map((s) => s.trim());
 
-    const defaultPrefill =
-      (productTitle ? `I’m looking at “${productTitle}”. Can you suggest better fits for me?`
-                    : `Can you suggest the best fit for me from this store?`);
-    const prefill = (overrides.prefill && overrides.prefill.trim()) || defaultPrefill;
+  const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
+  const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
+  const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
 
-    return {
-      source: "pdp",
-      shop: ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "",
-      productId: ds.productId || null,
-      productTitle,
-      productType: productType || null,
-      variantId: ds.selectedVariantId || null,
-      variantTitle: ds.selectedVariantTitle || null,
-      available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
-      price: coerceInt(ds.priceCents),
-      compareAtPrice: coerceInt(ds.compareAtPriceCents),
-      currency: ds.currency || (window.Shopify && Shopify.currency && Shopify.currency.active) || null,
-      priceCap: priceCap || null,
-      chips,
-      intent: null,
-      contextId: null,
-      prefill,
-      // NEW: carry through drawer text & CTA from block
-      headline: ds.headline || "",
-      subcopy: ds.subcopy || "",
-      buttonText: ds.buttonText || ""
-    };
-  }
+  const defaultPrefill = productTitle
+    ? `I’m looking at “${productTitle}”. Can you suggest better fits for me?`
+    : `Can you suggest the best fit for me from this store?`;
+
+  const prefill = (overrides.prefill && overrides.prefill.trim()) || defaultPrefill;
+
+  return {
+    source: "pdp",
+    shop: ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "",
+    productId: ds.productId || null,
+    productTitle,
+    productType: productType || null,
+    variantId: ds.selectedVariantId || null,
+    variantTitle: ds.selectedVariantTitle || null,
+    available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
+    price: coerceInt(ds.priceCents),
+    compareAtPrice: coerceInt(ds.compareAtPriceCents),
+    currency: ds.currency || (window.Shopify && Shopify.currency && Shopify.currency.active) || null,
+    priceCap: priceCap || null,
+    chips,
+    intent: null,
+    contextId: null,
+    prefill,
+    headline: ds.headline || "",
+    subcopy: ds.subcopy || "",
+    buttonText: ds.buttonText || ""
+  };
+}
 
   function resolveAccentHex(name) {
   switch ((name || "").toLowerCase()) {
