@@ -308,8 +308,8 @@
     const close = () => host.classList.remove("is-open");
     const backdrop = host.querySelector("[data-close]");
     const onEsc = (ev) => { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", onEsc); } };
-    backdrop.addEventListener("click", close, { once: true });
-    host.querySelector(".refina-dw-close").addEventListener("click", close, { once: true });
+    backdrop.onclick = close;
+    host.querySelector(".refina-dw-close").onclick = close;
     document.addEventListener("keydown", onEsc);
 
     // Continue → Option B: Refresh live PDP details, then open concierge
