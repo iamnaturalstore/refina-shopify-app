@@ -281,8 +281,8 @@
       : "";
 
     // Seed input with payload.prefill
-    // Start with an empty message (no prefilled context)
-       input.value = "";
+    // Start empty unless a chip provided a prefill
+      input.value = (basePayload.prefill || "").trim();
 
     // Render chips (merchant chips from block)
     chipsBox.innerHTML = "";
@@ -415,7 +415,7 @@
       const chipText = (chip.textContent || "").trim();
       base.prefill = chipText
         ? (base.productTitle ? `${chipText} — “${base.productTitle}”` : chipText)
-        : base.prefill;
+        : base.prefill = chipText || "";
       const maybeIntent = mapChipToIntent(chipText);
       if (maybeIntent) base.intent = maybeIntent;
       if (maybeIntent === "alt-cheaper" && !base.priceCap) {
