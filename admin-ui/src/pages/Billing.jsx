@@ -39,6 +39,20 @@ const PLAN_DETAILS = {
       "Per-minute ceiling 8",
     ],
   },
+
+    growth: {
+    label: "Growth",
+    priceMonthly: "$19/mo",
+    priceAnnualNote: "", // No annual at launch
+    tooltip: "Growth — Core AI + more runway • up to 3,000 products",
+    ribbon: "Most popular",
+    features: [
+      "Core AI answers + explanations",
+      "Up to 3,000 products",
+      "Per-minute ceiling 9",
+    ],
+  },
+
   pro: {
     label: "Pro",
     priceMonthly: "$39/mo",
@@ -69,6 +83,7 @@ const PLAN_DETAILS = {
 function normalizeLevel(level) {
   const v = String(level || "").toLowerCase().trim();
   if (v === "lite") return "lite";
+  if (v === "growth") return "growth";
   if (v === "pro") return "pro";
   if (v === "premium" || v === "pro+") return "premium";
   if (v === "plus") return "premium"; // alias legacy "plus" to premium
@@ -77,6 +92,7 @@ function normalizeLevel(level) {
 function labelFromLevel(level) {
   const v = normalizeLevel(level);
   if (v === "lite") return "Lite";
+  if (v === "growth") return "Growth";
   if (v === "pro") return "Pro";
   if (v === "premium") return "Premium";
   return v === "free" ? "Free" : v;
@@ -139,6 +155,7 @@ const [catalogLoading, setCatalogLoading] = useState(false);
 const [catalogError, setCatalogError] = useState("");
 
 const LITE_CAP = 500;
+const GROWTH_CAP = 3000;
 
 // On mount, fetch catalog size from indexer status (same endpoint used in Setup.jsx)
 useEffect(() => {
@@ -163,6 +180,10 @@ useEffect(() => {
 // Decide if Lite should be disabled
 const liteOverCap = useMemo(() => {
   return typeof catalogSize === "number" && catalogSize > LITE_CAP;
+}, [catalogSize]);
+
+const growthOverCap = useMemo(() => {
+  return typeof catalogSize === "number" && catalogSize > GROWTH_CAP;
 }, [catalogSize]);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
@@ -256,7 +277,7 @@ React.useEffect(() => {
     };
   }, []);
 
-  async function subscribe(which /* "premium" | "pro" | "lite" */, interval /* "monthly" | "annual" */) {
+async function subscribe(which /* "premium" | "pro" | "growth" | "lite" */, interval /* "monthly" | "annual" */) {
   try {
     setBusy(true);
     setError("");
@@ -266,10 +287,10 @@ React.useEffect(() => {
     const plan = String(which || "").toLowerCase();
     const safeInterval = interval === "annual" ? "annual" : "monthly";
 
-    // Lite + Pro → unified subscribe endpoint (plan-based)
-    if (plan === "lite" || plan === "pro") {
+    // Lite + Growth + Pro → unified subscribe endpoint (plan-based)
+    if (plan === "lite" || plan === "growth" || plan === "pro") {
       const resp = await api.post("/api/billing/subscribe", {
-        plan,           // "lite" or "pro"
+        plan,           // "lite" | "growth" | "pro"
         interval: safeInterval, // backend can ignore or use
       });
 
@@ -352,10 +373,13 @@ const currentInterval = (plan?.billingInterval || "").toLowerCase();
 const currentLabel = currentLevel ? labelFromLevel(currentLevel) : "";
 const currentStatus = plan?.status ? String(plan.status).toUpperCase() : "";
 
+const isLite = currentLevel === "lite";
+const isGrowth = currentLevel === "growth";
 const isPro = currentLevel === "pro";
 const isPremium = currentLevel === "premium";
 const isPlus = currentLevel === "plus";
-const isPaid = isPro || isPremium || isPlus;
+
+const isPaid = isLite || isGrowth || isPro || isPremium || isPlus;
 
 // pick meta for current plan if available (for tooltip/badge)
 const currentMeta = PLAN_DETAILS[currentLevel] || null;
@@ -374,31 +398,42 @@ const premiumMeta = PLAN_DETAILS.premium;
   }
 
   function PlanTile({ id, meta, current, onChoose, allowAnnual = true }) {
-    const isLite = id === "lite";
-const [liteErr, setLiteErr] = useState("");
+  const isLite = id === "lite";
+  const isGrowth = id === "growth";
+  const isCapPlan = isLite || isGrowth;
 
-async function handleChoose(interval) {
-  if (!onChoose) return;
-  if (isLite) {
-    setLiteErr("");
-    try {
-      const ts = Date.now();
-      const { data } = await api.get(`/api/indexer/status?fresh=1&ts=${ts}`);
-      const total = Number(data?.indexer?.totalProducts ?? 0);
-      if (total > 500) {
-        setLiteErr(
-          `Lite is limited to 500 products. Your catalog has ${total}. Please choose Pro or Premium.`
-        );
+  const [capErr, setCapErr] = useState("");
+
+  async function handleChoose(interval) {
+    if (!onChoose) return;
+
+    if (isCapPlan) {
+      setCapErr("");
+      const cap = isLite ? LITE_CAP : GROWTH_CAP;
+      const label = isLite ? "Lite" : "Growth";
+
+      try {
+        const ts = Date.now();
+        const { data } = await api.get(`/api/indexer/status?fresh=1&ts=${ts}`);
+        const total = Number(data?.indexer?.totalProducts ?? 0);
+
+        if (total > cap) {
+          setCapErr(
+            `${label} is limited to ${cap.toLocaleString()} products. Your catalog has ${total.toLocaleString()}. Please choose a higher plan.`
+          );
+          return;
+        }
+      } catch (e) {
+        setCapErr("Could not verify catalog size. Please try again.");
         return;
       }
-    } catch (e) {
-      setLiteErr("Could not verify catalog size. Please try again.");
-      return;
     }
+
+    onChoose(id, interval);
   }
-  onChoose(id, interval);
-}
+
   const isCurrent = current === id;
+
   return (
     <Card>
       <BlockStack gap="300">
@@ -568,6 +603,30 @@ async function handleChoose(interval) {
       onChoose={subscribe}
       allowAnnual={false}
     />
+  </Box>
+
+    {/* Growth (monthly only) */}
+  <Box minWidth="320px" maxWidth="520px" width="100%">
+    <Tooltip
+      content={
+        growthOverCap
+          ? `Your catalog (${(catalogSize ?? 0).toLocaleString()}) exceeds Growth’s ${GROWTH_CAP.toLocaleString()} cap. Choose Pro or Premium.`
+          : catalogLoading
+          ? "Still checking your catalog size. We’ll verify before activating Growth."
+          : ""
+      }
+      dismissOnMouseOut
+    >
+      <div style={{ opacity: growthOverCap ? 0.5 : 1 }}>
+        <PlanTile
+          id="growth"
+          meta={PLAN_DETAILS.growth}
+          current={currentLevel}
+          onChoose={growthOverCap ? null : subscribe}
+          allowAnnual={false}
+        />
+      </div>
+    </Tooltip>
   </Box>
 
   {/* Premium (monthly + annual) */}
