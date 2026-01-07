@@ -38,7 +38,11 @@
   .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
   .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
 
-  .refina-dw { position: absolute; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
+  .refina-dw { position: absolute; right: 0;
+    top: 50%; transform: translateX(100%) translateY(-50%);
+    height: auto; max-height: min(78vh, 720px);
+    width: min(420px, 92vw);
+
     /* was falling back to #0b0b0e → dark */
     background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
     border-left: 1px solid var(--refina-border);
@@ -48,7 +52,7 @@
     border-bottom-left-radius: var(--rfina-dw-radius, 16px); overflow: hidden;
     color: var(--color-foreground);
   }
-  .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
+  .refina-dw-host.is-open .refina-dw { transform: translateX(0) translateY(-50%); }
 
   .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
   .refina-dw-copy { display: grid; gap: 4px; }
@@ -90,8 +94,11 @@
     font-weight: 600; cursor: pointer; color: var(--color-foreground);
   }
 
-  @media (max-width: 640px) { .refina-dw { width: 100vw; } }
-`;
+  @media (max-width: 640px) {
+    .refina-dw { top: 0; max-height: 100vh; height: 100%; transform: translateX(100%); }
+    .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
+  }
+  `;
 
     const el = document.createElement("style");
     el.id = "refina-pdp-drawer-css";
@@ -224,7 +231,7 @@
       <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
         <header class="refina-dw-head">
           <div class="refina-dw-copy">
-            <h3 id="rf-dw-title" class="refina-dw-title"></h3>
+            <h4 id="rf-dw-title" class="refina-dw-title"></h4>
             <div class="refina-dw-sub" data-sub></div>
             <div class="refina-dw-micro"></div>
           </div>
