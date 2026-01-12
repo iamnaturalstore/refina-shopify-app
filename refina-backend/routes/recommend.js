@@ -1092,9 +1092,6 @@ try {
           promptChars,
           capsuleCount: capsulesStage1?.length ?? 0,
           capsuleChars: capsuleCharCount(capsulesStage1),
-          finalistsTop8: debugFinalistsTop8,
-          finalistsTop12: debugFinalistsTop12,
-          lipstickFlags: debugLipstickFlags,
         },
       });
     }
@@ -1197,9 +1194,6 @@ const safeCopy = { why: "", rationale: "", extras: "" };
         promptChars,
         capsuleCount: capsulesStage1?.length ?? 0,
         capsuleChars: capsuleCharCount(capsulesStage1),
-        finalistsTop8: debugFinalistsTop8,
-        finalistsTop12: debugFinalistsTop12,
-        lipstickFlags: debugLipstickFlags,
       },
     };
 
