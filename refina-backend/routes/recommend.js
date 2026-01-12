@@ -895,60 +895,6 @@ try {
     const forStage1 = finalists.slice(0, stage1Count).map(compactForPrompt);
     const forStage2Base = (needWiden ? finalists : finalists.slice(0, stage1Count)).map(compactForPrompt);
 
-    // ─────────────────────────────────────────────────────────────
-// DEBUG: finalist rank visibility (top 8 + top 12) + lipstick presence flags
-// NOTE: This does not affect ranking/selection; it only records what we already chose.
-// Add these into your __debug payload later.
-// ─────────────────────────────────────────────────────────────
-let debugFinalistsTop12 = [];
-let debugFinalistsTop8 = [];
-let debugLipstickFlags = { top8: false, top12: false };
-
-function isLipstickCompact(x) {
-  const pt = String(x?.productType_norm || "").toLowerCase().trim();
-  const cat = String(x?.category || "").toLowerCase().trim();
-  const name = String(x?.name || "").toLowerCase();
-  const tags = Array.isArray(x?.tags) ? x.tags.map((t) => String(t).toLowerCase()) : [];
-  return (
-    pt === "lipstick" ||
-    cat === "lipstick" ||
-    /\blip\s*stick\b/.test(name) ||
-    tags.some((t) => t.includes("lipstick"))
-  );
-}
-
-try {
-  debugFinalistsTop8 = forStage1.map((p, i) => ({
-    rank: i + 1,
-    id: String(p.id || ""),
-    productType_norm: String(p.productType_norm || ""),
-    category: String(p.category || ""),
-    ruleScore: p.ruleScore,
-    typeMatch: !!p.typeMatch,
-    concernHits: Array.isArray(p.concernHits) ? p.concernHits : [],
-  }));
-
-  // “Top 12” refers to the real finalist pool, not stage2Base (which can be narrowed).
-  // This is what you want to compare across stores.
-  const top12Raw = finalists.slice(0, 12).map(compactForPrompt);
-  debugFinalistsTop12 = top12Raw.map((p, i) => ({
-    rank: i + 1,
-    id: String(p.id || ""),
-    productType_norm: String(p.productType_norm || ""),
-    category: String(p.category || ""),
-    ruleScore: p.ruleScore,
-    typeMatch: !!p.typeMatch,
-    concernHits: Array.isArray(p.concernHits) ? p.concernHits : [],
-  }));
-
-  debugLipstickFlags = {
-    top8: debugFinalistsTop8.some(isLipstickCompact),
-    top12: debugFinalistsTop12.some(isLipstickCompact),
-  };
-} catch (_) {
-  // keep defaults
-}
-
     function estimateChars(productsArr) {
       try { return JSON.stringify(productsArr).length + String(concern).length + 512; }
       catch { return 999999; }
@@ -1251,6 +1197,9 @@ const safeCopy = { why: "", rationale: "", extras: "" };
         promptChars,
         capsuleCount: capsulesStage1?.length ?? 0,
         capsuleChars: capsuleCharCount(capsulesStage1),
+        finalistsTop8: debugFinalistsTop8,
+        finalistsTop12: debugFinalistsTop12,
+        lipstickFlags: debugLipstickFlags,
       },
     };
 
