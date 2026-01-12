@@ -1079,20 +1079,26 @@ try {
         tookMs,
         limitMessage: guard?.message || null,
         __debug: {
-          raced,
-          llmMs,
-          budgetMs: LLM_BUDGET_MS,
-          candidateCount: finalists.length,
-          validator: "fail",
-          rawHead,
-          attempts,
-          timings,
-          cacheKey: ck,
-          cacheEpoch,
-          promptChars,
-          capsuleCount: capsulesStage1?.length ?? 0,
-          capsuleChars: capsuleCharCount(capsulesStage1),
-        },
+  raced,
+  llmMs,
+  budgetMs: LLM_BUDGET_MS,
+  candidateCount: finalists.length,
+  validator: "fail",
+  rawHead,
+  attempts,
+  timings,
+  cacheKey: ck,
+  cacheEpoch,
+  promptChars,
+  capsuleCount: capsulesStage1?.length ?? 0,
+  capsuleChars: capsuleCharCount(capsulesStage1),
+
+  // DEBUG: finalist rank visibility + lipstick presence
+  finalistsTop8: debugFinalistsTop8,
+  finalistsTop12: debugFinalistsTop12,
+  lipstickFlags: debugLipstickFlags,
+},
+
       });
     }
 
@@ -1181,20 +1187,26 @@ const safeCopy = { why: "", rationale: "", extras: "" };
       source: "gemini",
       limitMessage: guard?.message || null,
       __debug: {
-        raced,
-        llmMs,
-        budgetMs: LLM_BUDGET_MS,
-        candidateCount: finalists.length,
-        validator: "ok",
-        rawHead,
-        attempts,
-        timings,
-        cacheKey: ck,
-        cacheEpoch,
-        promptChars,
-        capsuleCount: capsulesStage1?.length ?? 0,
-        capsuleChars: capsuleCharCount(capsulesStage1),
-      },
+  raced,
+  llmMs,
+  budgetMs: LLM_BUDGET_MS,
+  candidateCount: finalists.length,
+  validator: "ok",
+  rawHead,
+  attempts,
+  timings,
+  cacheKey: ck,
+  cacheEpoch,
+  promptChars,
+  capsuleCount: capsulesStage1?.length ?? 0,
+  capsuleChars: capsuleCharCount(capsulesStage1),
+
+  // DEBUG: finalist rank visibility + lipstick presence
+  finalistsTop8: debugFinalistsTop8,
+  finalistsTop12: debugFinalistsTop12,
+  lipstickFlags: debugLipstickFlags,
+},
+
     };
 
     try { await writeCache(storeId, ck, payload, cacheEpoch); } catch (_) {}
