@@ -648,12 +648,6 @@ scoredEmb.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id
       });
     }
 
-// Debug snapshots (must be defined before any early returns)
-let debugFinalistsTop12 = null;
-let debugFinalistsTop8 = null;
-let debugLipstickFlags = null;
-
-
     // Cache (EARLY) — avoid paying aiGuard on hits
 const concernNorm = normConcern(concern);
 const constraints = detectConstraints(concernNorm);
@@ -816,29 +810,7 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
     const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 12));
     const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
-
-    // DEBUG (temporary): verify what the model is being shown
-try {
-  console.log("[Recommend] plan+trim", {
-    level: String(plan?.level || guard?.level || "").toLowerCase(),
-    status: String(plan?.status || "").toUpperCase(),
-    maxProducts: guard?.trim?.maxProducts,
-    charBudget: guard?.trim?.charBudget,
-    finalists: finalists.length,
-  });
-
-  console.log(
-    "[Recommend] finalists top12",
-    finalists.slice(0, 12).map((p) => ({
-      id: String(p.id),
-      title: p.title || p.name || "",
-      productType: p.productType || "",
-      productType_norm: p.productType_norm || p.productTypeNormalized || p.productTypeNormalized || "",
-      tagsTop: Array.isArray(p.tags) ? p.tags.slice(0, 6) : [],
-    }))
-  );
-} catch {}
-
+    
     // Phase 2 — Convert finalists to Capsules (in-memory)
     const capsules = (finalists || []).map(buildCapsuleFromProduct);
 
@@ -910,65 +882,6 @@ try {
     while (estimateChars(forStage2) > charBudget && forStage2.length > stage1Count) {
       forStage2 = forStage2.slice(0, forStage2.length - 1);
     }
-
-    // ─────────────────────────────────────────────────────────────
-// Debug capture: finalists snapshots (top12/top8) + lipstick flags
-// ─────────────────────────────────────────────────────────────
-try {
-  const _asArr = (v) => (Array.isArray(v) ? v : v ? [v] : []);
-
-  const _tags = (p) => {
-    const t = p?.tags;
-    if (Array.isArray(t)) return t.map(String);
-    if (typeof t === "string") return t.split(",").map((s) => s.trim()).filter(Boolean);
-    return [];
-  };
-
-  const _ptNorm = (p) =>
-    String(
-      p?.productType_norm ??
-        p?.productTypeNormalized ??
-        p?.productType ??
-        p?.categoryNormalized ??
-        p?.category ??
-        ""
-    )
-      .toLowerCase()
-      .trim();
-
-  const _pickDebug = (p, i) => ({
-    rank: i + 1,
-    id: String(p?.id ?? p?.productId ?? ""),
-    productType_norm: _ptNorm(p),
-    category: String(p?.category ?? p?.categoryNormalized ?? ""),
-    ruleScore: Number.isFinite(p?.ruleScore) ? p.ruleScore : null,
-    typeMatch: p?.typeMatch ?? null,
-    concernHits: Array.isArray(p?.concernHits) ? p.concernHits : null,
-  });
-
-  const s2 = _asArr(typeof forStage2Base !== "undefined" ? forStage2Base : []);
-  const s1 = _asArr(typeof forStage1 !== "undefined" ? forStage1 : []);
-
-  debugFinalistsTop12 = s2.slice(0, 12).map(_pickDebug);
-  debugFinalistsTop8 = s1.slice(0, 8).map(_pickDebug);
-
-  const _hasLipstick = (p) => {
-    const pt = _ptNorm(p);
-    if (pt === "lipstick" || pt.includes("lipstick")) return true;
-    const tags = _tags(p).map((s) => s.toLowerCase());
-    return tags.some((t) => t.includes("lipstick"));
-  };
-
-  debugLipstickFlags = {
-    top8: s1.slice(0, 8).some(_hasLipstick),
-    top12: s2.slice(0, 12).some(_hasLipstick),
-  };
-} catch (_) {
-  // Never break recommend() for debug
-  debugFinalistsTop12 = null;
-  debugFinalistsTop8 = null;
-  debugLipstickFlags = null;
-}
 
 // Phase 1.5 + Phase 3A: conditional Knowledge Pack facts + micro-cache
 let ingredientFacts = {};
@@ -1157,10 +1070,6 @@ try {
           promptChars,
           capsuleCount: capsulesStage1?.length ?? 0,
           capsuleChars: capsuleCharCount(capsulesStage1),
-          // NEW
-          debugFinalistsTop12,
-          debugFinalistsTop8,
-          debugLipstickFlags,
         },
       });
     }
@@ -1263,10 +1172,6 @@ const safeCopy = { why: "", rationale: "", extras: "" };
         promptChars,
         capsuleCount: capsulesStage1?.length ?? 0,
         capsuleChars: capsuleCharCount(capsulesStage1),
-        // NEW
-        debugFinalistsTop12,
-        debugFinalistsTop8,
-        debugLipstickFlags,
       },
     };
 

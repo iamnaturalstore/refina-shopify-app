@@ -34,9 +34,10 @@ const PLAN_DETAILS = {
     tooltip: "Lite — Core AI on a lean setup • 1 placement • up to 500 products",
     ribbon: "Starter",
     features: [
+      "For smaller stores getting started",
       "Core AI answers (lean)",
-      "Up to 500 products",
-      "Per-minute ceiling 8",
+      "Basic analytics",
+      "Up to 500 AI queries/month",
     ],
   },
 
@@ -47,9 +48,10 @@ const PLAN_DETAILS = {
     tooltip: "Growth — Core AI + more runway • up to 3,000 products",
     ribbon: "Most popular",
     features: [
+      "For growing catalogs and steady traffic",
       "Core AI answers + explanations",
-      "Up to 3,000 products",
-      "Per-minute ceiling 9",
+      "Storefront launcher + PDP + modal",
+      "Up to 2,000 AI queries/month",
     ],
   },
 
@@ -60,9 +62,10 @@ const PLAN_DETAILS = {
     tooltip: "Pro — Richer answers • more placements • deeper analytics",
     ribbon: "Great for growing stores",
     features: [
+      "For scaling stores needing more capacity",
       "Richer AI answers + explanations",
-      "Up to 5,000 products",
-      "Per-minute ceiling 10",
+      "Unlimited products",
+      "Up to 5,000 AI queries/month",
     ],
   },
   premium: {
@@ -75,6 +78,7 @@ const PLAN_DETAILS = {
       "Advanced AI reasoning & quality",
       "Full styling & placements",
       "Priority support + deep analytics",
+      "Up to 10,000 AI queries/month",
     ],
   },
 };

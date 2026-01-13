@@ -295,7 +295,7 @@ export default function Setup() {
         <Badge tone="subdued">Recommended</Badge>
       </InlineStack>
       <Text as="p" tone="subdued">
-        Pick a plan to unlock AI. <strong>Lite</strong>, <strong>Pro</strong>, or <strong>Premium</strong>. We’ll check your catalog size before activating Lite.
+        Pick a plan to unlock AI. <strong>Lite: up to 500 prodyucts</strong>, <strong>Starter: up to 3,000 products</strong>, <strong>Pro</strong>, or <strong>Premium</strong>. We’ll check your catalog size before activating Lite.
       </Text>
       <InlineStack gap="300" wrap={false}>
         <Button url={`#/billing${qs}`} variant="primary">Open Billing</Button>
