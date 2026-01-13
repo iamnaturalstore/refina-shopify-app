@@ -342,6 +342,52 @@ function ruleScore(product = {}, constraints = {}, normQ = "") {
   return score;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Debug capture: finalists snapshots (top12/top8) + lipstick flags
+// ─────────────────────────────────────────────────────────────
+
+const _asArr = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const _tags = (p) => {
+  const t = p?.tags;
+  if (Array.isArray(t)) return t.map(String);
+  if (typeof t === "string") return t.split(",").map(s => s.trim()).filter(Boolean);
+  return [];
+};
+const _ptNorm = (p) =>
+  String(
+    p?.productType_norm ??
+    p?.productTypeNormalized ??
+    p?.productType ??
+    p?.categoryNormalized ??
+    p?.category ??
+    ""
+  ).toLowerCase().trim();
+
+const _pickDebug = (p, i) => ({
+  rank: i + 1,
+  id: String(p?.id ?? p?.productId ?? ""),
+  productType_norm: _ptNorm(p),
+  category: String(p?.category ?? p?.categoryNormalized ?? ""),
+  ruleScore: Number.isFinite(p?.ruleScore) ? p.ruleScore : null,
+  typeMatch: p?.typeMatch ?? null,
+  concernHits: Array.isArray(p?.concernHits) ? p.concernHits : (Number.isFinite(p?.concernHits) ? p.concernHits : null),
+});
+
+const debugFinalistsTop12 = _asArr(typeof forStage2Base !== "undefined" ? forStage2Base : []).slice(0, 12).map(_pickDebug);
+const debugFinalistsTop8  = _asArr(typeof forStage1 !== "undefined" ? forStage1 : []).slice(0, 8).map(_pickDebug);
+
+const _hasLipstick = (p) => {
+  const pt = _ptNorm(p);
+  if (pt === "lipstick" || pt.includes("lipstick")) return true;
+  const tags = _tags(p).map(s => s.toLowerCase());
+  return tags.some(t => t.includes("lipstick"));
+};
+
+const debugLipstickFlags = {
+  top8: _asArr(typeof forStage1 !== "undefined" ? forStage1 : []).slice(0, 8).some(_hasLipstick),
+  top12: _asArr(typeof forStage2Base !== "undefined" ? forStage2Base : []).slice(0, 12).some(_hasLipstick),
+};
+
 // ─── Cache (7d TTL; version + epoch invalidation) ────────────────────────────
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CACHE_VERSION = "concierge-v2-kb";
@@ -672,6 +718,9 @@ if (cached) {
       timings,
       capsuleCount: 0,
       capsuleChars: 0,
+      debugFinalistsTop12,
+      debugFinalistsTop8,
+      debugLipstickFlags,
     },
   });
 }
@@ -1092,6 +1141,9 @@ try {
           promptChars,
           capsuleCount: capsulesStage1?.length ?? 0,
           capsuleChars: capsuleCharCount(capsulesStage1),
+          debugFinalistsTop12,
+          debugFinalistsTop8,
+          debugLipstickFlags,
         },
       });
     }
