@@ -161,7 +161,7 @@ async function embedText(text) {
     process.env.GOOGLE_API_KEY || "";
   if (!key) return [];
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`;
   const body = {
     model: "models/gemini-embedding-001",
     content: { parts: [{ text: String(text || "") }] },

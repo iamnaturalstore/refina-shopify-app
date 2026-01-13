@@ -6,7 +6,7 @@ import { db } from "../bff/lib/firestore.js";
 async function embed(text) {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   if (!key) throw new Error("GEMINI_API_KEY missing");
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${encodeURIComponent(key)}`;
   const body = { model: "models/gemini-embedding-001", content: { parts: [{ text: String(text || "") }] } };
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`embed HTTP ${r.status}`);
