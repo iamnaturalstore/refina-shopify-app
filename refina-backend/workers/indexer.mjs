@@ -11,6 +11,7 @@ import { buildExtractEntitiesPrompt } from "../ai/prompts/extractEntities.js";
 import { validateExtractionOutput } from "../ai/jsonSchemas.js";
 // NEW: EO denylist for the product-level EO flag
 import { EO_DENYLIST } from "../bff/lib/knowledge.js";
+import crypto from "crypto";
 
 // ─────────────────────────────────────────────────────────────
 // Progress status (UI reads: indexerStatus/<shop>)
@@ -139,6 +140,94 @@ async function callGeminiWithRetry(prompt, cfg, timeoutMs) {
     }
   }
   throw lastErr || new Error("llm_failed");
+}
+
+function stableStr(v, cap) {
+const s = String(v || "").trim();
+return cap && s.length > cap ? s.slice(0, cap) : s;
+}
+function stableArr(v, cap) {
+const a = Array.isArray(v) ? v : [];
+const out = [];
+for (const x of a) {
+const s = String(x || "").trim();
+if (!s) continue;
+out.push(s);
+if (cap && out.length >= cap) break;
+}
+return out;
+}
+function stableTags(p, cap) {
+const t = p && p.tags;
+const tags = Array.isArray(t)
+? t
+: typeof t === "string"
+? t.split(",").map(s => s.trim()).filter(Boolean)
+: [];
+return stableArr(tags, cap).map(s => s.toLowerCase());
+}
+function hasAnyDenylistSignal(haystackLower, denylist) {
+if (!haystackLower) return false;
+if (!Array.isArray(denylist) || !denylist.length) return false;
+for (const term of denylist) {
+const t = String(term || "").trim().toLowerCase();
+if (!t) continue;
+if (haystackLower.includes(t)) return true;
+}
+return false;
+}
+function hasEssentialOilSignalForEmbedding(p) {
+  const _tags = stableTags(p, 48).join(" ");
+  const _t = stableStr(p && (p.title || p.name), 200).toLowerCase();
+  const _raw = stableStr((p && (p.description || p.body_html)) || "", 4000);
+  const _d = _raw.replace(/<[^>]*>/g, " ").toLowerCase();
+
+  const _hay = [_t, _tags, _d].filter(Boolean).join("\n");
+
+  // Prefer denylist terms when available.
+  if (hasAnyDenylistSignal(_hay, EO_DENYLIST)) return true;
+
+  // Conservative secondary signals.
+  return (
+    _hay.includes("essential oil") ||
+    _hay.includes("essential oils") ||
+    _hay.includes("aromatherapy") ||
+    _hay.includes(" e.o") ||
+    _hay.includes(" eo ")
+  );
+}
+
+// Deterministic capsule-derived text for embeddings (align retrieval with Gemini capsules).
+function capsuleTextForEmbedding(p) {
+  const _title = stableStr(p && (p.title || p.name), 120);
+  const _type = stableStr(p && p.productType, 60);
+
+  const _keywords = stableArr(p && p.keywords, 12);
+  const _benefits = stableArr(p && p.benefits, 8);
+
+  const _ingRaw = (p && (p.ingredientsNormalized || p.ingredients)) || [];
+  const _ingredients = stableArr(_ingRaw, 20);
+
+  const _fit = stableArr(p && p.skinFitTags, 10);
+
+  const _essentialOils =
+    Boolean(p && p.avoidFlags && p.avoidFlags.essentialOils) ||
+    hasEssentialOilSignalForEmbedding(p);
+
+  const _usage = stableStr(p && p.usage, 120);
+
+  // Compact, stable ordering. Avoid long HTML descriptions entirely.
+  const lines = [];
+  if (_title) lines.push("title:" + _title);
+  if (_type) lines.push("type:" + _type);
+  if (_keywords.length) lines.push("keywords:" + _keywords.join(";"));
+  if (_benefits.length) lines.push("benefits:" + _benefits.join(";"));
+  if (_ingredients.length) lines.push("ingredients:" + _ingredients.join(";"));
+  if (_fit.length) lines.push("fit:" + _fit.join(";"));
+  lines.push("avoidEO:" + (_essentialOils ? "yes" : "no"));
+  if (_usage) lines.push("usage:" + _usage);
+
+  return lines.join("\n");
 }
 
 // Build canonical text for embeddings (title + short desc + tags)
@@ -499,18 +588,41 @@ const evidence = entities
     evidence: e.evidence.slice(0, 2),
 }));
 
-  // Compute & store embedding vector
-  const textForEmb = productEmbedText(product);
-  const vector = await embedText(textForEmb); // [] if embed call fails
+  // Compute & store embedding vector (capsule-derived)
+  const textForEmb = capsuleTextForEmbedding(product);
+  const capsuleHash = capsuleHashForEmbedding(textForEmb);
 
-  batch.set(linkRef, {
-    productId,
-    entities: slugs.slice(0, 64),
-    evidence,
-    ...(vector.length ? { vector } : {}),
-    updatedAt: nowTs(),
-    schemaVersion: 1,
-  }, { merge: true });
+  // Optional cost saver: if the capsuleHash hasn't changed and vector exists, skip re-embedding.
+  let vector = [];
+  try {
+    const existing = await linkRef.get();
+    const prevHash = existing.exists ? String(existing.get("capsuleHash") || "") : "";
+    const hasVector =
+      existing.exists &&
+      Array.isArray(existing.get("vector")) &&
+      existing.get("vector").length > 0;
+
+    if (!prevHash || prevHash !== capsuleHash || !hasVector) {
+      vector = await embedText(textForEmb); // [] if embed call fails
+    }
+  } catch {
+    vector = await embedText(textForEmb); // fail open
+  }
+
+  batch.set(
+    linkRef,
+    {
+      productId,
+      capsuleHash,
+      embeddingTextVersion: 1,
+      entities: slugs.slice(0, 64),
+      evidence,
+      ...(vector.length ? { vector } : {}),
+      updatedAt: nowTs(),
+      schemaVersion: 1,
+    },
+    { merge: true }
+  );
 
   // Per-product entity facts path (unchanged)
   for (const ent of extraction.entities) {
