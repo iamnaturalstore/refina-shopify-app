@@ -419,6 +419,53 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   // (Change the default if you prefer another phrase.)
   const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
 
+    const renderRationale = (text) => {
+    const raw = typeof text === "string" ? text : String(text || "");
+    const lines = raw.split("\n");
+
+    const bulletLines = lines
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("•"));
+
+    // If no bullets, just preserve newlines nicely.
+    if (bulletLines.length === 0) {
+      return (
+        <p className={styles.blurb} style={{ whiteSpace: "pre-line" }}>
+          {raw}
+        </p>
+      );
+    }
+
+    // Split into: narrative (everything not bullet lines) + bullets.
+    const narrative = lines
+      .filter((l) => !l.trim().startsWith("•"))
+      .join("\n")
+      .trim();
+
+    const paragraphs = narrative
+      .split(/\n\s*\n/g) // split on blank line(s)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    return (
+      <>
+        {paragraphs.map((p, i) => (
+          <p key={i} className={styles.blurb}>
+            {p}
+          </p>
+        ))}
+
+        <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
+          {bulletLines.map((l, i) => (
+            <li key={i} style={{ marginBottom: 6, lineHeight: 1.45 }}>
+              {l.replace(/^•\s*/, "").trim()}
+            </li>
+          ))}
+        </ul>
+      </>
+    );
+  };
+
 
   return (
     <div className={styles.container}>
@@ -470,12 +517,19 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
       </button>
 
 
-      {(copy.why || copy.rationale || copy.extras) && (
+           {(copy.why || copy.rationale || copy.extras) && (
         <div className={styles.responseBox} aria-live="polite">
           <h2>Here’s what I’d pick</h2>
+
           {copy.why ? <p className={styles.opener}>{copy.why}</p> : null}
-          {copy.rationale ? <p className={styles.blurb}>{copy.rationale}</p> : null}
-          {copy.extras ? <p className={styles.usageNote}>{copy.extras}</p> : null}
+
+          {copy.rationale ? renderRationale(copy.rationale) : null}
+
+          {copy.extras ? (
+            <p className={styles.usageNote} style={{ whiteSpace: "pre-line" }}>
+              {copy.extras}
+            </p>
+          ) : null}
         </div>
       )}
 

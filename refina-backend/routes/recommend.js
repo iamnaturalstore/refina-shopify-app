@@ -1560,6 +1560,7 @@ explanation = cleanTrim(firstParagraph(explanation), expCap);
     }
 
     // Growth: current compact mode (short explanation, fewer reasons).
+    // Growth: compact mode (short explanation, fewer reasons) — but KEEP Awesome payload intact.
     if (level === "growth") {
       const maxReasonLen = 90;
 
@@ -1580,8 +1581,52 @@ explanation = cleanTrim(firstParagraph(explanation), expCap);
 
       const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
 
-      // Compact mode: no Awesome structure (matches your current “Pro” compact behavior).
-      return { ...payload, awesome: null, explanation, reasonsById, copy: undefined };
+      // Keep Awesome if present, but trim it down for Growth.
+      let awesome =
+        payload.awesome && typeof payload.awesome === "object" ? payload.awesome : null;
+
+      if (awesome && awesome.explanation && typeof awesome.explanation === "object") {
+        const oneLinerRaw =
+          typeof awesome.explanation.oneLiner === "string"
+            ? awesome.explanation.oneLiner
+            : explanation;
+
+        const friendlyRaw =
+          typeof awesome.explanation.friendlyParagraph === "string"
+            ? awesome.explanation.friendlyParagraph
+            : explanation;
+
+        const expertBulletsRaw = Array.isArray(awesome.explanation.expertBullets)
+          ? awesome.explanation.expertBullets
+          : [];
+
+        const expertBullets = expertBulletsRaw
+          .map((b) => cleanTrim(String(b || ""), 120))
+          .filter(Boolean)
+          .slice(0, 2); // Growth: max 2 bullets
+
+        awesome = {
+          ...awesome,
+          explanation: {
+            ...awesome.explanation,
+            oneLiner: cleanTrim(oneLinerRaw, 180),
+            friendlyParagraph: cleanTrim(friendlyRaw, 420),
+            expertBullets,
+          },
+        };
+      }
+
+      // IMPORTANT: your widget currently renders copy.why/rationale/extras.
+      // Populate a compact copy surface for Growth so it never shows as empty.
+      const copy = {
+        why:
+          (awesome?.explanation?.oneLiner && String(awesome.explanation.oneLiner)) ||
+          "",
+        rationale: explanation,
+        extras: "",
+      };
+
+      return { ...payload, awesome, explanation, reasonsById, copy };
     }
 
     // Lite: AI-short (minimal “why”).
