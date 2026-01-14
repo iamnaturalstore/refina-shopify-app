@@ -32,11 +32,21 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const docPerMin = Number(plan?.entitlements?.quota?.perMinuteCeiling ?? NaN);
 
     const defaultsByLevel = {
-    free:    { monthly: 0,     perMin: 0,  maxProducts: 0,  charBudget: 8000 },
-    lite:    { monthly: 500,   perMin: 8,  maxProducts: 10, charBudget: 16000 }, // NEW: Lite
-    growth:  { monthly: 2000,  perMin: 9,  maxProducts: 14, charBudget: 18000 },
-    pro:     { monthly: 5000,  perMin: 10, maxProducts: 14, charBudget: 18000 },
-    premium: { monthly: 10000, perMin: 20, maxProducts: 24, charBudget: 28000 },
+    // (free not used in listing anymore; keep as a safety default)
+    free: { maxProducts: 8, charBudget: 14000, perMin: 6 },
+
+    // Lite: AI-short (minimal “why”)
+    lite: { maxProducts: 10, charBudget: 14000, perMin: 8 },
+
+    // Growth: current compact mode (your current “Pro” behavior)
+    growth: { maxProducts: 14, charBudget: 18000, perMin: 10 },
+
+    // Pro: trimmed Awesome (same structure, 1-paragraph explanation)
+    pro: { maxProducts: 18, charBudget: 24000, perMin: 12 },
+
+    // Premium: full Awesome + richer explanation (2 short paras)
+    premium: { maxProducts: 22, charBudget: 32000, perMin: 16 },
+    
     plus:    { monthly: 25000, perMin: 30, maxProducts: 36, charBudget: 38000 }, // legacy, safe to keep
   };
   const def = defaultsByLevel[level] || defaultsByLevel.free;
@@ -48,11 +58,14 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   const aiEnabled = (level === "lite" || level === "growth" || level === "pro" || level === "premium" || level === "plus") && status === "ACTIVE";
   if (!aiEnabled) {
     return {
-      state: "off",
-      message:
-        'Enable AI answers with Lite ($9), Growth ($19), Pro ($39), or Premium ($79).',
-      trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
-    };
+    state: "off",
+    message:
+      'Enable AI answers with Lite ($9), Growth ($19), Pro ($39), or Premium ($79).',
+    level,
+    plan: { level },
+    trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
+  };
+
   }
 
   // 3) Reset monthly window if calendar month changed
@@ -97,6 +110,8 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
       state: "limited",
       message:
         "You’ve hit your plan’s per-minute limit. Try again in a moment, or upgrade for more throughput.",
+        level,
+        plan: { level },
       trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
     };
   }
@@ -114,6 +129,8 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
     return {
       state: "limited",
       message: msg,
+      level,
+      plan: { level },
       trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
     };
   }
@@ -122,6 +139,8 @@ export async function aiGuard({ storeId, intent, longForm = false, expectedPromp
   return {
     state: "ok",
     message: null,
+    level,
+    plan: { level },
     trim: { maxProducts: def.maxProducts, charBudget: def.charBudget },
   };
 }

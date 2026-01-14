@@ -1274,81 +1274,202 @@ async function loadProductsForScoring(storeId, ids = []) {
 }
 
   function clampCachedPayload(payload, guard) {
-    try {
-      if (!payload || typeof payload !== "object") return payload;
-      const maxItems = Math.max(1, Number(guard?.trim?.maxProducts || 12));
+  try {
+    if (!payload || typeof payload !== "object") return payload;
 
-      const products = Array.isArray(payload.products) ? payload.products.slice(0, maxItems) : [];
-      const keepIds = new Set(products.map(p => String(p.id)));
-      const productIds = Array.isArray(payload.productIds)
-        ? payload.productIds.filter(id => keepIds.has(String(id))).slice(0, maxItems)
-        : Array.from(keepIds);
+    const maxItems = Math.max(1, Number(guard?.trim?.maxProducts || 12));
 
-      let awesome = payload.awesome || null;
-      if (awesome && typeof awesome === "object") {
-        const primaryOk = awesome.primary && keepIds.has(String(awesome.primary.id)) ? awesome.primary : null;
-        const alternatives = Array.isArray(awesome.alternatives)
-          ? awesome.alternatives.filter(a => a && keepIds.has(String(a.id))).slice(0, Math.max(0, maxItems - (primaryOk ? 1 : 0)))
-          : [];
-        awesome = { ...awesome, primary: primaryOk, alternatives, productIds };
-      }
+    const products = Array.isArray(payload.products)
+      ? payload.products.slice(0, maxItems)
+      : [];
+    const keepIds = new Set(products.map((p) => String(p.id)));
 
-      const reasonsById = payload.reasonsById && typeof payload.reasonsById === "object" ? Object.fromEntries(
-        Object.entries(payload.reasonsById).filter(([k]) => keepIds.has(String(k)))
-      ) : {};
+    const productIds = Array.isArray(payload.productIds)
+      ? payload.productIds.filter((id) => keepIds.has(String(id))).slice(0, maxItems)
+      : Array.from(keepIds);
 
-      const charBudget = Number(guard?.trim?.charBudget || 28000);
-      const expCap = charBudget <= 20000 ? 280 : 480;
-      let explanation = typeof payload.explanation === "string" ? payload.explanation : "";
-      if (explanation.length > expCap) explanation = explanation.slice(0, expCap - 1) + "…";
+    let awesome = payload.awesome || null;
+    if (awesome && typeof awesome === "object") {
+      const primaryOk =
+        awesome.primary && keepIds.has(String(awesome.primary.id))
+          ? awesome.primary
+          : null;
 
-      return { ...payload, productIds, products, awesome, reasonsById, explanation };
-    } catch {
-      return payload;
+      const alternatives = Array.isArray(awesome.alternatives)
+        ? awesome.alternatives
+            .filter((a) => a && keepIds.has(String(a.id)))
+            .slice(0, Math.max(0, maxItems - (primaryOk ? 1 : 0)))
+        : [];
+
+      awesome = { ...awesome, primary: primaryOk, alternatives, productIds };
     }
+
+    const reasonsById =
+      payload.reasonsById && typeof payload.reasonsById === "object"
+        ? Object.fromEntries(
+            Object.entries(payload.reasonsById).filter(([k]) => keepIds.has(String(k)))
+          )
+        : {};
+
+    // IMPORTANT:
+    // - On cache hits we may not have a guard yet (for speed). In that case, do NOT
+    //   trim the explanation, otherwise Premium/Pro copy can be unintentionally clipped.
+    // - When a guard is present, trim to the plan’s intended explanation cap.
+    const level = String(guard?.plan?.level || guard?.level || "").toLowerCase();
+
+    const capsByLevel = {
+      lite: 200,
+      growth: 280,
+      pro: 520,       // 1 short paragraph
+      premium: 900,   // 2 short paragraphs
+    };
+
+    let explanation = typeof payload.explanation === "string" ? payload.explanation : "";
+
+    const hasGuard = !!guard && typeof guard === "object" && !!guard.trim;
+    if (hasGuard) {
+      const expCap = capsByLevel[level] || 480;
+      if (explanation.length > expCap) explanation = explanation.slice(0, expCap - 1) + "…";
+    } else {
+      // Safety cap only (prevents pathological payloads without affecting normal copy).
+      const hardCap = 4000;
+      if (explanation.length > hardCap) explanation = explanation.slice(0, hardCap - 1) + "…";
+    }
+
+    return { ...payload, productIds, products, awesome, reasonsById, explanation };
+  } catch {
+    return payload;
   }
+}
 
   function transformToBasicIfNeeded(payload, guard) {
-    try {
-      if (!payload || typeof payload !== "object") return payload;
+  try {
+    if (!payload || typeof payload !== "object") return payload;
 
-      const lvlA = (guard?.plan?.level || "").toString().toLowerCase();
-      const lvlB = (guard?.level || "").toString().toLowerCase();
-      const longFormOff = guard?.features && guard.features.longForm === false;
-      const trims = guard?.trim || {};
-      const proLikeTrims =
-        Number(trims.maxProducts || 999) <= 14 &&
-        Number(trims.charBudget || 999999) <= 20000;
+    const level = String(guard?.plan?.level || guard?.level || "").toLowerCase();
 
-      const isPro = (lvlA === "pro" || lvlB === "pro" || lvlA === "growth" || lvlB === "growth" || lvlA === "lite" || lvlB === "lite" || longFormOff || proLikeTrims);
-      if (!isPro) return payload;
+    // Default: if we can’t confidently identify the plan, keep payload as-is.
+    if (!level) return payload;
 
-      const products = Array.isArray(payload.products) ? payload.products : [];
-      const productIds = Array.isArray(payload.productIds) ? payload.productIds : products.map((p) => String(p.id));
+    // Helper: trim text without cutting words too aggressively.
+    function cleanTrim(s, cap) {
+      const str = String(s || "").trim();
+      if (!cap || str.length <= cap) return str;
+      const slice = str.slice(0, cap - 1);
+      const cut = slice.lastIndexOf(" ");
+      return (cut > 40 ? slice.slice(0, cut) : slice) + "…";
+    }
 
-      const primaryId =
-        (payload?.awesome?.primary?.id && String(payload.awesome.primary.id)) ||
-        (productIds.length ? String(productIds[0]) : null);
+    // Helper: keep only first paragraph (for Pro), without deleting intent.
+    function firstParagraph(s) {
+      const str = String(s || "").trim();
+      if (!str) return str;
+      const parts = str.split(/\n\s*\n/); // blank-line paragraphs
+      return (parts[0] || str).trim();
+    }
 
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    const productIds = Array.isArray(payload.productIds)
+      ? payload.productIds.map((id) => String(id))
+      : products.map((p) => String(p.id));
+
+    const primaryId =
+      (payload?.awesome?.primary?.id && String(payload.awesome.primary.id)) ||
+      (productIds.length ? String(productIds[0]) : null);
+
+    // Derive a single “why” for basic tiers.
+    const fromReasonsById =
+      primaryId && payload.reasonsById && payload.reasonsById[primaryId]
+        ? String(payload.reasonsById[primaryId])
+        : "";
+    const fromAwesomeReasons = Array.isArray(payload?.awesome?.primary?.reasons)
+      ? payload.awesome.primary.reasons.join(" ")
+      : "";
+    const fromCopy = payload?.copy?.why || payload?.copy?.rationale || "";
+
+    // Shared helper for trimming reasons arrays.
+    const capReasons = (arr, max, cap) =>
+      Array.isArray(arr) ? arr.slice(0, max).map((r) => cleanTrim(r, cap)) : [];
+
+    // ----------------------------
+    // Plan ladder shaping
+    // ----------------------------
+
+    // Premium: full Awesome + richer explanation (allow ~2 short paragraphs).
+    if (level === "premium") {
+      const expCap = 900;
+      const explanation =
+        typeof payload.explanation === "string" && payload.explanation.trim()
+          ? cleanTrim(payload.explanation, expCap)
+          : "Here are my top picks, chosen from your store for the best fit.";
+
+      const awesome =
+        payload.awesome && typeof payload.awesome === "object"
+          ? {
+              ...payload.awesome,
+              primary: payload.awesome.primary
+                ? {
+                    ...payload.awesome.primary,
+                    reasons: capReasons(payload.awesome.primary.reasons, 4, 140),
+                  }
+                : null,
+              alternatives: Array.isArray(payload.awesome.alternatives)
+                ? payload.awesome.alternatives.map((a) => ({
+                    ...a,
+                    reasons: capReasons(a?.reasons, 3, 120),
+                  }))
+                : [],
+            }
+          : payload.awesome;
+
+      return { ...payload, awesome, explanation };
+    }
+
+    // Pro: trimmed Awesome (same structure) but 1 paragraph only.
+    if (level === "pro") {
+      const expCap = 520;
+      let explanation =
+        typeof payload.explanation === "string" && payload.explanation.trim()
+          ? payload.explanation.trim()
+          : "Here are my top picks, chosen from your store for the best fit.";
+
+      explanation = cleanTrim(firstParagraph(explanation), expCap);
+
+      const awesome =
+        payload.awesome && typeof payload.awesome === "object"
+          ? {
+              ...payload.awesome,
+              primary: payload.awesome.primary
+                ? {
+                    ...payload.awesome.primary,
+                    reasons: capReasons(payload.awesome.primary.reasons, 3, 120),
+                  }
+                : null,
+              alternatives: Array.isArray(payload.awesome.alternatives)
+                ? payload.awesome.alternatives.map((a) => ({
+                    ...a,
+                    reasons: capReasons(a?.reasons, 2, 110),
+                  }))
+                : [],
+            }
+          : payload.awesome;
+
+      return { ...payload, awesome, explanation };
+    }
+
+    // Growth: current compact mode (short explanation, fewer reasons).
+    if (level === "growth") {
       const maxReasonLen = 90;
-      const fromReasonsById = primaryId && payload.reasonsById && payload.reasonsById[primaryId]
-        ? String(payload.reasonsById[primaryId]) : "";
-      const fromAwesomeReasons = Array.isArray(payload?.awesome?.primary?.reasons)
-        ? payload.awesome.primary.reasons.join(" ") : "";
-      const fromCopy = payload?.copy?.why || payload?.copy?.rationale || "";
 
-      function cleanTrim(s, cap) {
-        const str = String(s || "");
-        if (str.length <= cap) return str;
-        const slice = str.slice(0, cap - 1);
-        const cut = slice.lastIndexOf(" ");
-        return (cut > 40 ? slice.slice(0, cut) : slice) + "…";
-      }
-
-      let primaryReason = (fromReasonsById || fromAwesomeReasons || fromCopy || "Top match for your concern.").trim();
+      let primaryReason = (
+        fromReasonsById ||
+        fromAwesomeReasons ||
+        fromCopy ||
+        "Top match for your concern."
+      ).trim();
       primaryReason = cleanTrim(primaryReason, maxReasonLen);
 
-      const expCap = 220;
+      const expCap = 280;
       let explanation =
         typeof payload.explanation === "string" && payload.explanation.trim()
           ? payload.explanation.trim()
@@ -1357,9 +1478,35 @@ async function loadProductsForScoring(storeId, ids = []) {
 
       const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
 
+      // Compact mode: no Awesome structure (matches your current “Pro” compact behavior).
       return { ...payload, awesome: null, explanation, reasonsById, copy: undefined };
-    } catch { return payload; }
+    }
+
+    // Lite: AI-short (minimal “why”).
+    if (level === "lite") {
+      const maxReasonLen = 75;
+
+      let primaryReason = (fromReasonsById || fromAwesomeReasons || fromCopy || "Best match.").trim();
+      primaryReason = cleanTrim(primaryReason, maxReasonLen);
+
+      const expCap = 200;
+      let explanation =
+        typeof payload.explanation === "string" && payload.explanation.trim()
+          ? payload.explanation.trim()
+          : "Here are the best matches for what you asked.";
+      explanation = cleanTrim(explanation, expCap);
+
+      const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
+
+      return { ...payload, awesome: null, explanation, reasonsById, copy: undefined };
+    }
+
+    // Unknown plan: do not reshape.
+    return payload;
+  } catch {
+    return payload;
   }
+}
 });
 
 export default router;
