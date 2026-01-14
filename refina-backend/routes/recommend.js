@@ -655,7 +655,7 @@ const ck = cacheKey(storeId, concernNorm);
 const cached = await readCache(storeId, ck, cacheEpoch);
 if (cached) {
   // No guard yet — keep cached payload intact and fast.
-  let shaped = clampCachedPayload(cached, null);
+  let shaped = clampCachedPayload(cached, guard);
   shaped = transformToBasicIfNeeded(shaped, null);
 
   return res.json({
@@ -1277,17 +1277,23 @@ async function loadProductsForScoring(storeId, ids = []) {
   try {
     if (!payload || typeof payload !== "object") return payload;
 
+    const level = String(guard?.level || guard?.plan?.level || "premium").toLowerCase();
+
+    // Clamp counts (but do not destroy structures we might need later).
     const maxItems = Math.max(1, Number(guard?.trim?.maxProducts || 12));
 
     const products = Array.isArray(payload.products)
       ? payload.products.slice(0, maxItems)
       : [];
+
     const keepIds = new Set(products.map((p) => String(p.id)));
 
     const productIds = Array.isArray(payload.productIds)
       ? payload.productIds.filter((id) => keepIds.has(String(id))).slice(0, maxItems)
       : Array.from(keepIds);
 
+    // Preserve awesome if it exists — only filter it to kept IDs.
+    // (Do NOT null it here; tier logic happens later.)
     let awesome = payload.awesome || null;
     if (awesome && typeof awesome === "object") {
       const primaryOk =
@@ -1296,49 +1302,118 @@ async function loadProductsForScoring(storeId, ids = []) {
           : null;
 
       const alternatives = Array.isArray(awesome.alternatives)
-        ? awesome.alternatives
-            .filter((a) => a && keepIds.has(String(a.id)))
-            .slice(0, Math.max(0, maxItems - (primaryOk ? 1 : 0)))
+        ? awesome.alternatives.filter((a) => a && keepIds.has(String(a.id))).slice(
+            0,
+            Math.max(0, maxItems - (primaryOk ? 1 : 0))
+          )
         : [];
 
       awesome = { ...awesome, primary: primaryOk, alternatives, productIds };
     }
 
-    const reasonsById =
+    // Keep / filter reasonsById; if missing, derive from awesome (so UI can show per-pick lines).
+    let reasonsById =
       payload.reasonsById && typeof payload.reasonsById === "object"
         ? Object.fromEntries(
             Object.entries(payload.reasonsById).filter(([k]) => keepIds.has(String(k)))
           )
-        : {};
+        : null;
 
-    // IMPORTANT:
-    // - On cache hits we may not have a guard yet (for speed). In that case, do NOT
-    //   trim the explanation, otherwise Premium/Pro copy can be unintentionally clipped.
-    // - When a guard is present, trim to the plan’s intended explanation cap.
-    const level = String(guard?.plan?.level || guard?.level || "").toLowerCase();
-
-    const capsByLevel = {
-      lite: 200,
-      growth: 280,
-      pro: 520,       // 1 short paragraph
-      premium: 900,   // 2 short paragraphs
-    };
-
-    let explanation = typeof payload.explanation === "string" ? payload.explanation : "";
-
-    const hasGuard = !!guard && typeof guard === "object" && !!guard.trim;
-    if (hasGuard) {
-      const expCap = capsByLevel[level] || 480;
-      if (explanation.length > expCap) explanation = explanation.slice(0, expCap - 1) + "…";
-    } else {
-      // Safety cap only (prevents pathological payloads without affecting normal copy).
-      const hardCap = 4000;
-      if (explanation.length > hardCap) explanation = explanation.slice(0, hardCap - 1) + "…";
+    if (!reasonsById) {
+      reasonsById = {};
+      if (awesome && typeof awesome === "object") {
+        if (awesome.primary?.id && Array.isArray(awesome.primary.reasons)) {
+          const id = String(awesome.primary.id);
+          if (keepIds.has(id)) reasonsById[id] = awesome.primary.reasons.join(" ");
+        }
+        if (Array.isArray(awesome.alternatives)) {
+          for (const a of awesome.alternatives) {
+            if (!a?.id || !Array.isArray(a.reasons)) continue;
+            const id = String(a.id);
+            if (keepIds.has(id)) reasonsById[id] = a.reasons.join(" ");
+          }
+        }
+      }
     }
 
-    return { ...payload, productIds, products, awesome, reasonsById, explanation };
-  } catch {
+    const clamped = {
+      ...payload,
+      products,
+      productIds,
+      awesome,
+      reasonsById,
+    };
+
+    return transformToBasicIfNeeded(clamped, guard, level);
+  } catch (e) {
     return payload;
+  }
+
+  function transformToBasicIfNeeded(payload, guard, level) {
+    const trim = guard?.trim || {};
+
+    // Explanation ladder:
+    // - Premium: up to ~900 chars, can be multi-paragraph
+    // - Pro: first paragraph only
+    // - Growth: short, first paragraph only
+    // - Lite: even shorter, first paragraph only
+    const DEFAULT_MAX = {
+      premium: 900,
+      pro: 520,
+      growth: 320,
+      lite: 220,
+    };
+
+    const maxExplanationChars = Math.max(
+      80,
+      Number(trim.maxExplanationChars || DEFAULT_MAX[level] || 520)
+    );
+
+    const firstParagraphOnly = level !== "premium";
+
+    const normalizedExplanation = trimText(
+      String(payload.explanation || ""),
+      maxExplanationChars,
+      firstParagraphOnly
+    );
+
+    let out = { ...payload, explanation: normalizedExplanation };
+
+    // “Awesome” ladder:
+    // Premium/Pro keep awesome; Growth/Lite drop awesome (compact mode).
+    const keepAwesome = level === "premium" || level === "pro";
+
+    if (!keepAwesome) {
+      out.awesome = null;
+    }
+
+    // Safety: ensure reasonsById never references removed products
+    if (out.reasonsById && typeof out.reasonsById === "object") {
+      const keep = new Set((out.productIds || []).map(String));
+      out.reasonsById = Object.fromEntries(
+        Object.entries(out.reasonsById).filter(([k]) => keep.has(String(k)))
+      );
+    }
+
+    return out;
+  }
+
+  function trimText(text, maxChars, firstParagraphOnly) {
+    if (!text) return "";
+
+    let t = text.trim();
+
+    if (firstParagraphOnly) {
+      // Split on blank line (handles \n\n and similar).
+      const parts = t.split(/\n\s*\n/);
+      t = (parts[0] || "").trim();
+    }
+
+    if (t.length <= maxChars) return t;
+
+    // Hard cut with clean-ish ending
+    const cut = t.slice(0, maxChars - 1).trimEnd();
+    return cut.replace(/[,:;]\s*$/, "").trimEnd() + "…";
   }
 }
 
@@ -1396,44 +1471,71 @@ async function loadProductsForScoring(storeId, ids = []) {
     // ----------------------------
 
     // Premium: full Awesome + richer explanation (allow ~2 short paragraphs).
-    if (level === "premium") {
-      const expCap = 900;
-      const explanation =
-        typeof payload.explanation === "string" && payload.explanation.trim()
-          ? cleanTrim(payload.explanation, expCap)
-          : "Here are my top picks, chosen from your store for the best fit.";
+    // Premium: full Awesome + richer explanation (lead + bullet proof).
+if (level === "premium") {
+  const expCap = 900;
 
-      const awesome =
-        payload.awesome && typeof payload.awesome === "object"
-          ? {
-              ...payload.awesome,
-              primary: payload.awesome.primary
-                ? {
-                    ...payload.awesome.primary,
-                    reasons: capReasons(payload.awesome.primary.reasons, 4, 140),
-                  }
-                : null,
-              alternatives: Array.isArray(payload.awesome.alternatives)
-                ? payload.awesome.alternatives.map((a) => ({
-                    ...a,
-                    reasons: capReasons(a?.reasons, 3, 120),
-                  }))
-                : [],
-            }
-          : payload.awesome;
+  const oneLiner =
+    payload?.awesome?.explanation?.oneLiner ||
+    "Here are my top picks from your store.";
 
-      return { ...payload, awesome, explanation };
-    }
+  const bullets = Array.isArray(payload?.awesome?.explanation?.expertBullets)
+    ? payload.awesome.explanation.expertBullets
+    : [];
+
+  // Build: Lead sentence + bullets (scan-friendly) rather than a long 2nd paragraph.
+  // Keeps shoppers feeling informed without the wall-of-text effect.
+  const bulletBlock =
+    bullets.length
+      ? "Why these picks (quick proof):\n" +
+        bullets
+          .slice(0, 4)
+          .map((b) => `• ${String(b || "").trim()}`)
+          .join("\n")
+      : "";
+
+  let explanation = oneLiner;
+  if (bulletBlock) explanation = `${oneLiner}\n\n${bulletBlock}`;
+
+  explanation = cleanTrim(explanation, expCap);
+
+  const awesome =
+    payload.awesome && typeof payload.awesome === "object"
+      ? {
+          ...payload.awesome,
+          primary: payload.awesome.primary
+            ? {
+                ...payload.awesome.primary,
+                reasons: capReasons(payload.awesome.primary.reasons, 4, 140),
+              }
+            : null,
+          alternatives: Array.isArray(payload.awesome.alternatives)
+            ? payload.awesome.alternatives.map((a) => ({
+                ...a,
+                reasons: capReasons(a?.reasons, 3, 120),
+              }))
+            : [],
+        }
+      : payload.awesome;
+
+  // NOTE: We intentionally set top-level payload.explanation because your UI
+  // likely reads payload.explanation for the lead area.
+  return { ...payload, awesome, explanation };
+}
 
     // Pro: trimmed Awesome (same structure) but 1 paragraph only.
     if (level === "pro") {
       const expCap = 520;
       let explanation =
-        typeof payload.explanation === "string" && payload.explanation.trim()
-          ? payload.explanation.trim()
-          : "Here are my top picks, chosen from your store for the best fit.";
+       (typeof payload?.awesome?.explanation?.friendlyParagraph === "string" &&
+         payload.awesome.explanation.friendlyParagraph.trim()
+           ? payload.awesome.explanation.friendlyParagraph.trim()
+           : typeof payload.explanation === "string" && payload.explanation.trim()
+             ? payload.explanation.trim()
+             : "Here are my top picks, chosen from your store for the best fit.");
 
-      explanation = cleanTrim(firstParagraph(explanation), expCap);
+explanation = cleanTrim(firstParagraph(explanation), expCap);
+
 
       const awesome =
         payload.awesome && typeof payload.awesome === "object"
