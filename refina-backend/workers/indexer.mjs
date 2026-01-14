@@ -11,7 +11,7 @@ import { buildExtractEntitiesPrompt } from "../ai/prompts/extractEntities.js";
 import { validateExtractionOutput } from "../ai/jsonSchemas.js";
 // NEW: EO denylist for the product-level EO flag
 import { EO_DENYLIST } from "../bff/lib/knowledge.js";
-import crypto from "crypto";
+import { createHash } from "node:crypto";
 
 // ─────────────────────────────────────────────────────────────
 // Progress status (UI reads: indexerStatus/<shop>)
@@ -140,6 +140,10 @@ async function callGeminiWithRetry(prompt, cfg, timeoutMs) {
     }
   }
   throw lastErr || new Error("llm_failed");
+}
+
+function capsuleHashForEmbedding(text) {
+  return createHash("sha256").update(String(text || ""), "utf8").digest("hex");
 }
 
 function stableStr(v, cap) {
