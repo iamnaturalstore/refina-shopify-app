@@ -1470,32 +1470,79 @@ async function loadProductsForScoring(storeId, ids = []) {
     // Plan ladder shaping
     // ----------------------------
 
-    // Premium: full Awesome + richer explanation (lead + bullet proof).
+    // Premium: full Awesome + best “why these picks” (per-pick proof bullets).
     if (level === "premium") {
       const expCap = 900;
 
       const oneLiner =
-        payload?.awesome?.explanation?.oneLiner ||
-        "Here are my top picks from your store.";
+        (typeof payload?.awesome?.explanation?.oneLiner === "string" &&
+        payload.awesome.explanation.oneLiner.trim()
+          ? payload.awesome.explanation.oneLiner.trim()
+          : typeof payload.explanation === "string" && payload.explanation.trim()
+            ? payload.explanation.trim()
+            : "Here are my top picks from your store.");
 
-      const bullets = Array.isArray(payload?.awesome?.explanation?.expertBullets)
-        ? payload.awesome.explanation.expertBullets
-        : [];
+      // Helper: find product title by id (if products are present)
+      const productTitleById = (id) => {
+        const pid = String(id || "");
+        const list = Array.isArray(payload.products) ? payload.products : [];
+        const hit = list.find((p) => String(p?.id) === pid);
+        return (hit?.title && String(hit.title).trim()) || pid;
+      };
 
-      const bulletBlock =
-        bullets.length
-          ? "Why these picks (quick proof):\n" +
-            bullets
-              .slice(0, 4)
-              .map((b) => `• ${String(b || "").trim()}`)
-              .join("\n")
-          : "";
+      // Premium bullets: brief per-pick “why” (primary + alternatives)
+      const bullets = [];
+
+      const pushBullet = (label, productId, reason) => {
+        const r = String(reason || "").trim();
+        if (!r) return;
+
+        const title = productTitleById(productId);
+        const line = `${label}: ${title} — ${cleanTrim(r, 140)}`;
+
+        // prevent duplicates
+        const norm = line.toLowerCase();
+        if (bullets.some((b) => b.toLowerCase() === norm)) return;
+
+        bullets.push(line);
+      };
+
+      const primaryId =
+        (payload?.awesome?.primary?.id && String(payload.awesome.primary.id)) ||
+        (Array.isArray(payload.productIds) && payload.productIds.length
+          ? String(payload.productIds[0])
+          : null);
+
+      // Primary bullet (Top pick)
+      if (primaryId && Array.isArray(payload?.awesome?.primary?.reasons)) {
+        pushBullet("Top pick", primaryId, payload.awesome.primary.reasons[0]);
+      } else if (primaryId && payload?.reasonsById?.[primaryId]) {
+        pushBullet("Top pick", primaryId, payload.reasonsById[primaryId]);
+      }
+
+      // Alternatives bullets (up to 2)
+      if (Array.isArray(payload?.awesome?.alternatives)) {
+        for (const alt of payload.awesome.alternatives) {
+          if (bullets.length >= 3) break; // 1 top pick + 2 alts
+          const altId = alt?.id ? String(alt.id) : null;
+          const altReason =
+            Array.isArray(alt?.reasons) && alt.reasons.length ? alt.reasons[0] : "";
+          if (altId) pushBullet("Alternative", altId, altReason);
+        }
+      }
+
+      const finalBullets = bullets.slice(0, 4);
+
+      // Explanation: lead + per-pick bullets (scan-friendly, not a wall of text)
+      const bulletBlock = finalBullets.length
+        ? "Why these picks:\n" + finalBullets.map((b) => `• ${b}`).join("\n")
+        : "";
 
       let explanation = oneLiner;
       if (bulletBlock) explanation = `${oneLiner}\n\n${bulletBlock}`;
-
       explanation = cleanTrim(explanation, expCap);
 
+      // Keep Awesome intact, just trim reasons a touch (Premium is still “full”)
       const awesome =
         payload.awesome && typeof payload.awesome === "object"
           ? {
@@ -1512,15 +1559,34 @@ async function loadProductsForScoring(storeId, ids = []) {
                     reasons: capReasons(a?.reasons, 3, 120),
                   }))
                 : [],
+              explanation:
+                payload.awesome.explanation && typeof payload.awesome.explanation === "object"
+                  ? {
+                      ...payload.awesome.explanation,
+                      oneLiner: cleanTrim(oneLiner, 240),
+                      expertBullets: finalBullets, // now truly “why per pick”
+                    }
+                  : payload.awesome.explanation,
             }
           : payload.awesome;
 
-      return { ...payload, awesome, explanation };
+      // Widget-safe surfaces:
+      // - rationale = lead sentence/paragraph
+      // - extras = bullets block (proof)
+      const copy = {
+        why: cleanTrim(oneLiner, 240),
+        rationale: cleanTrim(oneLiner, 520),
+        extras: finalBullets.length ? finalBullets.map((b) => `• ${b}`).join("\n") : "",
+      };
+
+      return { ...payload, awesome, explanation, copy };
     }
 
-    // Pro: trimmed Awesome (same structure) but 1 paragraph only.
+    // Pro: trimmed Awesome (same structure) but 1 paragraph only + proof bullets.
     if (level === "pro") {
       const expCap = 520;
+
+      // Pro explanation = ONE paragraph only.
       let explanation =
         (typeof payload?.awesome?.explanation?.friendlyParagraph === "string" &&
         payload.awesome.explanation.friendlyParagraph.trim()
@@ -1529,8 +1595,35 @@ async function loadProductsForScoring(storeId, ids = []) {
             ? payload.explanation.trim()
             : "Here are my top picks, chosen from your store for the best fit.");
 
-      explanation = cleanTrim(firstParagraph(explanation), expCap);
+      explanation = firstParagraph(explanation);
+      explanation = cleanTrim(explanation, expCap);
 
+      // Build 2–4 proof bullets (brief “why” per pick).
+      const bullets = [];
+      const pushBullet = (s) => {
+        const t = String(s || "").trim();
+        if (!t) return;
+        const norm = t.toLowerCase();
+        if (bullets.some((b) => b.toLowerCase() === norm)) return;
+        bullets.push(cleanTrim(t, 130));
+      };
+
+      if (payload?.awesome?.primary?.reasons && Array.isArray(payload.awesome.primary.reasons)) {
+        payload.awesome.primary.reasons.slice(0, 2).forEach(pushBullet);
+      }
+
+      if (Array.isArray(payload?.awesome?.alternatives)) {
+        for (const alt of payload.awesome.alternatives) {
+          if (bullets.length >= 4) break;
+          if (Array.isArray(alt?.reasons) && alt.reasons.length) {
+            pushBullet(alt.reasons[0]);
+          }
+        }
+      }
+
+      const finalBullets = bullets.slice(0, 4);
+
+      // Trim Awesome but keep the structure (Primary + Alternatives stays clear).
       const awesome =
         payload.awesome && typeof payload.awesome === "object"
           ? {
@@ -1547,11 +1640,37 @@ async function loadProductsForScoring(storeId, ids = []) {
                     reasons: capReasons(a?.reasons, 2, 110),
                   }))
                 : [],
+              explanation:
+                payload.awesome.explanation && typeof payload.awesome.explanation === "object"
+                  ? {
+                      ...payload.awesome.explanation,
+                      oneLiner: cleanTrim(
+                        firstParagraph(payload.awesome.explanation.oneLiner || ""),
+                        180
+                      ),
+                      friendlyParagraph: explanation, // lock to 1 paragraph
+                      expertBullets: finalBullets, // keep in Awesome for downstream use
+                    }
+                  : payload.awesome.explanation,
             }
           : payload.awesome;
 
-      return { ...payload, awesome, explanation };
+      // Widget-safe surface:
+      // - rationale = 1 paragraph
+      // - extras = bullets (proof)
+      const extras = finalBullets.length ? finalBullets.map((b) => `• ${b}`).join("\n") : "";
+
+      const copy = {
+        why:
+          (awesome?.explanation?.oneLiner && String(awesome.explanation.oneLiner).trim()) ||
+          "",
+        rationale: explanation,
+        extras,
+      };
+
+      return { ...payload, awesome, explanation, copy };
     }
+
 
     // Growth: compact mode (short explanation, fewer reasons) — KEEP awesome trimmed.
     if (level === "growth") {
@@ -1566,54 +1685,118 @@ async function loadProductsForScoring(storeId, ids = []) {
       primaryReason = cleanTrim(primaryReason, maxReasonLen);
 
       const expCap = 280;
+
+      // IMPORTANT: Growth must be a SINGLE paragraph.
       let explanation =
         typeof payload.explanation === "string" && payload.explanation.trim()
           ? payload.explanation.trim()
           : "Here are the strongest matches for your concern.";
+
+      explanation = firstParagraph(explanation);
       explanation = cleanTrim(explanation, expCap);
 
       const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
 
+      // Keep Awesome if present, but trim it down for Growth.
       let awesome =
         payload.awesome && typeof payload.awesome === "object" ? payload.awesome : null;
 
+      // Build 3–5 “why” bullets (these are the compact proof points).
+      const bulletCap = 5;
+      const bullets = [];
+
+      // Helper: add bullets safely without dupes / empties.
+      const pushBullet = (s) => {
+        const t = String(s || "").trim();
+        if (!t) return;
+        const norm = t.toLowerCase();
+        if (bullets.some((b) => b.toLowerCase() === norm)) return;
+        bullets.push(cleanTrim(t, 120));
+      };
+
+      if (awesome && typeof awesome === "object") {
+        // 1) Primary reasons (up to 2)
+        if (Array.isArray(awesome?.primary?.reasons)) {
+          awesome.primary.reasons.slice(0, 2).forEach(pushBullet);
+        }
+
+        // 2) Alternatives (take first reason from each alt until we hit cap)
+        if (Array.isArray(awesome?.alternatives)) {
+          for (const alt of awesome.alternatives) {
+            if (bullets.length >= bulletCap) break;
+            if (Array.isArray(alt?.reasons) && alt.reasons.length) {
+              pushBullet(alt.reasons[0]);
+            }
+          }
+        }
+      }
+
+      // 3) Fallback bullet sources if we still don't have enough
+      if (bullets.length < 3 && primaryReason) pushBullet(primaryReason);
+      if (bullets.length < 3 && fromAwesomeReasons) pushBullet(fromAwesomeReasons);
+      if (bullets.length < 3 && fromCopy) pushBullet(fromCopy);
+
+      // Clamp to 3–5 bullets
+      const finalBullets = bullets.slice(0, bulletCap);
+      while (finalBullets.length > 0 && finalBullets.length < 3) {
+        // If we somehow only found 1–2, keep it minimal rather than padding with fluff.
+        break;
+      }
+
+      // Optional Tip line (short, not a second paragraph)
+      // Keep this conservative: only include when it’s clearly helpful.
+      let tip = "";
+      if (/oily hair|oil|build-?up|scalp/i.test(explanation)) {
+        tip = "Tip: Focus shampoo on the scalp and rinse thoroughly to avoid residue.";
+      }
+
+      // Trim Awesome explanation fields so Growth never outputs 2-paragraph blobs.
       if (awesome && awesome.explanation && typeof awesome.explanation === "object") {
         const oneLinerRaw =
           typeof awesome.explanation.oneLiner === "string"
             ? awesome.explanation.oneLiner
-            : explanation;
+            : "";
 
         const friendlyRaw =
           typeof awesome.explanation.friendlyParagraph === "string"
             ? awesome.explanation.friendlyParagraph
-            : explanation;
-
-        const expertBulletsRaw = Array.isArray(awesome.explanation.expertBullets)
-          ? awesome.explanation.expertBullets
-          : [];
-
-        const expertBullets = expertBulletsRaw
-          .map((b) => cleanTrim(String(b || ""), 120))
-          .filter(Boolean)
-          .slice(0, 2);
+            : "";
 
         awesome = {
           ...awesome,
           explanation: {
             ...awesome.explanation,
-            oneLiner: cleanTrim(oneLinerRaw, 180),
-            friendlyParagraph: cleanTrim(friendlyRaw, 420),
-            expertBullets,
+            oneLiner: cleanTrim(firstParagraph(oneLinerRaw || explanation), 180),
+            friendlyParagraph: cleanTrim(firstParagraph(friendlyRaw || explanation), 320),
+            // Keep expertBullets aligned with compact UI
+            expertBullets: finalBullets.map((b) => String(b)),
           },
+          primary: awesome.primary
+            ? {
+                ...awesome.primary,
+                reasons: capReasons(awesome.primary.reasons, 2, 120),
+              }
+            : null,
+          alternatives: Array.isArray(awesome.alternatives)
+            ? awesome.alternatives.map((a) => ({
+                ...a,
+                reasons: capReasons(a?.reasons, 1, 120),
+              }))
+            : [],
         };
       }
 
+      // IMPORTANT: widget renders copy.why/rationale/extras.
+      // Growth uses: 1 paragraph in rationale + bullets (and optional Tip) in extras.
+      const extrasLines = [
+        ...finalBullets.map((b) => `• ${b}`),
+        ...(tip ? [tip] : []),
+      ].filter(Boolean);
+
       const copy = {
-        why:
-          (awesome?.explanation?.oneLiner && String(awesome.explanation.oneLiner)) ||
-          "",
+        why: (awesome?.explanation?.oneLiner && String(awesome.explanation.oneLiner)) || "",
         rationale: explanation,
-        extras: "",
+        extras: extrasLines.join("\n"),
       };
 
       return { ...payload, awesome, explanation, reasonsById, copy };
@@ -1629,16 +1812,24 @@ async function loadProductsForScoring(storeId, ids = []) {
       primaryReason = cleanTrim(primaryReason, maxReasonLen);
 
       const expCap = 200;
+
+    // IMPORTANT: Lite must be a SINGLE paragraph.
+    // Prevents "\n\nThe PURE…" leaking into a truncated 2nd paragraph.
       let explanation =
         typeof payload.explanation === "string" && payload.explanation.trim()
           ? payload.explanation.trim()
           : "Here are the best matches for what you asked.";
+
+    // Keep first paragraph only (hard rule for Lite)
+      explanation = firstParagraph(explanation);
+
+    // Final trim
       explanation = cleanTrim(explanation, expCap);
 
       const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
 
-      // Keep Lite surface predictable for the widget:
-      // copy.rationale only, no bullets.
+    // Keep Lite surface predictable for the widget:
+    // copy.rationale only, no bullets.
       const copy = {
         why: "",
         rationale: explanation,
@@ -1647,6 +1838,7 @@ async function loadProductsForScoring(storeId, ids = []) {
 
       return { ...payload, awesome: null, explanation, reasonsById, copy };
     }
+
 
     // Unknown plan: do not reshape.
     return payload;
