@@ -526,7 +526,6 @@ const renderRationale = (text) => {
     if (/^(\u2022|•|\-|\*|\d+[.)])\s+/.test(l)) return true;
 
     // Colon bullets: "PRODUCT NAME: reason..."
-    // Matches your screenshot (e.g., "SLEEP DIFFUSER BLEND: ...")
     if (/^.{3,80}:\s+/.test(l)) return true;
 
     return false;
@@ -538,44 +537,75 @@ const renderRationale = (text) => {
       .replace(/^(\u2022|•|\-|\*|\d+[.)])\s+/, "") // remove classic bullet markers
       .trim();
 
-  // Rule: If there are 2+ paragraph blocks, treat the LAST block as proof,
-  // and keep earlier blocks as narrative.
+  // Rule: if there are 2+ blocks, last block is the "proof block"
   const narrativeBlocks = blocks.length >= 2 ? blocks.slice(0, -1) : [];
   const proofBlock = blocks.length >= 2 ? blocks[blocks.length - 1] : blocks[0] || "";
 
+  // Split proof block into candidate "bullet lines"
   const proofLines = proofBlock
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const bulletLines = proofLines.filter(isBulletLine);
+  // 1) Try explicit bullets / colon bullets first
+  const explicitBullets = proofLines.filter(isBulletLine);
 
-  // Only switch to bullets when we have a clear multi-line proof section
-  const shouldRenderBullets = bulletLines.length >= 2;
-
-  if (!shouldRenderBullets) {
+  if (explicitBullets.length >= 2) {
     return (
-      <p className={styles.blurb} style={{ whiteSpace: "pre-line" }}>
-        {raw}
-      </p>
+      <>
+        {narrativeBlocks.map((p, i) => (
+          <p key={`n-${i}`} className={styles.blurb}>
+            {p}
+          </p>
+        ))}
+
+        <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
+          {explicitBullets.map((l, i) => (
+            <li key={`b-${i}`} style={{ marginBottom: 6, lineHeight: 1.45 }}>
+              {cleanBullet(l)}
+            </li>
+          ))}
+        </ul>
+      </>
     );
   }
 
+  // 2) If no explicit bullets, but the proof block is "sentence-proof" (like your screenshot),
+  // turn sentences into bullets.
+  const sentenceBullets = proofBlock
+    .replace(/\s+Tip:\s+/g, " Tip: ") // keep tip with sentence
+    .split(/(?<=[.!?])\s+/) // split by sentence endings
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (sentenceBullets.length >= 2) {
+    return (
+      <>
+        {narrativeBlocks.map((p, i) => (
+          <p key={`n2-${i}`} className={styles.blurb}>
+            {p}
+          </p>
+        ))}
+
+        <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
+          {sentenceBullets.map((s, i) => (
+            <li key={`s-${i}`} style={{ marginBottom: 6, lineHeight: 1.45 }}>
+              {s}
+            </li>
+          ))}
+        </ul>
+      </>
+    );
+  }
+
+  // 3) Final fallback: preserve as paragraphs / pre-line
   return (
     <>
-      {narrativeBlocks.map((p, i) => (
-        <p key={i} className={styles.blurb}>
+      {blocks.map((p, i) => (
+        <p key={`p-${i}`} className={styles.blurb}>
           {p}
         </p>
       ))}
-
-      <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
-        {bulletLines.map((l, i) => (
-          <li key={i} style={{ marginBottom: 6, lineHeight: 1.45 }}>
-            {cleanBullet(l)}
-          </li>
-        ))}
-      </ul>
     </>
   );
 };
