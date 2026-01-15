@@ -491,8 +491,9 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const legacyCta = (settings.ctaText || "").trim();
 
   // Final label priority: URL override → legacy → safe default.
-  // (Change the default if you prefer another phrase.)
-  const renderOpener = (text) => {
+// (Change the default if you prefer another phrase.)
+
+const renderOpener = (text) => {
   const raw = typeof text === "string" ? text : String(text || "");
   const paragraphs = raw
     .split(/\n\s*\n/g)
@@ -506,54 +507,78 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   ));
 };
 
-  const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
+const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
 
-    const renderRationale = (text) => {
-    const raw = typeof text === "string" ? text : String(text || "");
-    const lines = raw.split("\n");
+const renderRationale = (text) => {
+  const raw = typeof text === "string" ? text : String(text || "");
 
-    const bulletLines = lines
-      .map((l) => l.trim())
-      .filter((l) => /^(\u2022|•|\-|\*|\d+[.)])\s+/.test(l));
+  // Split into paragraph blocks (blank lines)
+  const blocks = raw
+    .split(/\n\s*\n/g)
+    .map((b) => b.trim())
+    .filter(Boolean);
 
-    // If no bullets, just preserve newlines nicely.
-    if (bulletLines.length === 0) {
-      return (
-        <p className={styles.blurb} style={{ whiteSpace: "pre-line" }}>
-          {raw}
-        </p>
-      );
-    }
+  const isBulletLine = (line) => {
+    const l = line.trim();
+    if (!l) return false;
 
-    // Split into: narrative (everything not bullet lines) + bullets.
-    const narrative = lines
-      .filter((l) => !l.trim().startsWith("•"))
-      .join("\n")
+    // Normal bullets: • / - / * / 1) / 1.
+    if (/^(\u2022|•|\-|\*|\d+[.)])\s+/.test(l)) return true;
+
+    // Colon bullets: "PRODUCT NAME: reason..."
+    // Matches your screenshot (e.g., "SLEEP DIFFUSER BLEND: ...")
+    if (/^.{3,80}:\s+/.test(l)) return true;
+
+    return false;
+  };
+
+  const cleanBullet = (line) =>
+    line
+      .trim()
+      .replace(/^(\u2022|•|\-|\*|\d+[.)])\s+/, "") // remove classic bullet markers
       .trim();
 
-    const paragraphs = narrative
-      .split(/\n\s*\n/g) // split on blank line(s)
-      .map((p) => p.trim())
-      .filter(Boolean);
+  // Rule: If there are 2+ paragraph blocks, treat the LAST block as proof,
+  // and keep earlier blocks as narrative.
+  const narrativeBlocks = blocks.length >= 2 ? blocks.slice(0, -1) : [];
+  const proofBlock = blocks.length >= 2 ? blocks[blocks.length - 1] : blocks[0] || "";
 
+  const proofLines = proofBlock
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const bulletLines = proofLines.filter(isBulletLine);
+
+  // Only switch to bullets when we have a clear multi-line proof section
+  const shouldRenderBullets = bulletLines.length >= 2;
+
+  if (!shouldRenderBullets) {
     return (
-      <>
-        {paragraphs.map((p, i) => (
-          <p key={i} className={styles.blurb}>
-            {p}
-          </p>
-        ))}
-
-        <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
-          {bulletLines.map((l, i) => (
-            <li key={i} style={{ marginBottom: 6, lineHeight: 1.45 }}>
-              {l.replace(/^(\u2022|•|\-|\*|\d+[.)])\s+/, "").trim()}
-            </li>
-          ))}
-        </ul>
-      </>
+      <p className={styles.blurb} style={{ whiteSpace: "pre-line" }}>
+        {raw}
+      </p>
     );
-  };
+  }
+
+  return (
+    <>
+      {narrativeBlocks.map((p, i) => (
+        <p key={i} className={styles.blurb}>
+          {p}
+        </p>
+      ))}
+
+      <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
+        {bulletLines.map((l, i) => (
+          <li key={i} style={{ marginBottom: 6, lineHeight: 1.45 }}>
+            {cleanBullet(l)}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+};
 
 
   return (
