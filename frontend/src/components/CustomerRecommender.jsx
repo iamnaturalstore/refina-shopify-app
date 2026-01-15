@@ -239,9 +239,9 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
   const PROGRESS_PHASES = [
     { at: 0,       text: "Thinking" },
-    { at: 5_000,  text: "Researching" },
+    { at: 5_000,   text: "Reading product data" },
     { at: 10_000,  text: "Shortlisting products" },
-    { at: 15_000,  text: "Analyzing matches" },
+    { at: 15_000,  text: "Ranking your candidates" },
     { at: 20_000,  text: "Finalizing your Top 3" },
     { at: 25_000,  text: "Reasons why" },
   ];

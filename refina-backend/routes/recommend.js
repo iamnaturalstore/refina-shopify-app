@@ -1645,7 +1645,6 @@ if (level === "lite") {
   return { ...payload, awesome: null, explanation, reasonsById, copy };
 }
 
-
     // Unknown plan: do not reshape.
     return payload;
   } catch {
