@@ -920,11 +920,28 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     if (enriched && meta.source === 'gemini') {
       const ex = enriched.explanation || {};
       const primary = enriched.primary || {};
-      const toPara = (v) => (Array.isArray(v) ? v.join(' ').replace(/\s*•\s*/g, ' ').trim() : String(v || '').replace(/\s*•\s*/g, ' ').trim());
+      // Keep bullets as bullets (do NOT flatten arrays into a sentence)
+      const toText = (v) => String(v || "").trim();
+
+      const toBullets = (v) => {
+        if (!v) return "";
+        if (Array.isArray(v)) {
+          const items = v.map((x) => String(x || "").trim()).filter(Boolean);
+          if (!items.length) return "";
+          return items.map((x) => `• ${x.replace(/^(\u2022|•|\-|\*)\s+/, "").trim()}`).join("\n");
+        }
+        // If already a string with bullets, keep it as-is
+        return String(v).trim();
+      };
+
       copy = {
-        why: (ex.friendlyParagraph || ex.oneLiner || copy.why || '').trim(),
-        rationale: toPara(ex.expertBullets || copy.rationale),
-        extras: toPara(copy.extras),
+        // Pro/Premium: keep the lead readable, but do NOT let it become a wall
+        why: (ex.oneLiner || ex.friendlyParagraph || copy.why || "").trim(),
+
+        // Critical fix: expertBullets must remain bullets so renderRationale can detect them
+        rationale: toBullets(ex.expertBullets || copy.rationale),
+
+        extras: toText(copy.extras),
       };
     }
 
