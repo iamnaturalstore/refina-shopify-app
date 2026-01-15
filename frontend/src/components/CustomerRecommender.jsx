@@ -26,6 +26,81 @@ function formatPrice(val) {
   return `$${n.toFixed(2)}`;
 }
 
+const splitParagraphs = (text = "") =>
+  String(text)
+    .split(/\n\s*\n/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+const parseBulletsFromText = (text = "") =>
+  String(text)
+    .split(/\n+/g)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => l.replace(/^(\u2022|•|\-|\*|\d+[.)])\s+/, "")) // strip bullet markers
+    .filter(Boolean);
+
+const renderParagraphs = (text, className) => {
+  const parts = splitParagraphs(text);
+  if (!parts.length) return null;
+
+  return parts.map((p, i) => (
+    <p key={`${className || "para"}-${i}`} className={className}>
+      {p}
+    </p>
+  ));
+};
+
+/**
+ * Proof renderer rules (matches your conversion-shape contract):
+ * - If array -> render as <ul><li>
+ * - If string contains a lead + blank line + bullet section -> lead as <p>, rest as <ul>
+ * - If plain string -> keep as <p>
+ */
+const renderRationale = (rationale) => {
+  if (!rationale) return null;
+
+  // 1) Array = already structured bullets
+  if (Array.isArray(rationale)) {
+    return (
+      <ul className={styles.reasonsList}>
+        {rationale
+          .map((b) => String(b || "").trim())
+          .filter(Boolean)
+          .map((b, i) => (
+            <li key={`r-arr-${i}`}>{b}</li>
+          ))}
+      </ul>
+    );
+  }
+
+  const blocks = splitParagraphs(rationale);
+
+  // 2) If we have 2+ blocks: treat block 1 as lead, rest as bullet proof
+  if (blocks.length >= 2) {
+    const lead = blocks[0];
+    const bulletText = blocks.slice(1).join("\n");
+    const bullets = parseBulletsFromText(bulletText);
+
+    return (
+      <>
+        {lead ? <p>{lead}</p> : null}
+
+        {bullets.length ? (
+          <ul className={styles.reasonsList}>
+            {bullets.map((b, i) => (
+              <li key={`r-bul-${i}`}>{b}</li>
+            ))}
+          </ul>
+        ) : null}
+      </>
+    );
+  }
+
+  // 3) Single block: plain paragraph
+  return <p>{blocks[0]}</p>;
+};
+
 // --- SAFE catalog HTML sanitizer (UI-only) ---
 function sanitizeCatalogHtml(html = "") {
   try {
@@ -417,6 +492,20 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
   // Final label priority: URL override → legacy → safe default.
   // (Change the default if you prefer another phrase.)
+  const renderOpener = (text) => {
+  const raw = typeof text === "string" ? text : String(text || "");
+  const paragraphs = raw
+    .split(/\n\s*\n/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return paragraphs.map((p, i) => (
+    <p key={i} className={styles.opener}>
+      {p}
+    </p>
+  ));
+};
+
   const askLabel = widgetCtaOverride || legacyCta || "Find My Products";
 
     const renderRationale = (text) => {
@@ -425,7 +514,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
     const bulletLines = lines
       .map((l) => l.trim())
-      .filter((l) => l.startsWith("•"));
+      .filter((l) => /^(\u2022|•|\-|\*|\d+[.)])\s+/.test(l));
 
     // If no bullets, just preserve newlines nicely.
     if (bulletLines.length === 0) {
@@ -458,7 +547,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18 }}>
           {bulletLines.map((l, i) => (
             <li key={i} style={{ marginBottom: 6, lineHeight: 1.45 }}>
-              {l.replace(/^•\s*/, "").trim()}
+              {l.replace(/^(\u2022|•|\-|\*|\d+[.)])\s+/, "").trim()}
             </li>
           ))}
         </ul>
@@ -521,7 +610,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         <div className={styles.responseBox} aria-live="polite">
           <h2>Here’s what I’d pick</h2>
 
-          {copy.why ? <p className={styles.opener}>{copy.why}</p> : null}
+          {copy.why ? renderOpener(copy.why) : null}
 
           {copy.rationale ? renderRationale(copy.rationale) : null}
 
