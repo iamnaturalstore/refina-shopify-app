@@ -1570,7 +1570,15 @@ async function loadProductsForScoring(storeId, ids = []) {
         typeof payload.explanation === "string" && payload.explanation.trim()
           ? payload.explanation.trim()
           : "Here are the strongest matches for your concern.";
-      explanation = cleanTrim(explanation, expCap);
+      // Growth must stay compact, but NO ellipsis truncation.
+      explanation = firstParagraph(explanation);
+      if (explanation.length > expCap) {
+        explanation = explanation
+          .slice(0, expCap)
+          .trimEnd()
+          .replace(/[,:;]\s*$/, "")
+          .trimEnd();
+      }
 
       const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
 
