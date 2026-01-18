@@ -75,8 +75,79 @@
     background: transparent; cursor: pointer; font-size: .9em; color: var(--color-foreground);
   }
 
+  .refina-dw-update {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(17,17,17,.12);
+    background: rgba(17,17,17,.06);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .refina-dw-update:active { transform: translateY(1px); }
+
   .refina-dw-context { opacity: .75; font-size: .85em; margin-bottom: 6px; }
   .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
+
+    /* Step 4 — Results section */
+  .refina-dw-results { margin: 6px 0 10px; }
+  .refina-dw-results-head { display: grid; gap: 2px; margin-bottom: 8px; }
+  .refina-dw-results-title { font-weight: 600; font-size: .95em; }
+  .refina-dw-results-sub { opacity: .75; font-size: .85em; line-height: 1.25; }
+
+  .refina-dw-results-list { display: grid; gap: 8px; }
+
+  .refina-dw-result {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(17,17,17,.12);
+    background: color-mix(in srgb, var(--color-background, #ffffff) 92%, var(--color-accent, #7A5CFF) 8%);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .refina-dw-result:active { transform: translateY(1px); }
+
+  .refina-dw-result-img {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    object-fit: cover;
+    background: rgba(17,17,17,.06);
+  }
+
+  .refina-dw-result-meta { display: grid; gap: 3px; min-width: 0; }
+  .refina-dw-result-title {
+    font-weight: 600;
+    font-size: .92em;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .refina-dw-result-why {
+    opacity: .75;
+    font-size: .84em;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .refina-dw-empty {
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px dashed rgba(17,17,17,.18);
+    opacity: .85;
+    font-size: .88em;
+    line-height: 1.25;
+  }
 
   .refina-dw-input {
     width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
@@ -93,6 +164,36 @@
     background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
     font-weight: 600; cursor: pointer; color: var(--color-foreground);
   }
+
+    .refina-dw-foot-note {
+    font-size: .85em;
+    opacity: .75;
+    line-height: 1.25;
+    margin-bottom: 8px;
+  }
+
+  /* Step 7 — footer CTA is secondary */
+  .refina-dw-continue {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(17,17,17,.16);
+    background: transparent;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .refina-dw-continue:active { transform: translateY(1px); }
+
+    .refina-dw-empty-btn {
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(17,17,17,.16);
+    background: rgba(17,17,17,.04);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .refina-dw-empty-btn:active { transform: translateY(1px); }
 
   @media (max-width: 640px) {
     .refina-dw { top: 0; max-height: 100vh; height: 100%; transform: translateX(100%); }
@@ -170,14 +271,53 @@
   }
 }
 
-  function mapChipToIntent(chip) {
-    const s = String(chip || "").toLowerCase();
-    if (s.includes("compare")) return "compare-3";
-    if (s.includes("under")) return "alt-cheaper";
-    if (s.includes("sensitive")) return "verify";
-    if (s.includes("fragrance")) return "avoid-eo";
-    return null;
-  }
+    function parseChipKeys(root) {
+  const raw =
+    root && root.dataset && root.dataset.chipKeys ? String(root.dataset.chipKeys) : "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function mapChipKeyToIntent(key) {
+  const k = String(key || "").toLowerCase().trim();
+
+  // Universal/stable meaning driven by keys (merchant can rename chip copy safely)
+  if (k === "compare") return "compare-3";
+  if (k === "under-cap") return "alt-cheaper";
+  if (k === "sensitive") return "verify";
+  if (k === "fragrance-free") return "avoid-eo";
+
+  return null;
+}
+
+function mapChipToIntent(chip) {
+  // Fallback only (if keys are missing)
+  const s = String(chip || "").toLowerCase();
+  if (s.includes("compare")) return "compare-3";
+  if (s.includes("under")) return "alt-cheaper";
+  if (s.includes("sensitive")) return "verify";
+  if (s.includes("fragrance")) return "avoid-eo";
+  return null;
+}
+
+function getIntentForPdpChip(root, chipEl) {
+  const keys = parseChipKeys(root);
+  const chips = Array.from(root.querySelectorAll(".refina-pdp-assist__chip"));
+  const idx = Math.max(0, chips.indexOf(chipEl));
+
+  const key = keys && keys[idx] ? keys[idx] : null;
+  const text = (chipEl && chipEl.textContent ? chipEl.textContent : "").trim();
+
+  return mapChipKeyToIntent(key) || mapChipToIntent(text);
+}
+
+function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
+  const keys = parseChipKeys(root);
+  const key = keys && keys[chipIndex] ? keys[chipIndex] : null;
+  return mapChipKeyToIntent(key) || mapChipToIntent(chipLabelText);
+}
 
   function savePrefill(payload) {
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {}
@@ -191,6 +331,218 @@
       window.RefinaLauncher.open({ source: payload.source, prefill: payload.prefill, context: payload });
       return;
     }
+
+      // ─────────────────────────────────────────────
+  // Step 4 — Drawer instant “Top alternatives”
+  // Uses GET /apps/refina/v1/recommend?mode=peek (safe to be empty)
+  // ─────────────────────────────────────────────
+
+  function formatMoneyFromCents(cents, currency) {
+    const n = Number(cents);
+    if (!Number.isFinite(n)) return "";
+    const cur = (currency || "USD").toUpperCase();
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: cur,
+        maximumFractionDigits: 0,
+      }).format(n / 100);
+    } catch {
+      return `$${Math.round(n / 100)}`;
+    }
+  }
+
+  function normalizePeekCandidates(data) {
+    const raw =
+      (data && Array.isArray(data.candidates) && data.candidates) ||
+      (data && Array.isArray(data.alts) && data.alts) ||
+      (data && Array.isArray(data.alternatives) && data.alternatives) ||
+      [];
+
+    return raw
+      .map((p) => {
+        if (!p || typeof p !== "object") return null;
+
+        const id = p.id || p.productId || p.shopifyId || null;
+        const title = p.title || p.name || "";
+        const why = p.why || p.reason || p.subtitle || "";
+
+        const image =
+          (Array.isArray(p.images) &&
+            p.images[0] &&
+            (p.images[0].src || p.images[0].url)) ||
+          p.image ||
+          p.imageUrl ||
+          "";
+
+        const handle = p.handle || "";
+        const url = p.url || (handle ? `/products/${handle}` : "");
+
+        const priceCents =
+          p.priceCents ??
+          p.price_cents ??
+          (typeof p.price === "number" ? Math.round(p.price) : null);
+
+        return { id, title, why, image, url, priceCents };
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+  }
+
+  function renderDrawerCandidates(host, payload, candidates) {
+    const list = host.querySelector("[data-results]");
+    const sub = host.querySelector("[data-results-sub]");
+    if (!list || !sub) return;
+
+    list.innerHTML = "";
+
+    if (!candidates || !candidates.length) {
+  const hasRefine = !!(payload && payload.refineText && String(payload.refineText).trim());
+  sub.textContent = hasRefine
+    ? `No strong matches found for: “${payload.refineText}”.`
+    : "No instant alternatives found for this item.";
+
+  const wrap = document.createElement("div");
+  wrap.className = "refina-dw-empty";
+
+  const line1 = document.createElement("div");
+  line1.textContent =
+    "This may already be one of the best fits in this store.";
+
+  const line2 = document.createElement("div");
+  line2.style.marginTop = "6px";
+  line2.textContent =
+    "Try a different preference, or open the full assistant for deeper recommendations.";
+
+  const actions = document.createElement("div");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+  actions.style.marginTop = "10px";
+  actions.style.flexWrap = "wrap";
+
+  const btnClosest = document.createElement("button");
+  btnClosest.type = "button";
+  btnClosest.className = "refina-dw-empty-btn";
+  btnClosest.textContent = "Show closest matches";
+  btnClosest.addEventListener("click", () => {
+    try {
+      payload.intent = "compare-3";
+      hydrateDrawerPeek(document.querySelector(".refina-dw-host.is-open") || document.body, payload);
+    } catch {}
+  });
+
+  actions.appendChild(btnClosest);
+  wrap.appendChild(line1);
+  wrap.appendChild(line2);
+  wrap.appendChild(actions);
+
+  list.appendChild(wrap);
+  return;
+}
+
+    if (payload.refineText) {
+  sub.textContent = `Updated for: “${payload.refineText}”`;
+} else {
+  sub.textContent = "Here are the closest matches to compare.";
+}
+
+    candidates.forEach((p) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "refina-dw-result";
+
+      const img = document.createElement("img");
+      img.className = "refina-dw-result-img";
+      img.alt = p.title ? String(p.title) : "Alternative product";
+      if (p.image) img.src = p.image;
+
+      const meta = document.createElement("div");
+      meta.className = "refina-dw-result-meta";
+
+      const t = document.createElement("div");
+      t.className = "refina-dw-result-title";
+
+      const price =
+        p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
+      t.textContent = price ? `${p.title} · ${price}` : p.title;
+
+      const why = document.createElement("div");
+      why.className = "refina-dw-result-why";
+      why.textContent = p.why || "Tap to view this option.";
+
+      meta.appendChild(t);
+      meta.appendChild(why);
+
+      btn.appendChild(img);
+      btn.appendChild(meta);
+
+      if (p.url) {
+        btn.addEventListener("click", () => {
+          try {
+            window.location.href = p.url;
+          } catch {}
+        });
+      }
+
+      list.appendChild(btn);
+    });
+  }
+
+  async function hydrateDrawerPeek(host, payload) {
+    const sub = host.querySelector("[data-results-sub]");
+    const list = host.querySelector("[data-results]");
+    if (!sub || !list) return;
+
+    const token = uuid();
+    host.dataset.rfPeekToken = token;
+
+    const hasRefine = !!String(payload.refineText || "").trim();
+    sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
+    list.innerHTML = "";
+
+    if (candidates.length === 1) {
+  sub.textContent = payload.refineText
+    ? `Found 1 strong match for: “${payload.refineText}”.`
+    : "Found 1 strong alternative to compare.";
+}
+
+    const storeId = payload.shop || payload.storeId || "";
+    if (!storeId) {
+      renderDrawerCandidates(host, payload, []);
+      return;
+    }
+
+    const refineText = String(payload.refineText || payload.prefill || "").trim().slice(0, 240);
+payload.refineText = refineText;
+
+const qs = new URLSearchParams({
+  mode: "peek",
+  storeId,
+  productId: payload.productId || "",
+  intent: payload.intent || "",
+  priceCap: payload.priceCap || "",
+  currency: payload.currency || "",
+  q: refineText || "",
+});
+
+
+    try {
+      const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, {
+        credentials: "same-origin",
+      });
+      if (!resp.ok) throw new Error("peek_failed");
+      const data = await resp.json();
+
+      if (host.dataset.rfPeekToken !== token) return;
+
+      const candidates = normalizePeekCandidates(data);
+      renderDrawerCandidates(host, payload, candidates);
+    } catch {
+      if (host.dataset.rfPeekToken !== token) return;
+      sub.textContent = "Quick alternatives are unavailable right now.";
+      renderDrawerCandidates(host, payload, []);
+    }
+  }
 
     if (IN_THEME_EDITOR || IN_ADMIN) {
       const shop = payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
@@ -239,14 +591,29 @@
         </header>
         <div class="refina-dw-body">
           <div class="refina-dw-context" data-context></div>
+          <section class="refina-dw-results" aria-live="polite">
+          <div class="refina-dw-results-head">
+            <div class="refina-dw-results-title">Top alternatives</div>
+            <div class="refina-dw-results-sub" data-results-sub>
+              Finding the best matches…
+            </div>
+          </div>
+
+          <div class="refina-dw-results-list" data-results></div>
+        </section>
+
           <div class="refina-dw-chips" data-chips></div>
-          <label class="refina-dw-label" id="rf-dw-label">Message Refina (You can add your age, skin type, budget or goals for smarter picks. Or ask me any other question.)</label>
+          <label class="refina-dw-label" id="rf-dw-label">Want to narrow it down? (Add budget, preferences, or what matters most to refine your picks.)</label>
           <textarea class="refina-dw-input" data-input rows="3" aria-describedby="rf-dw-label"
-            placeholder="Ask a question…"></textarea>
+            placeholder="e.g. under $50, lightweight, best value, or most popular..."></textarea>
+            <button type="button" class="refina-dw-update" data-update>Update alternatives</button>
         </div>
         <footer class="refina-dw-foot">
-          <button type="button" class="refina-dw-continue" data-continue>Continue</button>
-        </footer>
+  <div class="refina-dw-foot-note">
+    Need deeper help? Ask anything and I’ll recommend the best picks.
+  </div>
+  <button type="button" class="refina-dw-continue" data-continue>Open full assistant</button>
+</footer>
       </aside>
   `;
   document.body.appendChild(host);
@@ -267,6 +634,7 @@
 
   const aside = host.querySelector(".refina-dw");
   const input = host.querySelector("[data-input]");
+  const updateBtn = host.querySelector("[data-update]");
   const chipsBox = host.querySelector("[data-chips]");
   const titleEl = host.querySelector(".refina-dw-title");
   const subEl = host.querySelector("[data-sub]");
@@ -289,27 +657,66 @@
   input.value = (basePayload.prefill || "").trim();
 
   // Render chips (merchant chips from block)
-  chipsBox.innerHTML = "";
-  (basePayload.chips || []).forEach((c) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "refina-dw-chip";
-    b.textContent = c;
+chipsBox.innerHTML = "";
+(basePayload.chips || []).forEach((c, i) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "refina-dw-chip";
+  b.textContent = c;
 
-    b.addEventListener("click", () => {
-      // Only insert chip text; do NOT append PDP product title
-      input.value = input.value ? `${input.value} ${c}` : `${c}`;
-      const maybeIntent = mapChipToIntent(c);
-      if (maybeIntent) basePayload.intent = maybeIntent;
-      input.focus();
-    });
+  b.addEventListener("click", () => {
+    // Only insert chip text; do NOT append PDP product title
+    input.value = input.value ? `${input.value} ${c}` : `${c}`;
 
-    chipsBox.appendChild(b);
+    // Use universal chip-keys by index (merchant can rename chip copy safely)
+    const intent = getIntentForDrawerChip(root, i, c);
+    if (intent) basePayload.intent = intent;
+
+    // If this is the “under-cap”/cheaper intent and we have a cap, ensure it’s present
+    if (intent === "alt-cheaper" && !basePayload.priceCap) {
+      const rawCap = (root.dataset.priceCap || "").trim();
+      if (rawCap) basePayload.priceCap = rawCap;
+    }
+
+    // Step 5: instantly refresh “Top alternatives”
+    try {
+      hydrateDrawerPeek(host, basePayload);
+    } catch {}
+
+    input.focus();
   });
 
+  chipsBox.appendChild(b);
+});
   // Open drawer
+    // Open drawer
   host.classList.add("is-open");
   try { aside.focus(); } catch {}
+
+  // Step 4: instantly populate “Top alternatives” (safe to be empty)
+  try { hydrateDrawerPeek(host, basePayload); } catch {}
+
+  function runRefineUpdate() {
+  const text = (input.value || "").trim();
+  basePayload.refineText = text;
+
+  try {
+    hydrateDrawerPeek(host, basePayload);
+  } catch {}
+}
+
+if (updateBtn) {
+  updateBtn.addEventListener("click", runRefineUpdate);
+}
+
+// Enter-to-update (Shift+Enter for a new line)
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    runRefineUpdate();
+  }
+});
+
 
     // Close handlers
     const close = () => host.classList.remove("is-open");
@@ -425,18 +832,20 @@
     }
 
     // CHIP: open drawer with chip text only (no PDP title appended)
-    if (chip) {
-      const chipText = (chip.textContent || "").trim();
-      base.prefill = chipText || "";
+if (chip) {
+  const chipText = (chip.textContent || "").trim();
+  base.prefill = chipText || "";
 
-      const maybeIntent = mapChipToIntent(chipText);
-      if (maybeIntent) base.intent = maybeIntent;
+  // Step 5: universal intent via chip index → chip key (merchant can rename chip copy)
+  const intent = getIntentForPdpChip(root, chip);
+  if (intent) base.intent = intent;
 
-      if (maybeIntent === "alt-cheaper" && !base.priceCap) {
-        const rawCap = (root.dataset.priceCap || "").trim();
-        if (rawCap) base.priceCap = rawCap;
-      }
-    }
+  // Preserve existing cheaper/price-cap behavior
+  if (intent === "alt-cheaper" && !base.priceCap) {
+    const rawCap = (root.dataset.priceCap || "").trim();
+    if (rawCap) base.priceCap = rawCap;
+  }
+}
 
     // Seed verdict/peek (best-effort, non-blocking)
     hydrateVerdictAndPeek(root);
