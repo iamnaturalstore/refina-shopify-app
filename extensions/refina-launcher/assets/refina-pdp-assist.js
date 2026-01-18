@@ -499,12 +499,7 @@ function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
     const hasRefine = !!String(payload.refineText || "").trim();
     sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
     list.innerHTML = "";
-
-    if (candidates.length === 1) {
-  sub.textContent = payload.refineText
-    ? `Found 1 strong match for: “${payload.refineText}”.`
-    : "Found 1 strong alternative to compare.";
-}
+    // NOTE: do not reference `candidates` here — it only exists after the fetch.
 
     const storeId = payload.shop || payload.storeId || "";
     if (!storeId) {
@@ -536,7 +531,16 @@ const qs = new URLSearchParams({
       if (host.dataset.rfPeekToken !== token) return;
 
       const candidates = normalizePeekCandidates(data);
-      renderDrawerCandidates(host, payload, candidates);
+
+    // Nice microcopy (only after we actually have results)
+    if (candidates.length === 1) {
+      sub.textContent = payload.refineText
+        ? `Found 1 strong match for: “${payload.refineText}”.`
+        : "Found 1 strong alternative to compare.";
+    }
+
+    renderDrawerCandidates(host, payload, candidates);
+
     } catch {
       if (host.dataset.rfPeekToken !== token) return;
       sub.textContent = "Quick alternatives are unavailable right now.";
