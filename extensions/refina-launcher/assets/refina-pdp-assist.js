@@ -635,7 +635,7 @@ async function hydrateDrawerPeek(host, payload) {
         </div>
         <footer class="refina-dw-foot">
   <div class="refina-dw-foot-note">
-    Need deeper help? Ask anything and I’ll recommend the best picks.
+    Want to dive deeper? Open the full concierge assistant.
   </div>
   <button type="button" class="refina-dw-continue" data-continue>Open full assistant</button>
 </footer>
@@ -672,8 +672,7 @@ async function hydrateDrawerPeek(host, payload) {
     (basePayload.headline && basePayload.headline.trim()) || "Tell us a bit more";
   subEl.textContent = (basePayload.subcopy || "").trim();
 
-  ctaBtn.textContent =
-    (basePayload.buttonText && basePayload.buttonText.trim()) || "Continue";
+  ctaBtn.textContent = "Open full assistant";
 
   // You can keep or remove this hint; it doesn't inject into the input.
   ctxEl.textContent = basePayload.productTitle ? `Using “${basePayload.productTitle}” as context` : "";
@@ -830,7 +829,7 @@ input.addEventListener("keydown", (e) => {
       const chips = Array.isArray(data.chips) ? data.chips : [];
       const verdict = (data.verdict || "Maybe").toUpperCase();
 
-      verdictEl.textContent = `${verdict}${chips.length ? " • " + chips.slice(0,3).join(" • ") : ""}`;
+      verdictEl.textContent = "";
     } catch {}
 
     // Quick-peek (optional, safe to be empty)
