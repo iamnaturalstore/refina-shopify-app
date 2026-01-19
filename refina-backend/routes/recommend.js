@@ -425,19 +425,18 @@ router.get("/recommend", async (req, res) => {
     const storeId = String(req.query.storeId || "").trim();
     if (!storeId) return res.status(400).json({ error: "storeId required" });
 
-    if (mode === "peek") {
-  // Lightweight alternatives for PDP drawer (Top alternatives)
-  // Deterministic + cheap: pulls a small same-type shortlist and scores locally.
+  if (mode === "peek") {
+  // PDP Drawer "Top alternatives" (minimal + deterministic)
+  // Uses existing query params: storeId, productId, intent, currency, priceCap, q
   const productId = String(req.query.productId || "").trim();
   const intent = String(req.query.intent || "").trim();
   const currency = String(req.query.currency || "").trim();
   const q = String(req.query.q || "").trim().toLowerCase();
-  const priceCap = Number(req.query.priceCap || 0); // dollars (client sends dollars)
+  const priceCap = Number(req.query.priceCap || 0);
 
-  // If we don't know what product we're comparing against, we can't pick alts.
   if (!productId) return res.json({ candidates: [] });
 
-  // Load source product
+  // Load the PDP product (anchor)
   const srcSnap = await db
     .collection("products")
     .doc(storeId)
@@ -448,83 +447,66 @@ router.get("/recommend", async (req, res) => {
   if (!srcSnap.exists) return res.json({ candidates: [] });
   const src = srcSnap.data() || {};
 
-  const srcType = String(src.productType || src.product_type || "")
-    .trim()
-    .toLowerCase();
+  const srcType = String(src.productType || "").trim().toLowerCase();
   const srcTags = Array.isArray(src.tags)
     ? src.tags.map((t) => String(t).toLowerCase())
     : [];
-  const srcTitle = String(src.title || src.name || "").toLowerCase();
 
-  // Fetch a small pool (cheap). Prefer same productType if available.
-  let queryRef = db
+  // Pull a small pool (keep it cheap). We do NOT depend on productType indexes here.
+  const poolSnap = await db
     .collection("products")
     .doc(storeId)
     .collection("items")
-    .limit(30);
-
-  if (srcType && src.productType) {
-    // If your Firestore field name differs, adjust this field name accordingly.
-    queryRef = db
-      .collection("products")
-      .doc(storeId)
-      .collection("items")
-      .where("productType", "==", src.productType)
-      .limit(30);
-  }
-
-  const poolSnap = await queryRef.get();
+    .limit(40)
+    .get();
 
   const pool = [];
   poolSnap.forEach((d) => {
     if (d.id === productId) return;
     const p = d.data() || {};
-    pool.push({ id: d.id, ...p });
+    pool.push({ __docId: d.id, ...p });
   });
 
-  // Scoring: simple + deterministic.
-  // - Same type > shared tags > refine text > under cap (when provided)
+  // Score locally using fields that already exist in your product docs.
   const scored = pool
     .map((p) => {
-      const pTitle = String(p.title || p.name || "").toLowerCase();
-      const pType = String(p.productType || p.product_type || "")
-        .trim()
-        .toLowerCase();
+      const pType = String(p.productType || "").trim().toLowerCase();
       const pTags = Array.isArray(p.tags)
         ? p.tags.map((t) => String(t).toLowerCase())
         : [];
+      const pTitle = String(p.title || p.name || "").toLowerCase();
       const pDesc = String(p.description || p.body_html || "").toLowerCase();
-
-      const priceCents =
-        p.priceCents ??
-        p.price_cents ??
-        (typeof p.price === "number" ? Math.round(p.price) : null);
 
       let score = 0;
 
-      // Type match
+      // Same productType (best signal when present)
       if (srcType && pType && pType === srcType) score += 3;
 
-      // Shared tags
+      // Shared tags (light)
       if (srcTags.length && pTags.length) {
         const shared = pTags.filter((t) => srcTags.includes(t)).length;
         score += Math.min(3, shared);
       }
 
-      // Intent shaping (very light)
-      if (intent === "alt-cheaper" && priceCap && typeof priceCents === "number") {
-        if (priceCents <= priceCap * 100) score += 2;
-      }
-
-      // Refine text hint
+      // Refine text boost (q)
       if (q) {
         if (pTitle.includes(q)) score += 2;
         else if (pDesc.includes(q)) score += 1;
         else if (pTags.some((t) => t.includes(q))) score += 1;
       }
 
-      // Small bias against exact duplicates
-      if (pTitle && srcTitle && pTitle === srcTitle) score -= 1;
+      // Intent: "cheaper" bias (only if your product already has a cents field)
+      // We are NOT introducing new price logic here — just using existing cents if present.
+      const priceCents =
+        typeof p.priceCents === "number"
+          ? p.priceCents
+          : typeof p.price_cents === "number"
+          ? p.price_cents
+          : null;
+
+      if (intent === "alt-cheaper" && priceCap && typeof priceCents === "number") {
+        if (priceCents <= priceCap * 100) score += 2;
+      }
 
       return { p, score, priceCents };
     })
@@ -540,15 +522,16 @@ router.get("/recommend", async (req, res) => {
         p.imageUrl ||
         "";
 
-      // “Why” line: keep short and human.
+      // Minimal "why" string (do not introduce new copy system)
       let why = "Closest match to compare.";
-      const pType = String(p.productType || p.product_type || "").trim();
-      if (pType) why = `Similar ${pType.toLowerCase()} option.`;
+      if (q) why = `Matches “${q}”.`;
+      else if (srcType && String(p.productType || "").trim()) {
+        why = `Similar ${String(p.productType).toLowerCase()} option.`;
+      }
       if (intent === "alt-cheaper" && priceCap) why = `Under $${priceCap} alternative.`;
-      if (q) why = `Matches your update: “${q}”.`;
 
       return {
-        id: p.id || p.productId || null,
+        id: p.__docId,                // Firestore doc id (stable)
         title: p.title || p.name || "Alternative",
         why,
         image,

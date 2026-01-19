@@ -319,218 +319,207 @@ function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
   return mapChipKeyToIntent(key) || mapChipToIntent(chipLabelText);
 }
 
-  function savePrefill(payload) {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {}
+// ─────────────────────────────────────────────
+// Step 4 — Drawer instant “Top alternatives”
+// IMPORTANT: must be TOP-LEVEL scope so openDrawerFrom() can call it.
+// ─────────────────────────────────────────────
+
+function formatMoneyFromCents(cents, currency) {
+  const n = Number(cents);
+  if (!Number.isFinite(n)) return "";
+  const cur = (currency || "USD").toUpperCase();
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: cur,
+      maximumFractionDigits: 0,
+    }).format(n / 100);
+  } catch {
+    return `$${Math.round(n / 100)}`;
+  }
+}
+
+function normalizePeekCandidates(data) {
+  const raw =
+    (data && Array.isArray(data.candidates) && data.candidates) ||
+    (data && Array.isArray(data.alts) && data.alts) ||
+    (data && Array.isArray(data.alternatives) && data.alternatives) ||
+    [];
+
+  return raw
+    .map((p) => {
+      if (!p || typeof p !== "object") return null;
+
+      const id = p.id || p.productId || p.shopifyId || null;
+      const title = p.title || p.name || "";
+      const why = p.why || p.reason || p.subtitle || "";
+
+      const image =
+        (Array.isArray(p.images) &&
+          p.images[0] &&
+          (p.images[0].src || p.images[0].url)) ||
+        p.image ||
+        p.imageUrl ||
+        "";
+
+      const handle = p.handle || "";
+      const url = p.url || (handle ? `/products/${handle}` : "");
+
+      const priceCents =
+        p.priceCents ??
+        p.price_cents ??
+        (typeof p.price === "number" ? Math.round(p.price) : null);
+
+      return { id, title, why, image, url, priceCents };
+    })
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function renderDrawerCandidates(host, payload, candidates) {
+  const list = host.querySelector("[data-results]");
+  const sub = host.querySelector("[data-results-sub]");
+  if (!list || !sub) return;
+
+  list.innerHTML = "";
+
+  if (!candidates || !candidates.length) {
+    const hasRefine = !!String(payload?.refineText || "").trim();
+    sub.textContent = hasRefine
+      ? `No strong matches found for: “${payload.refineText}”.`
+      : "No instant alternatives found for this item.";
+
+    const wrap = document.createElement("div");
+    wrap.className = "refina-dw-empty";
+
+    const line1 = document.createElement("div");
+    line1.textContent = "This may already be one of the best fits in this store.";
+
+    const line2 = document.createElement("div");
+    line2.style.marginTop = "6px";
+    line2.textContent =
+      "Try a different preference, or open the full assistant for deeper recommendations.";
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.gap = "8px";
+    actions.style.marginTop = "10px";
+    actions.style.flexWrap = "wrap";
+
+    const btnClosest = document.createElement("button");
+    btnClosest.type = "button";
+    btnClosest.className = "refina-dw-empty-btn";
+    btnClosest.textContent = "Show closest matches";
+    btnClosest.onclick = () => {
+      try {
+        payload.intent = "compare-3";
+        hydrateDrawerPeek(host, payload);
+      } catch {}
+    };
+
+    actions.appendChild(btnClosest);
+    wrap.appendChild(line1);
+    wrap.appendChild(line2);
+    wrap.appendChild(actions);
+
+    list.appendChild(wrap);
+    return;
   }
 
-  function openConcierge(payload) {
-    // Save payload for concierge.js → buildIframeUrl() (which now reads ONCE and clears)
-    savePrefill(payload);
+  if (payload.refineText) {
+    sub.textContent = `Updated for: “${payload.refineText}”`;
+  } else {
+    sub.textContent =
+      candidates.length === 1
+        ? "Found 1 close match to compare."
+        : `Found ${candidates.length} close matches to compare.`;
+  }
 
-    if (window.RefinaLauncher && typeof window.RefinaLauncher.open === "function") {
-      window.RefinaLauncher.open({ source: payload.source, prefill: payload.prefill, context: payload });
-      return;
+  candidates.forEach((p) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "refina-dw-result";
+
+    const img = document.createElement("img");
+    img.className = "refina-dw-result-img";
+    img.alt = p.title ? String(p.title) : "Alternative product";
+    if (p.image) img.src = p.image;
+
+    const meta = document.createElement("div");
+    meta.className = "refina-dw-result-meta";
+
+    const t = document.createElement("div");
+    t.className = "refina-dw-result-title";
+
+    const price =
+      p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
+    t.textContent = price ? `${p.title} · ${price}` : p.title;
+
+    const why = document.createElement("div");
+    why.className = "refina-dw-result-why";
+    why.textContent = p.why || "Tap to view this option.";
+
+    meta.appendChild(t);
+    meta.appendChild(why);
+
+    btn.appendChild(img);
+    btn.appendChild(meta);
+
+    if (p.url) {
+      btn.onclick = () => {
+        try {
+          window.location.href = p.url;
+        } catch {}
+      };
     }
 
-      // ─────────────────────────────────────────────
-  // Step 4 — Drawer instant “Top alternatives”
-  // Uses GET /apps/refina/v1/recommend?mode=peek (safe to be empty)
-  // ─────────────────────────────────────────────
+    list.appendChild(btn);
+  });
+}
 
-  function formatMoneyFromCents(cents, currency) {
-    const n = Number(cents);
-    if (!Number.isFinite(n)) return "";
-    const cur = (currency || "USD").toUpperCase();
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: cur,
-        maximumFractionDigits: 0,
-      }).format(n / 100);
-    } catch {
-      return `$${Math.round(n / 100)}`;
-    }
+async function hydrateDrawerPeek(host, payload) {
+  const sub = host.querySelector("[data-results-sub]");
+  const list = host.querySelector("[data-results]");
+  if (!sub || !list) return;
+
+  const token = uuid();
+  host.dataset.rfPeekToken = token;
+
+  const hasRefine = !!String(payload.refineText || "").trim();
+  sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
+  list.innerHTML = "";
+
+  const storeId = payload.shop || payload.storeId || "";
+  if (!storeId) {
+    renderDrawerCandidates(host, payload, []);
+    return;
   }
 
-  function normalizePeekCandidates(data) {
-    const raw =
-      (data && Array.isArray(data.candidates) && data.candidates) ||
-      (data && Array.isArray(data.alts) && data.alts) ||
-      (data && Array.isArray(data.alternatives) && data.alternatives) ||
-      [];
+  const refineText = String(payload.refineText || payload.prefill || "")
+    .trim()
+    .slice(0, 240);
+  payload.refineText = refineText;
 
-    return raw
-      .map((p) => {
-        if (!p || typeof p !== "object") return null;
-
-        const id = p.id || p.productId || p.shopifyId || null;
-        const title = p.title || p.name || "";
-        const why = p.why || p.reason || p.subtitle || "";
-
-        const image =
-          (Array.isArray(p.images) &&
-            p.images[0] &&
-            (p.images[0].src || p.images[0].url)) ||
-          p.image ||
-          p.imageUrl ||
-          "";
-
-        const handle = p.handle || "";
-        const url = p.url || (handle ? `/products/${handle}` : "");
-
-        const priceCents =
-          p.priceCents ??
-          p.price_cents ??
-          (typeof p.price === "number" ? Math.round(p.price) : null);
-
-        return { id, title, why, image, url, priceCents };
-      })
-      .filter(Boolean)
-      .slice(0, 3);
-  }
-
-  function renderDrawerCandidates(host, payload, candidates) {
-    const list = host.querySelector("[data-results]");
-    const sub = host.querySelector("[data-results-sub]");
-    if (!list || !sub) return;
-
-    list.innerHTML = "";
-
-    if (!candidates || !candidates.length) {
-  const hasRefine = !!(payload && payload.refineText && String(payload.refineText).trim());
-  sub.textContent = hasRefine
-    ? `No strong matches found for: “${payload.refineText}”.`
-    : "No instant alternatives found for this item.";
-
-  const wrap = document.createElement("div");
-  wrap.className = "refina-dw-empty";
-
-  const line1 = document.createElement("div");
-  line1.textContent =
-    "This may already be one of the best fits in this store.";
-
-  const line2 = document.createElement("div");
-  line2.style.marginTop = "6px";
-  line2.textContent =
-    "Try a different preference, or open the full assistant for deeper recommendations.";
-
-  const actions = document.createElement("div");
-  actions.style.display = "flex";
-  actions.style.gap = "8px";
-  actions.style.marginTop = "10px";
-  actions.style.flexWrap = "wrap";
-
-  const btnClosest = document.createElement("button");
-  btnClosest.type = "button";
-  btnClosest.className = "refina-dw-empty-btn";
-  btnClosest.textContent = "Show closest matches";
-  btnClosest.addEventListener("click", () => {
-    try {
-      payload.intent = "compare-3";
-      hydrateDrawerPeek(document.querySelector(".refina-dw-host.is-open") || document.body, payload);
-    } catch {}
+  const qs = new URLSearchParams({
+    mode: "peek",
+    storeId,
+    productId: payload.productId || "",
+    intent: payload.intent || "",
+    priceCap: payload.priceCap || "",
+    currency: payload.currency || "",
+    q: refineText || "",
   });
 
-  actions.appendChild(btnClosest);
-  wrap.appendChild(line1);
-  wrap.appendChild(line2);
-  wrap.appendChild(actions);
-
-  list.appendChild(wrap);
-  return;
-}
-
-    if (payload.refineText) {
-  sub.textContent = `Updated for: “${payload.refineText}”`;
-} else {
-  sub.textContent = "Here are the closest matches to compare.";
-}
-
-    candidates.forEach((p) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "refina-dw-result";
-
-      const img = document.createElement("img");
-      img.className = "refina-dw-result-img";
-      img.alt = p.title ? String(p.title) : "Alternative product";
-      if (p.image) img.src = p.image;
-
-      const meta = document.createElement("div");
-      meta.className = "refina-dw-result-meta";
-
-      const t = document.createElement("div");
-      t.className = "refina-dw-result-title";
-
-      const price =
-        p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
-      t.textContent = price ? `${p.title} · ${price}` : p.title;
-
-      const why = document.createElement("div");
-      why.className = "refina-dw-result-why";
-      why.textContent = p.why || "Tap to view this option.";
-
-      meta.appendChild(t);
-      meta.appendChild(why);
-
-      btn.appendChild(img);
-      btn.appendChild(meta);
-
-      if (p.url) {
-        btn.addEventListener("click", () => {
-          try {
-            window.location.href = p.url;
-          } catch {}
-        });
-      }
-
-      list.appendChild(btn);
+  try {
+    const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, {
+      credentials: "same-origin",
     });
-  }
+    if (!resp.ok) throw new Error("peek_failed");
 
-  async function hydrateDrawerPeek(host, payload) {
-    const sub = host.querySelector("[data-results-sub]");
-    const list = host.querySelector("[data-results]");
-    if (!sub || !list) return;
+    const data = await resp.json();
+    if (host.dataset.rfPeekToken !== token) return;
 
-    const token = uuid();
-    host.dataset.rfPeekToken = token;
-
-    const hasRefine = !!String(payload.refineText || "").trim();
-    sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
-    list.innerHTML = "";
-    // NOTE: do not reference `candidates` here — it only exists after the fetch.
-
-    const storeId = payload.shop || payload.storeId || "";
-    if (!storeId) {
-      renderDrawerCandidates(host, payload, []);
-      return;
-    }
-
-    const refineText = String(payload.refineText || payload.prefill || "").trim().slice(0, 240);
-payload.refineText = refineText;
-
-const qs = new URLSearchParams({
-  mode: "peek",
-  storeId,
-  productId: payload.productId || "",
-  intent: payload.intent || "",
-  priceCap: payload.priceCap || "",
-  currency: payload.currency || "",
-  q: refineText || "",
-});
-
-
-    try {
-      const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, {
-        credentials: "same-origin",
-      });
-      if (!resp.ok) throw new Error("peek_failed");
-      const data = await resp.json();
-
-      if (host.dataset.rfPeekToken !== token) return;
-
-      const candidates = normalizePeekCandidates(data);
+    const candidates = normalizePeekCandidates(data);
 
     // Nice microcopy (only after we actually have results)
     if (candidates.length === 1) {
@@ -540,39 +529,71 @@ const qs = new URLSearchParams({
     }
 
     renderDrawerCandidates(host, payload, candidates);
+  } catch {
+    if (host.dataset.rfPeekToken !== token) return;
+    sub.textContent = "Quick alternatives are unavailable right now.";
+    renderDrawerCandidates(host, payload, []);
+  }
+}
 
-    } catch {
-      if (host.dataset.rfPeekToken !== token) return;
-      sub.textContent = "Quick alternatives are unavailable right now.";
-      renderDrawerCandidates(host, payload, []);
-    }
+  function savePrefill(payload) {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {}
   }
 
-    if (IN_THEME_EDITOR || IN_ADMIN) {
-      const shop = payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
-      if (!shop) return;
-      const url = new URL(`https://${shop}/apps/refina`);
-      for (const [k, v] of Object.entries(payload)) {
-        if (v == null) continue;
-        if (Array.isArray(v)) url.searchParams.set(k, v.join(","));
-        else url.searchParams.set(k, String(v));
-      }
-      try { window.open(url.toString(), "_blank", "noopener"); } catch { location.href = url.toString(); }
-      return;
-    }
+  function openConcierge(payload) {
+  // Save payload for concierge.js → buildIframeUrl() (which now reads ONCE and clears)
+  savePrefill(payload);
 
-    const params = new URLSearchParams({ refina: "1" });
+  if (window.RefinaLauncher && typeof window.RefinaLauncher.open === "function") {
+    window.RefinaLauncher.open({
+      source: payload.source,
+      prefill: payload.prefill,
+      context: payload,
+    });
+    return;
+  }
+
+  // Theme editor / admin preview must open in new tab (embedded admin blocks popups)
+  if (IN_THEME_EDITOR || IN_ADMIN) {
+    const shop =
+      payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
+    if (!shop) return;
+
+    const url = new URL(`https://${shop}/apps/refina`);
     for (const [k, v] of Object.entries(payload)) {
       if (v == null) continue;
-      if (Array.isArray(v)) params.set(k, v.join(","));
-      else params.set(k, String(v));
+      if (Array.isArray(v)) url.searchParams.set(k, v.join(","));
+      else url.searchParams.set(k, String(v));
     }
 
-    try { history.replaceState(null, "", location.pathname + location.search + "#refina?" + params.toString()); }
-    catch { location.hash = "#refina?" + params.toString(); }
-
-    document.dispatchEvent(new CustomEvent("refina:open", { detail: payload }));
+    try {
+      window.open(url.toString(), "_blank", "noopener");
+    } catch {
+      location.href = url.toString();
+    }
+    return;
   }
+
+  // Normal storefront flow: hash + event (concierge.js listens for it)
+  const params = new URLSearchParams({ refina: "1" });
+  for (const [k, v] of Object.entries(payload)) {
+    if (v == null) continue;
+    if (Array.isArray(v)) params.set(k, v.join(","));
+    else params.set(k, String(v));
+  }
+
+  try {
+    history.replaceState(
+      null,
+      "",
+      location.pathname + location.search + "#refina?" + params.toString()
+    );
+  } catch {
+    location.hash = "#refina?" + params.toString();
+  }
+
+  document.dispatchEvent(new CustomEvent("refina:open", { detail: payload }));
+}
 
   // Drawer creation / UX
   function ensureDrawer(radiusPx = "16px", accentName = "violet") {
@@ -813,7 +834,12 @@ input.addEventListener("keydown", (e) => {
     } catch {}
 
     // Quick-peek (optional, safe to be empty)
-    const qs2 = new URLSearchParams({ mode: "peek", storeId });
+    const qs2 = new URLSearchParams({
+  mode: "peek",
+  storeId,
+  productId: ds.productId || "",
+  currency: ds.currency || "",
+});
     try { await fetch(`/apps/refina/v1/recommend?${qs2.toString()}`, { credentials: "same-origin" }); } catch {}
   }
 
