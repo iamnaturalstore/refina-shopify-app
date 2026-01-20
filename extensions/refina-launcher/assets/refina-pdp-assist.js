@@ -38,20 +38,29 @@
   .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
   .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
 
-  .refina-dw { position: absolute; right: 0;
-    top: 50%; transform: translateX(100%) translateY(-50%);
-    height: auto; max-height: min(78vh, 720px);
-    width: min(420px, 92vw);
+.refina-dw {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: min(420px, 92vw);
+  height: auto;
+  max-height: min(78vh, 720px);
 
-    /* was falling back to #0b0b0e → dark */
-    background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
-    border-left: 1px solid var(--refina-border);
-    box-shadow: -20px 0 60px rgba(0,0,0,.35);
-    transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1);
-    display: grid; grid-template-rows: auto 1fr auto; border-top-left-radius: var(--rfina-dw-radius, 16px);
-    border-bottom-left-radius: var(--rfina-dw-radius, 16px); overflow: hidden;
-    color: var(--color-foreground);
-  }
+  background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
+  border-left: 1px solid var(--refina-border);
+  box-shadow: -20px 0 60px rgba(0,0,0,.35);
+
+  transform: translateX(100%) translateY(-50%);
+  transition: transform .24s cubic-bezier(.2,.8,.2,1);
+
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border-top-left-radius: var(--rfina-dw-radius, 16px);
+  border-bottom-left-radius: var(--rfina-dw-radius, 16px);
+  overflow: hidden;
+  color: var(--color-foreground);
+}
+
   .refina-dw-host.is-open .refina-dw { transform: translateX(0) translateY(-50%); }
 
   .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
@@ -793,6 +802,11 @@ async function hydrateDrawerPeek(host, payload) {
 
   basePayload.contextId = basePayload.contextId || uuid();
 
+// Open drawer immediately (so later JS issues can't prevent it sliding in)
+  host.classList.add("is-open");
+  try { aside && aside.focus(); } catch {}
+
+
   titleEl.textContent =
     (basePayload.headline && basePayload.headline.trim()) || "Tell us a bit more";
   subEl.textContent = (basePayload.subcopy || "").trim();
@@ -842,11 +856,6 @@ async function hydrateDrawerPeek(host, payload) {
 
     chipsBox.appendChild(b);
   });
-
-  // Open drawer
-    // Open drawer
-  host.classList.add("is-open");
-  try { aside.focus(); } catch {}
 
   // Step 4: instantly populate “Top alternatives” (safe to be empty)
   try { hydrateDrawerPeek(host, basePayload); } catch {}
