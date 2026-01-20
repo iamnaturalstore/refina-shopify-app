@@ -67,35 +67,55 @@
   }
 
   .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
-  .refina-dw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
-    .refina-dw-rank-title {
-    margin-top: 10px;
-    font-weight: 600;
-    font-size: .92em;
-    line-height: 1.2;
-    opacity: .92;
-  }
+  .refina-dw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0 18px;
+}
 
-  .refina-dw-deeper-title {
-    margin-top: 12px;
-    font-weight: 600;
-    font-size: .92em;
-    line-height: 1.2;
-    opacity: .92;
-  }
+  .refina-dw-rank-title {
+  margin-top: 14px;
+  margin-bottom: 10px;
+  text-align: center;
+  font-weight: 700;
+  font-size: .95em;
+  line-height: 1.2;
+  opacity: .92;
+}
 
-  .refina-dw-deeper-copy {
-    margin: 4px 0 8px;
-    font-size: .85em;
-    line-height: 1.25;
-    opacity: .75;
-  }
+.refina-dw-deeper-title {
+  margin-top: 18px;
+  margin-bottom: 6px;
+  text-align: center;
+  font-weight: 700;
+  font-size: .95em;
+  line-height: 1.2;
+  opacity: .92;
+}
 
-  .refina-dw-chip {
-    padding: 6px 10px; border-radius: 999px;
-    border: 1px solid rgba(17,17,17,.12);
-    background: transparent; cursor: pointer; font-size: .9em; color: var(--color-foreground);
-  }
+.refina-dw-deeper-copy {
+  margin: 0 auto 12px;
+  text-align: center;
+  max-width: 320px;
+  font-size: .86em;
+  line-height: 1.3;
+  opacity: .75;
+}
+
+.refina-dw-chip {
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(17,17,17,.14);
+  background: rgba(17,17,17,.04);
+  cursor: pointer;
+  font-size: .9em;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.refina-dw-chip:active { transform: translateY(1px); }
 
   .refina-dw-update {
     width: 100%;
@@ -180,34 +200,27 @@
 
   .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
 
-  .refina-dw-continue {
-    width: 100%; padding: 10px 12px; border-radius: 999px;
-    border: 1px solid rgba(17,17,17,.14);
-    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
-    font-weight: 600; cursor: pointer; color: var(--color-foreground);
-  }
-
-    .refina-dw-foot-note {
+  .refina-dw-foot-note {
     font-size: .85em;
     opacity: .75;
     line-height: 1.25;
     margin-bottom: 8px;
   }
 
-  /* Step 7 — footer CTA is secondary */
-  .refina-dw-continue {
-    width: 100%;
-    padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(17,17,17,.16);
-    background: transparent;
-    font-weight: 600;
-    cursor: pointer;
-  }
+.refina-dw-continue {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(17,17,17,.16);
+  background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--color-foreground);
+}
 
-  .refina-dw-continue:active { transform: translateY(1px); }
+.refina-dw-continue:active { transform: translateY(1px); }
 
-    .refina-dw-empty-btn {
+  .refina-dw-empty-btn {
     padding: 8px 10px;
     border-radius: 999px;
     border: 1px solid rgba(17,17,17,.16);
@@ -730,7 +743,9 @@ async function hydrateDrawerPeek(host, payload) {
           <div class="refina-dw-chips" data-chips></div>
 
           <div class="refina-dw-deeper-title">Like to dive deeper?</div>
-          <div class="refina-dw-deeper-copy">Add budget, preferences, skin goals — anything that matters.</div>
+          <div class="refina-dw-deeper-copy">
+            Open the full AI concierge for recommendations based on what matters to you. Ask me anything...
+          </div>
 
           <label class="refina-dw-label" id="rf-dw-label" style="display:none;">Refine your picks</label>
           <textarea
@@ -740,8 +755,6 @@ async function hydrateDrawerPeek(host, payload) {
             aria-describedby="rf-dw-label"
             placeholder="e.g. under $50, fragrance free, best for eczema, lightweight texture..."
           ></textarea>
-
-          <button type="button" class="refina-dw-update" data-update>Update matches</button>
         </div>
 
         <footer class="refina-dw-foot">
@@ -770,7 +783,8 @@ async function hydrateDrawerPeek(host, payload) {
 
   const aside = host.querySelector(".refina-dw");
   const input = host.querySelector("[data-input]");
-  const updateBtn = host.querySelector("[data-update]");
+  // Reference layout has no intermediate "Update matches" action
+  if (updateBtn) updateBtn.style.display = "none";
   const chipsBox = host.querySelector("[data-chips]");
   const titleEl = host.querySelector(".refina-dw-title");
   const subEl = host.querySelector("[data-sub]");
@@ -784,6 +798,8 @@ async function hydrateDrawerPeek(host, payload) {
   subEl.textContent = (basePayload.subcopy || "").trim();
 
   ctaBtn.textContent = "Open full assistant";
+  const footNote = host.querySelector(".refina-dw-foot-note");
+  if (footNote) footNote.style.display = "none";
 
   // You can keep or remove this hint; it doesn't inject into the input.
   ctxEl.textContent = basePayload.productTitle ? `Using “${basePayload.productTitle}” as context` : "";
@@ -791,53 +807,42 @@ async function hydrateDrawerPeek(host, payload) {
   // Start empty unless a chip provided a prefill
   input.value = "";
 
-  // Render chips (merchant chips from block)
-chipsBox.innerHTML = "";
-(basePayload.chips || []).forEach((c, i) => {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "refina-dw-chip";
-  b.textContent = c;
+  // Render drawer rank chips (NOT the PDP block chips)
+  // These reorder the existing Top 3 instantly (no fetch).
+  const rankChips = ["Most popular", "Highest reviews", "Best value"];
+
+  chipsBox.innerHTML = "";
+  rankChips.forEach((label) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "refina-dw-chip";
+    b.textContent = label;
 
     b.addEventListener("click", () => {
-    // Map chip → intent (keys preferred)
-    const intent = getIntentForDrawerChip(root, i, c);
-    if (intent) basePayload.intent = intent;
+      // Map label → rank intent (label-driven, not PDP chip keys)
+      const intent = mapChipToIntent(label);
+      if (intent) basePayload.intent = intent;
 
-    // Rank chips: reorder existing 3 instantly (NO fetch)
-    if (intent && String(intent).startsWith("rank-")) {
-      const sub = host.querySelector("[data-results-sub]");
+      // Only rank if we actually have a cached shortlist
       const existing = host.__rfPeekCandidates || [];
+      if (!existing.length) return;
+
+      const sub = host.querySelector("[data-results-sub]");
       const ranked = rankCandidatesByIntent(existing, intent);
       const final = applyRankWhy(ranked, intent);
 
       try {
         renderDrawerCandidates(host, basePayload, final);
         if (sub) {
-          const label = getRankLabel(intent);
-          sub.textContent = label ? `Ranked by: ${label}` : "Ranked picks.";
+          const labelTxt = getRankLabel(intent);
+          sub.textContent = labelTxt ? `Ranked by: ${labelTxt}` : "Ranked picks.";
         }
       } catch {}
+    });
 
-      return;
-    }
-
-    // Legacy chips: treat as a shortlist refresh (fetch)
-    // (You may not use these once you switch to omni keys, but safe to keep.)
-    basePayload.refineText = String(c || "").trim();
-
-    // Preserve existing cheaper/price-cap behavior
-    if (intent === "alt-cheaper" && !basePayload.priceCap) {
-      const rawCap = (root.dataset.priceCap || "").trim();
-      if (rawCap) basePayload.priceCap = rawCap;
-    }
-
-    try {
-      hydrateDrawerPeek(host, basePayload);
-    } catch {}
+    chipsBox.appendChild(b);
   });
-  chipsBox.appendChild(b);
-});
+
   // Open drawer
     // Open drawer
   host.classList.add("is-open");
