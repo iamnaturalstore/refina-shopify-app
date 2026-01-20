@@ -792,8 +792,6 @@ async function hydrateDrawerPeek(host, payload) {
 
   const aside = host.querySelector(".refina-dw");
   const input = host.querySelector("[data-input]");
-  // Reference layout has no intermediate "Update matches" action
-  if (updateBtn) updateBtn.style.display = "none";
   const chipsBox = host.querySelector("[data-chips]");
   const titleEl = host.querySelector(".refina-dw-title");
   const subEl = host.querySelector("[data-sub]");
@@ -802,21 +800,27 @@ async function hydrateDrawerPeek(host, payload) {
 
   basePayload.contextId = basePayload.contextId || uuid();
 
-// Open drawer immediately (so later JS issues can't prevent it sliding in)
+  // Open drawer immediately (so later JS issues can't prevent it sliding in)
   host.classList.add("is-open");
   try { aside && aside.focus(); } catch {}
 
+  // Basic guards (avoid hard crashes if markup changes)
+  if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
 
   titleEl.textContent =
     (basePayload.headline && basePayload.headline.trim()) || "Tell us a bit more";
   subEl.textContent = (basePayload.subcopy || "").trim();
 
   ctaBtn.textContent = "Open full assistant";
+
+  // Footer note is not in the reference layout
   const footNote = host.querySelector(".refina-dw-foot-note");
   if (footNote) footNote.style.display = "none";
 
-  // You can keep or remove this hint; it doesn't inject into the input.
-  ctxEl.textContent = basePayload.productTitle ? `Using “${basePayload.productTitle}” as context` : "";
+  // Optional context line
+  ctxEl.textContent = basePayload.productTitle
+    ? `Using “${basePayload.productTitle}” as context`
+    : "";
 
   // Start empty unless a chip provided a prefill
   input.value = "";
@@ -860,26 +864,17 @@ async function hydrateDrawerPeek(host, payload) {
   // Step 4: instantly populate “Top alternatives” (safe to be empty)
   try { hydrateDrawerPeek(host, basePayload); } catch {}
 
-  function runRefineUpdate() {
-  const text = (input.value || "").trim();
-  basePayload.refineText = text;
+  // Enter-to-refresh (Shift+Enter for a new line)
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
 
-  try {
-    hydrateDrawerPeek(host, basePayload);
-  } catch {}
-}
+      const text = (input.value || "").trim();
+      basePayload.refineText = text;
 
-if (updateBtn) {
-  updateBtn.addEventListener("click", runRefineUpdate);
-}
-
-// Enter-to-update (Shift+Enter for a new line)
-input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    runRefineUpdate();
-  }
-});
+      try { hydrateDrawerPeek(host, basePayload); } catch {}
+    }
+  });
 
 
     // Close handlers
