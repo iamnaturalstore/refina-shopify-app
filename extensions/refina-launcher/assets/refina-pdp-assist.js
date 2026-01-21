@@ -88,7 +88,7 @@
   margin-top: 34px;
   margin-bottom: 10px;
   text-align: center;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 1.0em;
   line-height: 1.2;
   opacity: .92;
@@ -98,7 +98,7 @@
   margin-top: 34px;
   margin-bottom: 6px;
   text-align: center;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 1.0em;
   line-height: 1.2;
   opacity: .92;
