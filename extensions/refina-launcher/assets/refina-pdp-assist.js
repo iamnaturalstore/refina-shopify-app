@@ -65,7 +65,7 @@
 
   .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
   .refina-dw-copy { display: grid; gap: 4px; }
-  .refina-dw-title { font-weight: 600; line-height: 1.25; }
+  .refina-dw-title { font-weight: 500; line-height: 1.25; }
   .refina-dw-sub { opacity: .85; font-size: .92em; line-height: 1.35; }
   .refina-dw-micro { opacity: .7; font-size: .85em; line-height: 1.3; }
 
@@ -85,21 +85,21 @@
 }
 
   .refina-dw-rank-title {
-  margin-top: 14px;
+  margin-top: 34px;
   margin-bottom: 10px;
   text-align: center;
-  font-weight: 700;
-  font-size: .95em;
+  font-weight: 500;
+  font-size: 1.0em;
   line-height: 1.2;
   opacity: .92;
 }
 
 .refina-dw-deeper-title {
-  margin-top: 18px;
+  margin-top: 34px;
   margin-bottom: 6px;
   text-align: center;
-  font-weight: 700;
-  font-size: .95em;
+  font-weight: 500;
+  font-size: 1.0em;
   line-height: 1.2;
   opacity: .92;
 }
@@ -117,10 +117,10 @@
   padding: 9px 14px;
   border-radius: 999px;
   border: 1px solid rgba(17,17,17,.14);
-  background: rgba(17,17,17,.04);
+  background: #fff;
   cursor: pointer;
   font-size: .9em;
-  font-weight: 600;
+  font-weight: 200;
   color: var(--color-foreground);
 }
 
@@ -221,8 +221,8 @@
   padding: 12px 14px;
   border-radius: 999px;
   border: 1px solid rgba(17,17,17,.16);
-  background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
-  font-weight: 700;
+  background: #fff;
+  font-weight: 500;
   cursor: pointer;
   color: var(--color-foreground);
 }
