@@ -22,7 +22,7 @@
   // Minimal CSS for drawer (glass look) + header/subcopy/micro-prompt
   (function injectDrawerCssOnce() {
     if (document.getElementById("refina-pdp-drawer-css")) return;
-   const css = `
+    const css = `
   .refina-dw-host { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
   .refina-dw-host.is-open { pointer-events: auto; }
 
@@ -35,112 +35,129 @@
     isolation: isolate;
   }
 
-  .refina-dw-backdrop {
-    position: absolute; inset: 0;
-    background: rgba(0,0,0,.45);
-    opacity: 0;
-    transition: opacity .22s ease;
-  }
+  .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
   .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
 
-  .refina-dw {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    width: min(420px, 92vw);
-    height: auto;
-    max-height: min(78vh, 720px);
+.refina-dw {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: min(420px, 92vw);
+  height: auto;
+  max-height: min(78vh, 720px);
 
-    background: #ffffff;
-    border-left: 1px solid var(--refina-border);
-    box-shadow: -20px 0 60px rgba(0,0,0,.35);
+  background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
+  border-left: 1px solid var(--refina-border);
+  box-shadow: -20px 0 60px rgba(0,0,0,.35);
 
-    transform: translateX(100%) translateY(-50%);
-    transition: transform .24s cubic-bezier(.2,.8,.2,1);
+  transform: translateX(100%) translateY(-50%);
+  transition: transform .24s cubic-bezier(.2,.8,.2,1);
 
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-    border-top-left-radius: var(--rfina-dw-radius, 16px);
-    border-bottom-left-radius: var(--rfina-dw-radius, 16px);
-    overflow: hidden;
-    color: var(--color-foreground);
-  }
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border-top-left-radius: var(--rfina-dw-radius, 16px);
+  border-bottom-left-radius: var(--rfina-dw-radius, 16px);
+  overflow: hidden;
+  color: var(--color-foreground);
+}
 
   .refina-dw-host.is-open .refina-dw { transform: translateX(0) translateY(-50%); }
 
-  .refina-dw-head {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: start;
-    gap: 12px;
-    padding: 16px 18px 10px;
-  }
-
-  .refina-dw-copy { display: grid; gap: 8px; }
-
-  .refina-dw-title {
-    font-weight: 600;
-    line-height: 1.08;
-    letter-spacing: .5px;
-    text-transform: uppercase;
-    font-size: 1.55em;
-    margin: 0;
-  }
-
-  .refina-dw-sub {
-    opacity: .92;
-    font-size: 1.02em;
-    line-height: 1.45;
-  }
+  .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
+  .refina-dw-copy { display: grid; gap: 4px; }
+  .refina-dw-title { font-weight: 600; line-height: 1.25; }
+  .refina-dw-sub { opacity: .85; font-size: .92em; line-height: 1.35; }
+  .refina-dw-micro { opacity: .7; font-size: .85em; line-height: 1.3; }
 
   .refina-dw-close {
-    border: 1px solid rgba(17,17,17,.16);
-    background: #fff;
-    border-radius: 12px;
-    padding: 8px 12px;
+    border: 1px solid rgba(17,17,17,.14);
+    background: transparent;
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; color: var(--color-foreground);
+  }
+
+  .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
+  .refina-dw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0 18px;
+}
+
+  .refina-dw-rank-title {
+  margin-top: 14px;
+  margin-bottom: 10px;
+  text-align: center;
+  font-weight: 700;
+  font-size: .95em;
+  line-height: 1.2;
+  opacity: .92;
+}
+
+.refina-dw-deeper-title {
+  margin-top: 18px;
+  margin-bottom: 6px;
+  text-align: center;
+  font-weight: 700;
+  font-size: .95em;
+  line-height: 1.2;
+  opacity: .92;
+}
+
+.refina-dw-deeper-copy {
+  margin: 0 auto 12px;
+  text-align: center;
+  max-width: 320px;
+  font-size: .86em;
+  line-height: 1.3;
+  opacity: .75;
+}
+
+.refina-dw-chip {
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(17,17,17,.14);
+  background: rgba(17,17,17,.04);
+  cursor: pointer;
+  font-size: .9em;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.refina-dw-chip:active { transform: translateY(1px); }
+
+  .refina-dw-update {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(17,17,17,.12);
+    background: rgba(17,17,17,.06);
+    font-weight: 600;
     cursor: pointer;
-    color: var(--color-foreground);
   }
 
-  .refina-dw-body {
-    padding: 0 18px 18px;
-    overflow: auto;
-  }
+  .refina-dw-update:active { transform: translateY(1px); }
 
-  .refina-dw-context {
-    margin-top: 4px;
-    margin-bottom: 8px;
-    opacity: .85;
-    font-size: .92em;
-    line-height: 1.3;
-  }
+  .refina-dw-context { opacity: .75; font-size: .85em; margin-bottom: 6px; }
+  .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
 
-  /* Results section */
-  .refina-dw-results { margin: 10px 0 18px; }
-  .refina-dw-results-head { display: grid; gap: 4px; margin-bottom: 10px; }
+    /* Step 4 — Results section */
+  .refina-dw-results { margin: 6px 0 10px; }
+  .refina-dw-results-head { display: grid; gap: 2px; margin-bottom: 8px; }
+  .refina-dw-results-title { font-weight: 600; font-size: .95em; }
+  .refina-dw-results-sub { opacity: .75; font-size: .85em; line-height: 1.25; }
 
-  .refina-dw-results-title {
-    font-weight: 800;
-    font-size: 1.05em;
-    line-height: 1.2;
-  }
-
-  .refina-dw-results-sub {
-    opacity: .85;
-    font-size: .98em;
-    line-height: 1.25;
-  }
-
-  .refina-dw-results-list { display: grid; gap: 12px; }
+  .refina-dw-results-list { display: grid; gap: 8px; }
 
   .refina-dw-result {
     display: grid;
-    grid-template-columns: 52px 1fr;
-    gap: 12px;
+    grid-template-columns: 44px 1fr;
+    gap: 10px;
     align-items: center;
-    padding: 12px;
-    border-radius: 18px;
-    border: 1px solid rgba(17,17,17,.14);
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(17,17,17,.12);
     background: color-mix(in srgb, var(--color-background, #ffffff) 92%, var(--color-accent, #7A5CFF) 8%);
     cursor: pointer;
     text-align: left;
@@ -149,127 +166,84 @@
   .refina-dw-result:active { transform: translateY(1px); }
 
   .refina-dw-result-img {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
+    width: 44px; height: 44px;
+    border-radius: 12px;
     object-fit: cover;
     background: rgba(17,17,17,.06);
   }
 
-  .refina-dw-result-meta { display: grid; gap: 4px; min-width: 0; }
-
+  .refina-dw-result-meta { display: grid; gap: 3px; min-width: 0; }
   .refina-dw-result-title {
     font-weight: 600;
-    font-size: 1.02em;
-    line-height: 1.15;
+    font-size: .92em;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
   .refina-dw-result-why {
-    opacity: .78;
-    font-size: .92em;
-    line-height: 1.2;
+    opacity: .75;
+    font-size: .84em;
+    line-height: 1.25;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  /* Rank section */
-  .refina-dw-rank-title {
-    margin-top: 6px;
-    margin-bottom: 12px;
-    text-align: center;
-    font-weight: 600;
-    font-size: 1.15em;
-    line-height: 1.2;
-    opacity: .96;
-  }
-
-  .refina-dw-chips {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 14px;
-    margin: 0 0 22px;
-  }
-
-  .refina-dw-chip {
-    padding: 11px 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(17,17,17,.18);
-    background: #fff;
-    cursor: pointer;
-    font-size: .98em;
-    font-weight: 700;
-    color: var(--color-foreground);
-  }
-
-  .refina-dw-chip:active { transform: translateY(1px); }
-
-  /* Deeper section */
-  .refina-dw-deeper-title {
-    margin-top: 2px;
-    margin-bottom: 10px;
-    text-align: center;
-    font-weight: 600;
-    font-size: 1.15em;
-    line-height: 1.2;
-    opacity: .96;
-  }
-
-  .refina-dw-deeper-copy {
-    margin: 0 auto 14px;
-    text-align: center;
-    max-width: 340px;
-    font-size: 1.02em;
-    line-height: 1.35;
+  .refina-dw-empty {
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px dashed rgba(17,17,17,.18);
     opacity: .85;
+    font-size: .88em;
+    line-height: 1.25;
   }
 
   .refina-dw-input {
-    width: 100%;
-    min-height: 88px;
-    padding: 14px 14px;
-    border-radius: 16px;
+    width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
     border: 1px solid rgba(17,17,17,.14);
     background: color-mix(in srgb, var(--color-accent, #7A5CFF) 10%, transparent);
-    color: var(--color-foreground);
-    resize: vertical;
-    font-size: 1.02em;
-    line-height: 1.35;
+    color: var(--color-foreground); resize: vertical;
   }
 
-  .refina-dw-input::placeholder {
-    opacity: .55;
+  .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
+
+  .refina-dw-foot-note {
+    font-size: .85em;
+    opacity: .75;
+    line-height: 1.25;
+    margin-bottom: 8px;
   }
 
-  .refina-dw-foot {
-    padding: 14px 18px 18px;
-    display: grid;
-    gap: 8px;
-  }
+.refina-dw-continue {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(17,17,17,.16);
+  background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--color-foreground);
+}
 
-  .refina-dw-continue {
-    width: 100%;
-    padding: 14px 14px;
+.refina-dw-continue:active { transform: translateY(1px); }
+
+  .refina-dw-empty-btn {
+    padding: 8px 10px;
     border-radius: 999px;
-    border: 1px solid rgba(17,17,17,.18);
-    background: #fff;
+    border: 1px solid rgba(17,17,17,.16);
+    background: rgba(17,17,17,.04);
     font-weight: 600;
     cursor: pointer;
-    color: var(--color-foreground);
   }
-
-  .refina-dw-continue:active { transform: translateY(1px); }
+  .refina-dw-empty-btn:active { transform: translateY(1px); }
 
   @media (max-width: 640px) {
     .refina-dw { top: 0; max-height: 100vh; height: 100%; transform: translateX(100%); }
     .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
   }
-`;
+  `;
 
     const el = document.createElement("style");
     el.id = "refina-pdp-drawer-css";
@@ -749,51 +723,57 @@ async function hydrateDrawerPeek(host, payload) {
   host = document.createElement("div");
   host.id = "refina-pdp-drawer";
   host.className = "refina-dw-host";
-  host.innerHTML = `
-  <div class="refina-dw-backdrop" data-close></div>
-  <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
-    <header class="refina-dw-head">
-      <div class="refina-dw-copy">
-        <h4 id="rf-dw-title" class="refina-dw-title"></h4>
-        <div class="refina-dw-sub" data-sub></div>
-      </div>
-      <button type="button" class="refina-dw-close" data-close aria-label="Close">✕</button>
-    </header>
-
-    <div class="refina-dw-body">
-      <div class="refina-dw-context" data-context></div>
-
-      <section class="refina-dw-results" aria-live="polite">
-        <div class="refina-dw-results-head">
-          <div class="refina-dw-results-title">Top alternatives</div>
-          <div class="refina-dw-results-sub" data-results-sub>
-            Finding the best matches…
+    host.innerHTML = `
+      <div class="refina-dw-backdrop" data-close></div>
+      <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
+        <header class="refina-dw-head">
+          <div class="refina-dw-copy">
+            <h4 id="rf-dw-title" class="refina-dw-title"></h4>
+            <div class="refina-dw-sub" data-sub></div>
+            <div class="refina-dw-micro"></div>
           </div>
+          <button type="button" class="refina-dw-close" data-close aria-label="Close">✕</button>
+        </header>
+
+        <div class="refina-dw-body">
+          <div class="refina-dw-context" data-context></div>
+
+          <section class="refina-dw-results" aria-live="polite">
+            <div class="refina-dw-results-head">
+              <div class="refina-dw-results-title">Top alternatives</div>
+              <div class="refina-dw-results-sub" data-results-sub>
+                Finding the best matches…
+              </div>
+            </div>
+            <div class="refina-dw-results-list" data-results></div>
+          </section>
+
+          <div class="refina-dw-rank-title">Rank these picks</div>
+          <div class="refina-dw-chips" data-chips></div>
+
+          <div class="refina-dw-deeper-title">Like to dive deeper?</div>
+          <div class="refina-dw-deeper-copy">
+            Open the full AI concierge for recommendations based on what matters to you. Ask me anything...
+          </div>
+
+          <label class="refina-dw-label" id="rf-dw-label" style="display:none;">Refine your picks</label>
+          <textarea
+            class="refina-dw-input"
+            data-input
+            rows="3"
+            aria-describedby="rf-dw-label"
+            placeholder="e.g. i have sensitive and sun damaged skin, what is the best face cream for me?..."
+          ></textarea>
         </div>
-        <div class="refina-dw-results-list" data-results></div>
-      </section>
 
-      <div class="refina-dw-rank-title">Rank these picks</div>
-      <div class="refina-dw-chips" data-chips></div>
-
-      <div class="refina-dw-deeper-title">Like to dive deeper?</div>
-      <div class="refina-dw-deeper-copy">
-        Open the full AI concierge for recommendations based on what matters to you. Ask me anything...
-      </div>
-
-      <textarea
-        class="refina-dw-input"
-        data-input
-        rows="3"
-        placeholder="e.g. i have sensitive and sun damaged skin, what is the best face cream for me?"
-      ></textarea>
-    </div>
-
-    <footer class="refina-dw-foot">
-      <button type="button" class="refina-dw-continue" data-continue>Open full assistant</button>
-    </footer>
-  </aside>
-`;
+        <footer class="refina-dw-foot">
+          <div class="refina-dw-foot-note">
+            Want deeper help? Open the full assistant for the best picks.
+          </div>
+          <button type="button" class="refina-dw-continue" data-continue>Open full assistant</button>
+        </footer>
+      </aside>
+  `;
   document.body.appendChild(host);
 
   // NEW: set radius + accent CSS vars (this is the only addition here)
