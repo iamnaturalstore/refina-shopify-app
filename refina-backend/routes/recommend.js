@@ -448,17 +448,47 @@ router.get("/recommend", async (req, res) => {
   const src = srcSnap.data() || {};
 
   const srcType = String(src.productType || "").trim().toLowerCase();
+  const srcTypeNorm = String(src.productType_norm || srcType || "").trim().toLowerCase();
+
   const srcTags = Array.isArray(src.tags)
     ? src.tags.map((t) => String(t).toLowerCase())
     : [];
 
-  // Pull a small pool (keep it cheap). We do NOT depend on productType indexes here.
-  const poolSnap = await db
-    .collection("products")
-    .doc(storeId)
-    .collection("items")
-    .limit(40)
-    .get();
+  const srcPriceCents =
+    typeof src.priceCents === "number"
+      ? src.priceCents
+      : typeof src.price_cents === "number"
+      ? src.price_cents
+      : typeof src.price === "number"
+      ? Math.round(src.price * 100)
+      : null;
+
+  // Pull a small pool (keep it cheap).
+  // Prefer same productType_norm when available, but safely fall back.
+  let poolSnap = null;
+
+  try {
+    if (srcTypeNorm) {
+      poolSnap = await db
+        .collection("products")
+        .doc(storeId)
+        .collection("items")
+        .where("productType_norm", "==", srcTypeNorm)
+        .limit(120)
+        .get();
+    }
+  } catch (e) {
+    poolSnap = null;
+  }
+
+  if (!poolSnap) {
+    poolSnap = await db
+      .collection("products")
+      .doc(storeId)
+      .collection("items")
+      .limit(120)
+      .get();
+  }
 
   const pool = [];
   poolSnap.forEach((d) => {
@@ -467,20 +497,23 @@ router.get("/recommend", async (req, res) => {
     pool.push({ __docId: d.id, ...p });
   });
 
-  // Score locally using fields that already exist in your product docs.
   const scored = pool
     .map((p) => {
       const pType = String(p.productType || "").trim().toLowerCase();
+      const pTypeNorm = String(p.productType_norm || pType || "").trim().toLowerCase();
+
       const pTags = Array.isArray(p.tags)
         ? p.tags.map((t) => String(t).toLowerCase())
         : [];
+
       const pTitle = String(p.title || p.name || "").toLowerCase();
       const pDesc = String(p.description || p.body_html || "").toLowerCase();
 
       let score = 0;
 
-      // Same productType (best signal when present)
+      // Same productType (strong signal)
       if (srcType && pType && pType === srcType) score += 3;
+      if (srcTypeNorm && pTypeNorm && pTypeNorm === srcTypeNorm) score += 2;
 
       // Shared tags (light)
       if (srcTags.length && pTags.length) {
@@ -488,22 +521,47 @@ router.get("/recommend", async (req, res) => {
         score += Math.min(3, shared);
       }
 
-      // Refine text boost (q)
+      // Refine text boost (q) — still supported, but chip-driven mode should not rely on q
       if (q) {
         if (pTitle.includes(q)) score += 2;
         else if (pDesc.includes(q)) score += 1;
         else if (pTags.some((t) => t.includes(q))) score += 1;
       }
 
-      // Intent: "cheaper" bias (only if your product already has a cents field)
-      // We are NOT introducing new price logic here — just using existing cents if present.
       const priceCents =
         typeof p.priceCents === "number"
           ? p.priceCents
           : typeof p.price_cents === "number"
           ? p.price_cents
+          : typeof p.price === "number"
+          ? Math.round(p.price * 100)
           : null;
 
+      // Omni utility intents (Firestore-only)
+      if (intent === "util-cheaper") {
+        if (typeof priceCents === "number" && typeof srcPriceCents === "number") {
+          if (priceCents < srcPriceCents) score += 3;
+          score += Math.max(0, Math.min(2, Math.round((srcPriceCents - priceCents) / 5000)));
+        } else if (priceCap && typeof priceCents === "number") {
+          if (priceCents <= priceCap * 100) score += 2;
+        }
+      }
+
+      if (intent === "util-upgrade") {
+        if (typeof priceCents === "number" && typeof srcPriceCents === "number") {
+          if (priceCents > srcPriceCents) score += 3;
+          score += Math.max(0, Math.min(1, Math.round((priceCents - srcPriceCents) / 8000)));
+        }
+      }
+
+      if (intent === "util-value") {
+        if (typeof priceCents === "number" && typeof srcPriceCents === "number") {
+          if (priceCents <= srcPriceCents) score += 2;
+          if (priceCents > srcPriceCents) score -= 1;
+        }
+      }
+
+      // Back-compat for old intent (optional)
       if (intent === "alt-cheaper" && priceCap && typeof priceCents === "number") {
         if (priceCents <= priceCap * 100) score += 2;
       }
@@ -514,6 +572,7 @@ router.get("/recommend", async (req, res) => {
     .slice(0, 3)
     .map(({ p, score, priceCents }) => {
       const handle = p.handle || "";
+
       const image =
         (Array.isArray(p.images) &&
           p.images[0] &&
@@ -522,16 +581,23 @@ router.get("/recommend", async (req, res) => {
         p.imageUrl ||
         "";
 
-      // Minimal "why" string (do not introduce new copy system)
       let why = "Closest match to compare.";
-      if (q) why = `Matches “${q}”.`;
-      else if (srcType && String(p.productType || "").trim()) {
-        why = `Similar ${String(p.productType).toLowerCase()} option.`;
+
+      if (intent === "util-cheaper") why = "Cheaper alternative with a similar fit.";
+      if (intent === "util-value") why = "Best balance of fit and price.";
+      if (intent === "util-upgrade") why = "Premium upgrade alternative.";
+
+      if (!intent) {
+        if (q) why = `Matches “${q}”.`;
+        else if (srcType && String(p.productType || "").trim()) {
+          why = `Similar ${String(p.productType).toLowerCase()} option.`;
+        }
       }
+
       if (intent === "alt-cheaper" && priceCap) why = `Under $${priceCap} alternative.`;
 
       return {
-        id: p.__docId,                // Firestore doc id (stable)
+        id: p.__docId,
         title: p.title || p.name || "Alternative",
         why,
         image,

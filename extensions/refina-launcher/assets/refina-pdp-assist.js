@@ -327,36 +327,28 @@
 function mapChipKeyToIntent(key) {
   const k = String(key || "").toLowerCase().trim();
 
-  // PDP shortlist intents (these should fetch a fresh Top 3)
-  if (k === "compare") return "compare-3";
-  if (k === "under-cap") return "alt-cheaper";
-  if (k === "sensitive") return "verify";
-  if (k === "fragrance-free") return "avoid-eo";
-
-  // Drawer rank intents (these should reorder the existing 3 instantly)
-  if (k === "best-value" || k === "value") return "rank-value";
-  if (k === "budget") return "rank-budget";
-  if (k === "popular") return "rank-popular";
-  if (k === "reviews" || k === "top-rated") return "rank-reviews";
+  // PDP shortlist intents (fetch a fresh Top 3)
+  if (k === "compare") return "util-compare";
+  if (k === "value" || k === "best-value") return "util-value";
+  if (k === "cheaper" || k === "budget") return "util-cheaper";
+  if (k === "upgrade") return "util-upgrade";
 
   return null;
 }
 
 function mapChipToIntent(chip) {
-  // Fallback only (if keys are missing)
   const s = String(chip || "").toLowerCase();
 
-  // PDP shortlist intents
-  if (s.includes("compare")) return "compare-3";
-  if (s.includes("under")) return "alt-cheaper";
-  if (s.includes("sensitive")) return "verify";
-  if (s.includes("fragrance")) return "avoid-eo";
+  // PDP shortlist intents (chip labels)
+  if (s.includes("compare")) return "util-compare";
+  if (s.includes("best value") || s.includes("value")) return "util-value";
+  if (s.includes("cheaper")) return "util-cheaper";
+  if (s.includes("upgrade")) return "util-upgrade";
 
-  // Drawer rank intents
+  // Drawer rank intents (rank labels)
   if (s.includes("best value") || s.includes("value")) return "rank-value";
-  if (s.includes("budget")) return "rank-budget";
-  if (s.includes("popular")) return "rank-popular";
-  if (s.includes("review") || s.includes("top rated") || s.includes("highest")) return "rank-reviews";
+  if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
+  if (s.includes("upgrade")) return "rank-upgrade";
 
   return null;
 }
@@ -373,9 +365,9 @@ function getIntentForPdpChip(root, chipEl) {
 }
 
 function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
-  const keys = parseChipKeys(root);
-  const key = keys && keys[chipIndex] ? keys[chipIndex] : null;
-  return mapChipKeyToIntent(key) || mapChipToIntent(chipLabelText);
+  // Drawer rank chips must NOT read PDP chip keys.
+  // Their meaning is label-driven only.
+  return mapChipToIntent(chipLabelText);
 }
 
 // ─────────────────────────────────────────────
@@ -427,9 +419,11 @@ function normalizePeekCandidates(data) {
       const priceCents =
         p.priceCents ??
         p.price_cents ??
-        (typeof p.price === "number" ? Math.round(p.price) : null);
+        (typeof p.price === "number" ? Math.round(p.price * 100) : null);
 
-      return { id, title, why, image, url, priceCents };
+      const score = typeof p.score === "number" ? p.score : null;
+
+      return { id, title, why, image, url, priceCents, score };
     })
     .filter(Boolean)
     .slice(0, 3);
@@ -440,11 +434,9 @@ function getRankLabel(intent) {
     case "rank-value":
       return "Best value";
     case "rank-budget":
-      return "Budget options";
-    case "rank-popular":
-      return "Most popular";
-    case "rank-reviews":
-      return "Highest reviews";
+      return "Cheaper";
+    case "rank-upgrade":
+      return "Upgrade pick";
     default:
       return "";
   }
@@ -453,13 +445,11 @@ function getRankLabel(intent) {
 function getRankWhy(intent) {
   switch (intent) {
     case "rank-value":
-      return "Best value pick from these options.";
+      return "Best balance of fit and price.";
     case "rank-budget":
-      return "Best budget-friendly option from these picks.";
-    case "rank-popular":
-      return "Most popular style pick from this shortlist.";
-    case "rank-reviews":
-      return "Top-rated style pick from this shortlist.";
+      return "Cheaper options from these picks.";
+    case "rank-upgrade":
+      return "Premium step-up from these picks.";
     default:
       return "";
   }
@@ -467,20 +457,60 @@ function getRankWhy(intent) {
 
 function rankCandidatesByIntent(candidates, intent) {
   const list = Array.isArray(candidates) ? [...candidates] : [];
-
-  // If we have no usable signals, keep stable order.
   if (!list.length) return list;
 
-  // We only have priceCents reliably. Everything else is best-effort.
-  if (intent === "rank-budget" || intent === "rank-value") {
+  const getPrice = (x) =>
+    x && x.priceCents != null && Number.isFinite(Number(x.priceCents))
+      ? Number(x.priceCents)
+      : null;
+
+  const getScore = (x) =>
+    x && x.score != null && Number.isFinite(Number(x.score))
+      ? Number(x.score)
+      : null;
+
+  if (intent === "rank-budget") {
+    // Cheaper first (unknown price goes last)
     return list.sort((a, b) => {
-      const ap = a && a.priceCents != null ? Number(a.priceCents) : Number.POSITIVE_INFINITY;
-      const bp = b && b.priceCents != null ? Number(b.priceCents) : Number.POSITIVE_INFINITY;
+      const ap = getPrice(a);
+      const bp = getPrice(b);
+      if (ap == null && bp == null) return 0;
+      if (ap == null) return 1;
+      if (bp == null) return -1;
       return ap - bp;
     });
   }
 
-  // rank-popular / rank-reviews: no local popularity/reviews signals → keep as-is.
+  if (intent === "rank-upgrade") {
+    // Higher price first (unknown price goes last)
+    return list.sort((a, b) => {
+      const ap = getPrice(a);
+      const bp = getPrice(b);
+      if (ap == null && bp == null) return 0;
+      if (ap == null) return 1;
+      if (bp == null) return -1;
+      return bp - ap;
+    });
+  }
+
+  if (intent === "rank-value") {
+    // Best value = strongest match (score) then cheaper (price)
+    return list.sort((a, b) => {
+      const as = getScore(a);
+      const bs = getScore(b);
+      if (as != null && bs != null && as !== bs) return bs - as;
+      if (as != null && bs == null) return -1;
+      if (as == null && bs != null) return 1;
+
+      const ap = getPrice(a);
+      const bp = getPrice(b);
+      if (ap == null && bp == null) return 0;
+      if (ap == null) return 1;
+      if (bp == null) return -1;
+      return ap - bp;
+    });
+  }
+
   return list;
 }
 
@@ -740,7 +770,7 @@ async function hydrateDrawerPeek(host, payload) {
 
           <section class="refina-dw-results" aria-live="polite">
             <div class="refina-dw-results-head">
-              <div class="refina-dw-results-title">Top alternatives</div>
+              <div class="refina-dw-results-title">Similar options</div>
               <div class="refina-dw-results-sub" data-results-sub>
                 Finding the best matches…
               </div>
@@ -827,7 +857,7 @@ async function hydrateDrawerPeek(host, payload) {
 
   // Render drawer rank chips (NOT the PDP block chips)
   // These reorder the existing Top 3 instantly (no fetch).
-  const rankChips = ["Most popular", "Highest reviews", "Best value"];
+  const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
 
   chipsBox.innerHTML = "";
   rankChips.forEach((label) => {
