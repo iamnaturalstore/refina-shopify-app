@@ -568,7 +568,18 @@ router.get("/recommend", async (req, res) => {
 
       return { p, score, priceCents };
     })
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => {
+  // Premium options = highest priced options (still within the similarity pool)
+  if (intent === "util-upgrade") {
+    const ap = typeof a.priceCents === "number" ? a.priceCents : -1;
+    const bp = typeof b.priceCents === "number" ? b.priceCents : -1;
+    if (bp !== ap) return bp - ap;          // price first (highest)
+    return b.score - a.score;               // then match score
+  }
+
+  // default behaviour
+  return b.score - a.score;
+})
     .slice(0, 3)
     .map(({ p, score, priceCents }) => {
       const handle = p.handle || "";
