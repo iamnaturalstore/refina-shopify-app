@@ -48,7 +48,6 @@
 
   background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
   border-left: 1px solid var(--refina-border);
-  box-shadow: -20px 0 60px rgba(0,0,0,.35);
 
   transform: translateX(100%) translateY(-50%);
   transition: transform .24s cubic-bezier(.2,.8,.2,1);
@@ -59,6 +58,11 @@
   border-bottom-left-radius: var(--rfina-dw-radius, 16px);
   overflow: hidden;
   color: var(--color-foreground);
+}
+
+/* Shadow ONLY when open */
+.refina-dw-host.is-open .refina-dw {
+  box-shadow: -20px 0 60px rgba(0,0,0,.35);
 }
 
   .refina-dw-host.is-open .refina-dw { transform: translateX(0) translateY(-50%); }
@@ -365,9 +369,15 @@ function getIntentForPdpChip(root, chipEl) {
 }
 
 function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
-  // Drawer rank chips must NOT read PDP chip keys.
-  // Their meaning is label-driven only.
-  return mapChipToIntent(chipLabelText);
+  // Drawer rank chips must ALWAYS resolve to rank-* intents (never util-*).
+  // They reorder the existing 3 instantly (no fetch).
+  const s = String(chipLabelText || "").toLowerCase();
+
+  if (s.includes("best value") || s.includes("value")) return "rank-value";
+  if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
+  if (s.includes("upgrade")) return "rank-upgrade";
+
+  return null;
 }
 
 // ─────────────────────────────────────────────
@@ -855,41 +865,41 @@ async function hydrateDrawerPeek(host, payload) {
   // Start empty unless a chip provided a prefill
   input.value = "";
 
-  // Render drawer rank chips (NOT the PDP block chips)
-  // These reorder the existing Top 3 instantly (no fetch).
-  const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
+// Render drawer rank chips (NOT the PDP block chips)
+// These reorder the existing Top 3 instantly (no fetch).
+const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
 
-  chipsBox.innerHTML = "";
-  rankChips.forEach((label) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "refina-dw-chip";
-    b.textContent = label;
+chipsBox.innerHTML = "";
+rankChips.forEach((label, i) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "refina-dw-chip";
+  b.textContent = label;
 
-    b.addEventListener("click", () => {
-      // Map label → rank intent (label-driven, not PDP chip keys)
-      const intent = mapChipToIntent(label);
-      if (intent) basePayload.intent = intent;
+  b.addEventListener("click", () => {
+    // Map label → rank intent (label-driven, never util-*)
+    const intent = getIntentForDrawerChip(root, i, label);
+    if (intent) basePayload.intent = intent;
 
-      // Only rank if we actually have a cached shortlist
-      const existing = host.__rfPeekCandidates || [];
-      if (!existing.length) return;
+    // Only rank if we actually have a cached shortlist
+    const existing = host.__rfPeekCandidates || [];
+    if (!existing.length) return;
 
-      const sub = host.querySelector("[data-results-sub]");
-      const ranked = rankCandidatesByIntent(existing, intent);
-      const final = applyRankWhy(ranked, intent);
+    const sub = host.querySelector("[data-results-sub]");
+    const ranked = rankCandidatesByIntent(existing, intent);
+    const final = applyRankWhy(ranked, intent);
 
-      try {
-        renderDrawerCandidates(host, basePayload, final);
-        if (sub) {
-          const labelTxt = getRankLabel(intent);
-          sub.textContent = labelTxt ? `Ranked by: ${labelTxt}` : "Ranked picks.";
-        }
-      } catch {}
-    });
-
-    chipsBox.appendChild(b);
+    try {
+      renderDrawerCandidates(host, basePayload, final);
+      if (sub) {
+        const labelTxt = getRankLabel(intent);
+        sub.textContent = labelTxt ? `Ranked by: ${labelTxt}` : "Ranked picks.";
+      }
+    } catch {}
   });
+
+  chipsBox.appendChild(b);
+});
 
   // Step 4: instantly populate “Top alternatives” (safe to be empty)
   try { hydrateDrawerPeek(host, basePayload); } catch {}
