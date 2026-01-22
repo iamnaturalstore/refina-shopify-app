@@ -847,9 +847,8 @@ const constraints = detectConstraints(concernNorm);
 const ck = cacheKey(storeId, concernNorm);
 const cached = await readCache(storeId, ck, cacheEpoch);
 if (cached) {
-  // No guard yet — keep cached payload intact and fast.
-  let shaped = clampCachedPayload(cached, guard);
-  shaped = transformToBasicIfNeeded(shaped, null);
+  const shaped = clampCachedPayload(cached, null);
+// IMPORTANT: don’t tier-transform again here; cached payload should already be tier-shaped
 
   return res.json({
     ...shaped,
