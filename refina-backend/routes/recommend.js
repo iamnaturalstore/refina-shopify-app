@@ -1187,25 +1187,109 @@ try {
 } catch {}
 
 
-    // Single call (gemini.js handles JSON mode/retries)
-    let raw = null, rawHead = null, vr = { ok: false };
-    try {
-      try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
-      const t0_llm = Date.now();
-      raw = await callGemini(prompt1, {
-        model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
-        temperature: 0.3,
-        topP: 0.8,
-      });
-      llmMs = Date.now() - t0_llm;
+    // Gemini call (AI must always happen) — add hedging to collapse tail latency.
+// No timeouts, no aborts. If attempt #1 is slow, start attempt #2 in parallel
+// and take the first valid answer.
+const HEDGE_MS = Number(process.env.REFINA_HEDGE_MS || 9000); // start 2nd call after ~9s if still waiting
 
-      vr = validateConciergeResponse(raw);
-      if (typeof raw === "string") rawHead = raw.slice(0, 220);
-      attempts.push({ stage: 1, ok: vr.ok, ms: llmMs, err: vr.ok ? undefined : (raw ? "validation_failed" : "llm_returned_null") });
-    } catch (e) {
-      console.error("[recommend] Unexpected error during callGemini:", e);
-      attempts.push({ stage: 1, ok: false, err: String(e?.message || e) });
+async function runGeminiAttempt(stage) {
+  let raw = null;
+  let vr = { ok: false };
+  const t0 = Date.now();
+
+  try {
+    raw = await callGemini(prompt1, {
+      model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+      temperature: 0.3,
+      topP: 0.8,
+    });
+
+    const ms = Date.now() - t0;
+    vr = validateConciergeResponse(raw);
+
+    attempts.push({
+      stage,
+      ok: vr.ok,
+      ms,
+      err: vr.ok
+        ? undefined
+        : raw
+          ? "validation_failed"
+          : "llm_returned_null",
+    });
+
+    return { raw, vr, ms };
+  } catch (e) {
+    const ms = Date.now() - t0;
+
+    attempts.push({
+      stage,
+      ok: false,
+      ms,
+      err: String(e?.message || e),
+    });
+
+    return { raw: null, vr: { ok: false }, ms };
+  }
+}
+
+let raw = null,
+  rawHead = null,
+  vr = { ok: false };
+
+try {
+  try {
+    await incrementOnInvoke(storeId, { count: 1 });
+  } catch (_) {}
+
+  // Start attempt #1 immediately
+  const p1 = runGeminiAttempt(1);
+
+  // Start attempt #2 only if #1 is still running after HEDGE_MS
+  let p2 = null;
+  const hedgeTimer = setTimeout(() => {
+    raced = true; // we hedged (not aborted)
+    p2 = runGeminiAttempt(2);
+  }, Math.max(0, HEDGE_MS));
+
+  // If running on Node, don't keep the process alive just for the timer
+  if (typeof hedgeTimer?.unref === "function") hedgeTimer.unref();
+
+  // Await attempt #1 first — if it returns valid, we're done (no need to wait for #2)
+  const r1 = await p1;
+  clearTimeout(hedgeTimer);
+
+  if (r1?.vr?.ok) {
+    raw = r1.raw;
+    vr = r1.vr;
+    llmMs = r1.ms;
+  } else {
+    // Attempt #1 failed validation/null.
+    // If attempt #2 never started yet, start it now (AI must still happen).
+    if (!p2) {
+      raced = true;
+      p2 = runGeminiAttempt(2);
     }
+
+    const r2 = await p2;
+
+    if (r2?.vr?.ok) {
+      raw = r2.raw;
+      vr = r2.vr;
+      llmMs = r2.ms;
+    } else {
+      // Both attempts failed
+      raw = r1.raw || r2.raw || null;
+      vr = { ok: false };
+      llmMs = r2?.ms || r1?.ms || 0;
+    }
+  }
+
+  if (typeof raw === "string") rawHead = raw.slice(0, 220);
+} catch (e) {
+  console.error("[recommend] Unexpected error during Gemini hedged call:", e);
+  attempts.push({ stage: 0, ok: false, err: String(e?.message || e) });
+}
 
     if (!vr.ok) {
       const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
