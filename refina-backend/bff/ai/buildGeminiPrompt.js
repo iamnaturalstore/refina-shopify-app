@@ -89,20 +89,17 @@ function productToCompact(p, constraints = {}, concernTokens = []) {
     name,
     descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 120),
     tags: Array.isArray(p.tags)
-      ? p.tags.slice(0, 8)
-      : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 8) : []),
-    keywords: (kwNorm || (Array.isArray(p.keywords) ? p.keywords : [])).slice(0, 8),
-    ingredients: (ingNorm || (Array.isArray(p.ingredients) ? p.ingredients : [])).slice(0, 10),
+      ? p.tags.slice(0, 12)
+      : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
+    keywords: (kwNorm || (Array.isArray(p.keywords) ? p.keywords : [])).slice(0, 12),
     productType: p.productType || "",
     productType_norm: productTypeNormalized,
     usageStep,
-    benefits,
-    concerns,
     audience,
     // normalized faceting fields explicitly present for the model:
-    benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized.slice(0, 10) : [],
-    concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized.slice(0, 10) : [],
-    ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized.slice(0, 10) : [],
+    benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized.slice(0, 16) : [],
+    concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized.slice(0, 16) : [],
+    ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized.slice(0, 16) : [],
     category: p.categoryNormalized || p.category || "",
     price: p.price ?? p.minPrice ?? undefined,
 
@@ -210,14 +207,6 @@ OUTPUT REQUIREMENTS:
 - Choose EXACTLY 3 product IDs from candidates: primary + 2 alternatives.
 - Ensure productIds is ordered: [primary, alt1, alt2].
 - Keep reasons short, concrete, and grounded in candidate fields.
-HARD LENGTH CAPS (to reduce latency; do not exceed these):
-- primary.reasons: exactly 3 strings, each <= 90 characters
-- alternatives: exactly 2 items
-  - each alternative.reasons: max 2 strings, each <= 80 characters
-- explanation.oneLiner: <= 140 characters
-- explanation.friendlyParagraph: max 2 sentences and <= 260 characters
-- explanation.expertBullets: exactly 2 strings, each <= 90 characters
-- Do not add extra keys. Do not include any extra prose outside JSON.
 
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
