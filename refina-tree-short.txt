@@ -1,24 +1,123 @@
-.
-├── _archive-app
-│   ├── lib
-│   │   └── firebase.server.js
-│   ├── package.json
-│   ├── routes
-│   │   ├── _index.jsx
-│   │   ├── admin-dashboard.jsx
-│   │   └── admin-settings.jsx
-│   ├── shopify.app.toml
-│   └── utils
-│       └── session.server.js
+├── .DS_Store
+├── .env
+├── .gitignore
+├── .shopify
+│   ├── .gitignore
+│   ├── deploy-bundle
+│   │   ├── df1fadfc-0aa2-0102-5072-0443220855f2ad661ec6
+│   │   │   ├── assets
+│   │   │   │   ├── concierge.css
+│   │   │   │   ├── concierge.js
+│   │   │   │   └── refina-pdp-assist.js
+│   │   │   ├── blocks
+│   │   │   │   ├── refina-launcher.liquid
+│   │   │   │   └── refina-pdp-assist.liquid
+│   │   │   └── locales
+│   │   │       └── en.default.json
+│   │   └── manifest.json
+│   ├── deploy-bundle.br
+│   ├── deploy-bundle.zip
+│   ├── dev-bundle
+│   └── project.json
+├── .yarn
+│   ├── install-state.gz
+│   └── releases
+│       ├── yarn-1.22.22.cjs
+│       └── yarn-classic.cjs
+├── .yarnrc
+├── .yarnrc.yml
 ├── addStoreIdToProducts.js
+├── admin-OLD
+│   ├── .env.example
+│   ├── lib
+│   │   ├── firebase.js
+│   │   └── shopify.js
+│   ├── package.json
+│   ├── pages
+│   │   ├── Analytics.jsx
+│   │   ├── Billing.jsx
+│   │   ├── Home.jsx
+│   │   ├── NotFound.jsx
+│   │   └── Settings.jsx
+│   ├── src
+│   │   ├── app.jsx
+│   │   ├── components
+│   │   │   └── AdminLayout.jsx
+│   │   └── main.jsx
+│   └── vite.config.js
+├── admin-ui
+│   ├── .env
+│   ├── .env.production
+│   ├── index.html
+│   ├── package.json
+│   ├── src
+│   │   ├── abTitleBar.js
+│   │   ├── api
+│   │   │   ├── analytics.js
+│   │   │   └── client.js
+│   │   ├── App.jsx
+│   │   ├── appBridge.js
+│   │   ├── components
+│   │   │   ├── AIControlsPanel.jsx
+│   │   │   └── AppearancePanel.jsx
+│   │   ├── main.jsx
+│   │   ├── pages
+│   │   │   ├── Analytics.jsx
+│   │   │   ├── Analytics.module.css
+│   │   │   ├── Billing.jsx
+│   │   │   ├── Home.jsx
+│   │   │   ├── Settings.jsx
+│   │   │   ├── Setup.jsx
+│   │   │   └── Welcome.jsx
+│   │   └── utils
+│   │       ├── returnTo.js
+│   │       └── shareHref.js
+│   └── vite.config.js
+├── app
+│   └── routes
+│       ├── _index.jsx
+│       └── billing.jsx
+├── dist
+│   ├── assets
+│   │   ├── index-BeiPL2RV.css
+│   │   └── index-qfUkEakz.js
+│   └── index.html
+├── extensions
+│   └── refina-launcher
+│       ├── assets
+│       │   ├── concierge.css
+│       │   ├── concierge.js
+│       │   └── refina-pdp-assist.js
+│       ├── blocks
+│       │   ├── refina-launcher.liquid
+│       │   └── refina-pdp-assist.liquid
+│       ├── locales
+│       │   └── en.default.json
+│       └── shopify.extension.toml
 ├── frontend
+│   ├── .DS_Store
+│   ├── .env
+│   ├── .netlify
+│   │   ├── functions-internal
+│   │   ├── netlify.toml
+│   │   ├── state.json
+│   │   └── v1
+│   │       └── functions
+│   ├── dist
+│   │   └── assets
+│   ├── dist-concierge
+│   │   ├── _headers
+│   │   ├── concierge.css
+│   │   ├── concierge.js
+│   │   └── concierge.js.map
 │   ├── eslint.config.js
 │   ├── index.html
 │   ├── package.json
+│   ├── public
+│   │   └── _headers
 │   ├── scripts
 │   │   ├── fixProductImages.js
-│   │   ├── logProductImages.js
-│   │   └── scripts
+│   │   └── logProductImages.js
 │   ├── src
 │   │   ├── app.jsx
 │   │   ├── components
@@ -28,59 +127,144 @@
 │   │   │   ├── CustomerRecommender.css
 │   │   │   ├── CustomerRecommender.jsx
 │   │   │   └── CustomerRecommender.module.css
+│   │   ├── concierge
+│   │   │   └── main.jsx
 │   │   ├── firebase.js
 │   │   ├── gemini.js
 │   │   ├── main.jsx
 │   │   └── utils
-│   │       ├── buildGeminiPrompt.js
+│   │       ├── buildGeminiPrompt.client-DEAD.js
 │   │       ├── concernMatching.js
 │   │       ├── fallbackProductMatch.js
 │   │       ├── fetchStoreProducts.js
 │   │       ├── fetchStoreSettings.js
 │   │       ├── matchProducts.js
 │   │       ├── normalizeConcern.js
-│   │       ├── planSync.js
+│   │       ├── preFilter.js
 │   │       └── stripHtml.js
-│   └── vite.config.js
-├── lib
-├── package-lock.json
+│   ├── vite.config.js
+│   └── yarn.lock
+├── index.html
+├── ops
+│   └── snapshots
+│       └── 2025-09-17.md
 ├── package.json
 ├── refina-backend
+│   ├── .DS_Store
+│   ├── .env
+│   ├── .gitignore
+│   ├── admin-ui-dist
+│   │   ├── assets
+│   │   │   ├── index-DL5h5V9I.css
+│   │   │   ├── index-DT5GJIPN.js
+│   │   │   └── index-DT5GJIPN.js.map
+│   │   └── index.html
+│   ├── ai
+│   │   ├── jsonSchemas.js
+│   │   ├── prompts
+│   │   │   ├── extractEntities.js
+│   │   │   └── queryToEntities.js
+│   │   └── validateConcierge.js
 │   ├── api
-│   │   ├── billing
-│   │   │   ├── confirm.js
-│   │   │   └── subscribe.js
-│   │   ├── dev-test-set-plan.js
-│   │   ├── legacy-confirm-billing.js
-│   │   └── legacy-upgrade-plan.js
+│   │   └── dev-test-set-plan.js
+│   ├── bff
+│   │   ├── ai
+│   │   │   ├── buildGeminiPrompt.js
+│   │   │   ├── gemini.js
+│   │   │   ├── getIngredientFacts.js
+│   │   │   └── guard.js
+│   │   ├── lib
+│   │   │   ├── cache.js
+│   │   │   ├── fallbackRanker.js
+│   │   │   ├── firestore.js
+│   │   │   ├── knowledge.js
+│   │   │   ├── normalize.js
+│   │   │   ├── packs.js
+│   │   │   ├── paths.js
+│   │   │   └── settings.js
+│   │   ├── packs
+│   │   │   └── beauty
+│   │   │       └── config.json
+│   │   └── server.js
+│   ├── firebaseAdmin.js
 │   ├── lib
-│   │   └── memory-storage.js
-│   ├── middleware
+│   │   ├── firestore.js
+│   │   ├── memory-storage.js
+│   │   ├── planWriter.js
+│   │   ├── session
+│   │   │   └── firestoreSessionStorage.js
+│   │   └── usage.js
 │   ├── package.json
+│   ├── public
+│   │   └── concierge
+│   │       ├── _headers
+│   │       ├── concierge.css
+│   │       ├── concierge.js
+│   │       └── concierge.js.map
 │   ├── routes
-│   │   └── billing.js
+│   │   ├── _mount-backfill.js
+│   │   ├── adminSettings.js
+│   │   ├── analytics.js
+│   │   ├── analyticsIngest.js
+│   │   ├── auth.js
+│   │   ├── backfill.js
+│   │   ├── billing.js
+│   │   ├── catalog-fallback.js
+│   │   ├── enrichment.js
+│   │   ├── privacyWebhooks.js
+│   │   ├── recommend.js
+│   │   ├── semantic.js
+│   │   ├── settings.js
+│   │   └── storeSettings.js
 │   ├── scripts
+│   │   ├── .env
 │   │   ├── cleanupFlatProducts.js
+│   │   ├── cloneAnalyticsFromStore.js
 │   │   ├── deleteAllProducts.js
+│   │   ├── findAnalyticsCollection.js
 │   │   ├── importProductsNested.js
 │   │   ├── importProductsSingleImage.js
+│   │   ├── importShopifyProductsToFirestore.mjs
+│   │   ├── migrateStoreIdDeep.js
+│   │   ├── moveAnalyticsLogsToConversations.js
+│   │   ├── reimportShopifyToFirestore.mjs
+│   │   ├── seed_knowledge.mjs
+│   │   ├── seedDemoFromApi.js
+│   │   └── setPlan.js
+│   ├── secure
 │   │   └── service-account.json
+│   ├── seed
+│   │   ├── concern_to_ingredients.ndjson
+│   │   └── ingredient_facts.ndjson
+│   ├── server-3001.log
 │   ├── server.js
+│   ├── sessions.sqlite
 │   ├── Shopify
 │   │   └── syncProducts.mjs
-│   └── shopify.js
-├── refina-backup-2025-08-08.zip
-├── refina-frontend-backup-20250806-1832.zip
-├── refina-migrate
-│   ├── migrateProducts.js
-│   ├── package.json
-│   ├── service-account.json
-│   └── yarn.lock
+│   ├── shopify.js
+│   ├── start.js
+│   ├── utils
+│   │   ├── firebaseAdmin.js
+│   │   ├── planSync.js
+│   │   ├── preFilter
+│   │   ├── resolveStore.js
+│   │   └── shopSession.js
+│   └── workers
+│       ├── backfillEmbeddings.mjs
+│       └── indexer.mjs
+├── refina-baseline-20250827-102356.tgz
+├── refina-baseline-20250827-102520.tgz
+├── refina-demo.myshopify.com_2025-09-06_11-47-05.report.html
+├── refina-pre-analytics-unify-2025-10-05.bundle
+├── refina-src-pre-analytics-unify-2025-10-05.zip
 ├── refina-structure.txt
 ├── refina-tree-short.txt
 ├── refina-tree.txt
 ├── remix.config.cjs
+├── render.yaml
 ├── scripts
+│   ├── .env
+│   ├── buildEmbeddings.js
 │   ├── cleanupFlatProducts.js
 │   ├── enrichProductsWithDetails.js
 │   ├── generateConcernMappings.js
@@ -88,9 +272,34 @@
 │   ├── mapConcernsInBatches.js
 │   ├── mapConcernsToProducts.js
 │   ├── migrateProducts.js
-│   └── service-account.json
-├── service-account.json
+│   ├── normalizeProducts.js
+│   ├── sdk-shape.mjs
+│   ├── shopify-shape.mjs
+│   ├── vectorDiversityScan.mjs
+│   ├── vectorHealthScan.mjs
+│   └── vectorSelfCheck.mjs
+├── sed
+├── shopify.app.toml
+├── src
+│   ├── app.jsx
+│   ├── components
+│   │   └── AdminLayout.jsx
+│   ├── lib
+│   │   ├── appBridge.js
+│   │   ├── copyLink.js
+│   │   ├── shopify.js
+│   │   └── useTitleBar.js
+│   ├── main.jsx
+│   ├── pages
+│   │   ├── Analytics.jsx
+│   │   ├── Billing.jsx
+│   │   ├── Home.jsx
+│   │   ├── NotFound.jsx
+│   │   └── Settings.jsx
+│   └── theme
+│       └── applyTheme.js
 ├── tsconfig.json
+├── vite.config.js
 └── yarn.lock
 
-22 directories, 72 files
+74 directories, 230 files

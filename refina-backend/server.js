@@ -872,7 +872,7 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
         ingredientFacts,
         products: condenseProducts(topK),
       });
-      const genConfig = { temperature: plan === 'premium' ? 0.7 : 0.5, topP: 0.9, maxOutputTokens: 1024 };
+      const genConfig = { temperature: plan === 'premium' ? 0.6 : 0.45, topP: 0.9, maxOutputTokens: 512 };
       const tLLM = Date.now();
       const modelText = await callGemini(prompt, genConfig).catch(() => null);
       meta.llmMs = Date.now() - tLLM;
