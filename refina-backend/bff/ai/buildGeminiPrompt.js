@@ -87,17 +87,14 @@ function productToCompact(p, constraints = {}, concernTokens = []) {
   return {
     id: p.id,
     name,
-    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 200),
+    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 150),
     tags: Array.isArray(p.tags)
       ? p.tags.slice(0, 12)
       : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
     keywords: (kwNorm || (Array.isArray(p.keywords) ? p.keywords : [])).slice(0, 12),
-    ingredients: (ingNorm || (Array.isArray(p.ingredients) ? p.ingredients : [])).slice(0, 12),
     productType: p.productType || "",
     productType_norm: productTypeNormalized,
     usageStep,
-    benefits,
-    concerns,
     audience,
     // normalized faceting fields explicitly present for the model:
     benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized.slice(0, 16) : [],
