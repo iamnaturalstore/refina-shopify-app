@@ -1187,120 +1187,25 @@ try {
 } catch {}
 
 
-    // Gemini call (AI must always happen) — TRUE hedging.
-// No timeouts, no aborts. Start attempt #2 only if #1 is still running,
-// and use the FIRST VALID response that returns.
+    // Single call (gemini.js handles JSON mode/retries)
+    let raw = null, rawHead = null, vr = { ok: false };
+    try {
+      try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
+      const t0_llm = Date.now();
+      raw = await callGemini(prompt1, {
+        model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+        temperature: 0.3,
+        topP: 0.8,
+      });
+      llmMs = Date.now() - t0_llm;
 
-const HEDGE_MS = Number(process.env.REFINA_HEDGE_MS || 9000);
-
-async function runGeminiAttempt(stage) {
-  let raw = null;
-  let vr = { ok: false };
-  const t0 = Date.now();
-
-  try {
-    raw = await callGemini(prompt1, {
-      model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
-      temperature: 0.3,
-      topP: 0.8,
-    });
-
-    const ms = Date.now() - t0;
-    vr = validateConciergeResponse(raw);
-
-    attempts.push({
-      stage,
-      ok: vr.ok,
-      ms,
-      err: vr.ok
-        ? undefined
-        : raw
-          ? "validation_failed"
-          : "llm_returned_null",
-    });
-
-    return { raw, vr, ms, stage };
-  } catch (e) {
-    const ms = Date.now() - t0;
-
-    attempts.push({
-      stage,
-      ok: false,
-      ms,
-      err: String(e?.message || e),
-    });
-
-    return { raw: null, vr: { ok: false }, ms, stage };
-  }
-}
-
-function isPending(p) {
-  return Promise.race([p, Promise.resolve("__PENDING__")]).then((v) => v === "__PENDING__");
-}
-
-let raw = null,
-  rawHead = null,
-  vr = { ok: false };
-
-try {
-  try {
-    await incrementOnInvoke(storeId, { count: 1 });
-  } catch (_) {}
-
-  const p1 = runGeminiAttempt(1);
-
-  // Start p2 only if p1 is still running after HEDGE_MS
-  const p2Starter = new Promise((resolve) => {
-    const t = setTimeout(async () => {
-      raced = true;
-      resolve(runGeminiAttempt(2));
-    }, Math.max(0, HEDGE_MS));
-
-    if (typeof t?.unref === "function") t.unref();
-  });
-
-  // Race: first OK wins (p1 can win before hedge even starts p2)
-  const firstWinner = await Promise.race([
-    p1.then((r) => ({ which: 1, r })),
-    p2Starter.then((p2) => p2.then((r) => ({ which: 2, r }))),
-  ]);
-
-  let best = firstWinner.r;
-
-  // If the first result is NOT valid, we must wait for the other one (AI must happen)
-  if (!best?.vr?.ok) {
-    // If p2 never started yet, start it now
-    let p2 = null;
-    const p2Maybe = await Promise.race([p2Starter, Promise.resolve(null)]);
-    if (p2Maybe && typeof p2Maybe.then === "function") p2 = p2Maybe;
-    if (!p2) {
-      raced = true;
-      p2 = runGeminiAttempt(2);
+      vr = validateConciergeResponse(raw);
+      if (typeof raw === "string") rawHead = raw.slice(0, 220);
+      attempts.push({ stage: 1, ok: vr.ok, ms: llmMs, err: vr.ok ? undefined : (raw ? "validation_failed" : "llm_returned_null") });
+    } catch (e) {
+      console.error("[recommend] Unexpected error during callGemini:", e);
+      attempts.push({ stage: 1, ok: false, err: String(e?.message || e) });
     }
-
-    // Await the other result (whichever we don't have yet)
-    const other = firstWinner.which === 1 ? await p2 : await p1;
-
-    if (other?.vr?.ok) best = other;
-  }
-
-  // Final assignment
-  if (best?.vr?.ok) {
-    raw = best.raw;
-    vr = best.vr;
-    llmMs = best.ms;
-  } else {
-    // both failed; keep diagnostics
-    raw = best?.raw || null;
-    vr = { ok: false };
-    llmMs = best?.ms || 0;
-  }
-
-  if (typeof raw === "string") rawHead = raw.slice(0, 220);
-} catch (e) {
-  console.error("[recommend] Unexpected error during Gemini hedge race:", e);
-  attempts.push({ stage: 0, ok: false, err: String(e?.message || e) });
-}
 
     if (!vr.ok) {
       const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
