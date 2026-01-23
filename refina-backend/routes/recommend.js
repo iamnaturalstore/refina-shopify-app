@@ -1187,10 +1187,11 @@ try {
 } catch {}
 
 
-    // Gemini call (AI must always happen) — add hedging to collapse tail latency.
-// No timeouts, no aborts. If attempt #1 is slow, start attempt #2 in parallel
-// and take the first valid answer.
-const HEDGE_MS = Number(process.env.REFINA_HEDGE_MS || 9000); // start 2nd call after ~9s if still waiting
+    // Gemini call (AI must always happen) — TRUE hedging.
+// No timeouts, no aborts. Start attempt #2 only if #1 is still running,
+// and use the FIRST VALID response that returns.
+
+const HEDGE_MS = Number(process.env.REFINA_HEDGE_MS || 9000);
 
 async function runGeminiAttempt(stage) {
   let raw = null;
@@ -1218,7 +1219,7 @@ async function runGeminiAttempt(stage) {
           : "llm_returned_null",
     });
 
-    return { raw, vr, ms };
+    return { raw, vr, ms, stage };
   } catch (e) {
     const ms = Date.now() - t0;
 
@@ -1229,8 +1230,12 @@ async function runGeminiAttempt(stage) {
       err: String(e?.message || e),
     });
 
-    return { raw: null, vr: { ok: false }, ms };
+    return { raw: null, vr: { ok: false }, ms, stage };
   }
+}
+
+function isPending(p) {
+  return Promise.race([p, Promise.resolve("__PENDING__")]).then((v) => v === "__PENDING__");
 }
 
 let raw = null,
@@ -1242,52 +1247,58 @@ try {
     await incrementOnInvoke(storeId, { count: 1 });
   } catch (_) {}
 
-  // Start attempt #1 immediately
   const p1 = runGeminiAttempt(1);
 
-  // Start attempt #2 only if #1 is still running after HEDGE_MS
-  let p2 = null;
-  const hedgeTimer = setTimeout(() => {
-    raced = true; // we hedged (not aborted)
-    p2 = runGeminiAttempt(2);
-  }, Math.max(0, HEDGE_MS));
+  // Start p2 only if p1 is still running after HEDGE_MS
+  const p2Starter = new Promise((resolve) => {
+    const t = setTimeout(async () => {
+      raced = true;
+      resolve(runGeminiAttempt(2));
+    }, Math.max(0, HEDGE_MS));
 
-  // If running on Node, don't keep the process alive just for the timer
-  if (typeof hedgeTimer?.unref === "function") hedgeTimer.unref();
+    if (typeof t?.unref === "function") t.unref();
+  });
 
-  // Await attempt #1 first — if it returns valid, we're done (no need to wait for #2)
-  const r1 = await p1;
-  clearTimeout(hedgeTimer);
+  // Race: first OK wins (p1 can win before hedge even starts p2)
+  const firstWinner = await Promise.race([
+    p1.then((r) => ({ which: 1, r })),
+    p2Starter.then((p2) => p2.then((r) => ({ which: 2, r }))),
+  ]);
 
-  if (r1?.vr?.ok) {
-    raw = r1.raw;
-    vr = r1.vr;
-    llmMs = r1.ms;
-  } else {
-    // Attempt #1 failed validation/null.
-    // If attempt #2 never started yet, start it now (AI must still happen).
+  let best = firstWinner.r;
+
+  // If the first result is NOT valid, we must wait for the other one (AI must happen)
+  if (!best?.vr?.ok) {
+    // If p2 never started yet, start it now
+    let p2 = null;
+    const p2Maybe = await Promise.race([p2Starter, Promise.resolve(null)]);
+    if (p2Maybe && typeof p2Maybe.then === "function") p2 = p2Maybe;
     if (!p2) {
       raced = true;
       p2 = runGeminiAttempt(2);
     }
 
-    const r2 = await p2;
+    // Await the other result (whichever we don't have yet)
+    const other = firstWinner.which === 1 ? await p2 : await p1;
 
-    if (r2?.vr?.ok) {
-      raw = r2.raw;
-      vr = r2.vr;
-      llmMs = r2.ms;
-    } else {
-      // Both attempts failed
-      raw = r1.raw || r2.raw || null;
-      vr = { ok: false };
-      llmMs = r2?.ms || r1?.ms || 0;
-    }
+    if (other?.vr?.ok) best = other;
+  }
+
+  // Final assignment
+  if (best?.vr?.ok) {
+    raw = best.raw;
+    vr = best.vr;
+    llmMs = best.ms;
+  } else {
+    // both failed; keep diagnostics
+    raw = best?.raw || null;
+    vr = { ok: false };
+    llmMs = best?.ms || 0;
   }
 
   if (typeof raw === "string") rawHead = raw.slice(0, 220);
 } catch (e) {
-  console.error("[recommend] Unexpected error during Gemini hedged call:", e);
+  console.error("[recommend] Unexpected error during Gemini hedge race:", e);
   attempts.push({ stage: 0, ok: false, err: String(e?.message || e) });
 }
 
