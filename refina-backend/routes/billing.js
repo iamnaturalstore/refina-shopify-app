@@ -385,7 +385,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
               // 3) Everyone else → default trial
               process.env.SHOPIFY_BILLING_TRIAL_DAYS ||
               process.env.BILLING_TRIAL_DAYS ||
-              14
+              30
             )
       )
 ),

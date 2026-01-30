@@ -380,7 +380,7 @@ const knowledgePct = knowledgeHasCounts
         {level === "free" && (
           <Banner
             tone="info"
-            title="Turn on AI answers with Pro — 2,000 AI requests/mo. 7-day free trial."
+            title="Turn on AI answers with Pro — 2,000 AI requests/mo. 30-day free trial."
             action={{ content: "Upgrade to Pro", url: `#/billing${qs}` }}
           >
             <p>Unlock AI recommendations, analytics, and styling controls with Pro. No changes to your storefront theme required.</p>

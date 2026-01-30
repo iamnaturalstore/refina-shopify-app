@@ -81,7 +81,7 @@ export default function Billing() {
       </div>
 
       <p style={{ marginTop: 12, color: "#666" }}>
-        Trial: {Number(import.meta?.env?.VITE_BILLING_TRIAL_DAYS || 7)} days. You can upgrade or cancel anytime.
+        Trial: {Number(import.meta?.env?.VITE_BILLING_TRIAL_DAYS || 30)} days. You can upgrade or cancel anytime.
       </p>
     </div>
   );
