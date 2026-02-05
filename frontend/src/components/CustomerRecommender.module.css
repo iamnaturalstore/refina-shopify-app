@@ -250,11 +250,21 @@
 
 /* ===== Modal Overlay + Modal (glassy) ===== */
 .modalOverlay {
-  position: fixed; inset: 0;
-  background-color: var(--rf-overlay);
-  display: flex; align-items: center; justify-content: center;
+  position: fixed;
+  inset: 0;
+
+  /* ✅ remove grey wash */
+  background: rgba(0,0,0,0.10);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
   z-index: 999;
-  backdrop-filter: blur(2px);
+
+  /* ✅ no blur haze */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .modal {
   background-color: var(--rf-surface);
@@ -263,8 +273,11 @@
   max-width: 560px;
   width: min(92%, 560px);
   text-align: center;
-  max-height: 90vh;
-  overflow: auto;
+  height: 96dvh;
+  max-height: 96dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   color: var(--rf-color-text);
   border: 1px solid var(--rf-border);
   box-shadow: var(--rf-shadow), inset 0 1px 0 rgba(255,255,255,0.35);
