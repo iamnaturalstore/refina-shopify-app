@@ -254,7 +254,7 @@
   inset: 0;
 
   /* ✅ remove grey wash */
-  background: transparent;
+  background: rgba(255, 255, 255, 0);
 
   display: flex;
   align-items: center;
