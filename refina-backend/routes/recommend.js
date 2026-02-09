@@ -165,6 +165,97 @@ function pickPrimaryImage(p, storeId) {
   return ensureAbsolute(candidate, storeId);
 }
 
+function buildGeminiPromptFastExplain({
+  concern,
+  normalizedConcern = "",
+  category = "",
+  tone = "",
+  products = [],
+}) {
+  const toneText = String(tone || "confident expert");
+  const toneHint = /bestie/i.test(toneText)
+    ? "Warm, friendly 'smart bestie' tone while staying precise."
+    : "Confident, compact expert tone—friendly but no fluff.";
+
+  const compact = (Array.isArray(products) ? products : []).slice(0, 5).map((p) => ({
+    id: String(p.id ?? p.productId ?? ""),
+    title: String(p.title || p.name || "").slice(0, 120),
+    productType: String(p.productType || "").slice(0, 60),
+    keywords: Array.isArray(p.keywords) ? p.keywords.slice(0, 8) : [],
+    benefits: Array.isArray(p.benefits) ? p.benefits.slice(0, 6) : [],
+    usage: String(p.usage || "").slice(0, 120),
+    avoidFlags: p.avoidFlags && typeof p.avoidFlags === "object" ? p.avoidFlags : {},
+  }));
+
+  return `
+You are Refina, a thoughtful, precise shopping concierge for a ${String(category || "retail")} Shopify store.
+Language: Australian English.
+Be concise. Avoid medical claims.
+
+CUSTOMER CONCERN (raw): ${String(concern || "").trim()}
+${normalizedConcern ? `CUSTOMER CONCERN (normalized): ${normalizedConcern}` : ""}
+
+You are given FINAL picks (JSON). Do NOT change the product IDs. Do NOT invent facts.
+Write an AI explanation and reasons for each ID, grounded ONLY in the provided fields.
+
+Behaviour rules:
+- ${toneHint}
+- Second person ("you").
+- No fluff, no repetition.
+
+OUTPUT REQUIREMENTS:
+- Return STRICT JSON only (no markdown/backticks).
+- Keep it short.
+
+RESPONSE JSON SHAPE:
+{
+  "explanation": "1 short paragraph (2–4 sentences).",
+  "reasonsById": {
+    "<id>": ["reason 1", "reason 2"],
+    "<id>": ["reason 1", "reason 2"]
+  }
+}
+
+PICKS JSON:
+${JSON.stringify(compact)}
+`.trim();
+}
+
+function validateFastExplainResponse(raw) {
+  if (!raw || typeof raw !== "string") return { ok: false, err: "empty" };
+
+  let obj = null;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    // tolerate ```json fences if they appear
+    const m = raw.match(/```json([\s\S]*?)```/i);
+    if (m) {
+      try { obj = JSON.parse(m[1]); } catch {}
+    }
+  }
+  if (!obj || typeof obj !== "object") return { ok: false, err: "non_json" };
+
+  const explanation = typeof obj.explanation === "string" ? obj.explanation.trim() : "";
+  if (!explanation) return { ok: false, err: "missing_explanation" };
+
+  const rbi = obj.reasonsById;
+  if (!rbi || typeof rbi !== "object") return { ok: false, err: "missing_reasonsById" };
+
+  const cleaned = {};
+  for (const [id, reasons] of Object.entries(rbi)) {
+    const key = String(id || "").trim();
+    if (!key) continue;
+    const rr = Array.isArray(reasons)
+      ? reasons.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 3)
+      : [];
+    if (rr.length) cleaned[key] = rr;
+  }
+  if (!Object.keys(cleaned).length) return { ok: false, err: "empty_reasons" };
+
+  return { ok: true, value: { explanation, reasonsById: cleaned } };
+}
+
 // ─── Embeddings via REST (vectors) ───────────────────────────────────────────
 const EMBEDDING_MODEL =
   process.env.EMBEDDING_MODEL ||
@@ -1015,9 +1106,6 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
       const pt = p.productType_norm || p.productTypeNormalized || p.productType || "";
       const step = p.usageStep || p.step || "";
 
-      const stripHtmlLocal = (s = "") => String(s).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-      const capLocal = (s, n = 140) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-
       const rs = ruleScore(p, constraints, concernNorm);
       const typeMatch = constraints.step
         ? ([pt, step].map(String).map(s => s.toLowerCase()).includes(String(constraints.step).toLowerCase()))
@@ -1038,7 +1126,6 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
       return {
         id: p.id,
         name: p.title || p.name || "",
-        descriptionShort: capLocal(stripHtmlLocal(p.description || p.body_html || "")),
         productType: p.productType || "",
         productType_norm: pt,
         usageStep: step,
@@ -1075,81 +1162,15 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
       forStage2 = forStage2.slice(0, forStage2.length - 1);
     }
 
-// Phase 1.5 + Phase 3A: conditional Knowledge Pack facts + micro-cache
+// Phase 1.5 + Phase 3A: ingredient facts (DISABLED for warm-latency target)
+// Re-enable after we hit consistent <=6s warm AI responses.
 let ingredientFacts = {};
-const wantFacts = shouldFetchIngredientFacts({
-  constraints,
-  category,
-  concernNorm,
-});
+const wantFacts = false;
+timings.factsMs = 0;
 
-if (wantFacts) {
-  const finalistIdsForFacts = finalists.slice(0, 3).map((p) => String(p.id || ""));
-  const factsKeyParts = [
-    storeId,
-    cacheEpoch || "none",
-    category || "",
-    constraints.step || "",
-    constraints.flags?.sensitive ? "sens" : "",
-    constraints.flags?.avoidEO ? "avoidEO" : "",
-    String(constraints.age || ""),
-    finalistIdsForFacts.join(","),
-    concernNorm,
-  ];
-  const factsKey = factsKeyParts.join("|");
-
-  const cachedFacts = factsCacheGet(factsKey);
-  if (cachedFacts) {
-    ingredientFacts = cachedFacts;
-    timings.factsMs = 1;
-  } else {
-    const tFactsStart = Date.now();
-    try {
-      // Expand concern + top finalists into ingredient slugs
-      const hints = await expandConcernToIngredients(concernNorm, finalists.slice(0, 3));
-      const rawSlugs =
-        Array.isArray(hints?.slugs)
-          ? hints.slugs
-          : Array.isArray(hints?.fromConcern?.slugs)
-          ? hints.fromConcern.slugs
-          : [];
-
-      const slugs = Array.from(
-        new Set(
-          rawSlugs
-            .map((s) => String(s || "").trim().toLowerCase())
-            .filter(Boolean),
-        ),
-      );
-
-      if (slugs.length) {
-        // NOTE: getIngredientFacts returns the object format expected by buildGeminiPrompt.formatIngredientFacts
-        ingredientFacts = (await getIngredientFacts(storeId, slugs.slice(0, 12))) || {};
-      } else {
-        ingredientFacts = {};
-      }
-
-      factsCacheSet(factsKey, ingredientFacts);
-    } catch (e) {
-      ingredientFacts = {};
-      try {
-        console.warn("[recommend] ingredient facts skipped (error)", {
-          storeId,
-          msg: String(e?.message || e),
-        });
-      } catch (_) {}
-    } finally {
-      timings.factsMs = Date.now() - tFactsStart;
-    }
-  }
-} else {
-  // Explicit: skipped facts
-  timings.factsMs = 0;
-}
-
-// Phase 2 — Capsules-first prompt build
-const capsulesStage1 = (forStage1 || []).map(buildCapsuleFromProduct);
-const capsulesStage2 = (forStage2 || []).map(buildCapsuleFromProduct);
+// Phase 2 — Prompt build from compact candidates (single shaping path)
+// forStage1 is already compactForPrompt(...). Do NOT re-map through buildCapsuleFromProduct.
+const productsForPrompt = Array.isArray(forStage1) ? forStage1 : [];
 
 const prompt1 = buildGeminiPrompt({
   concern,
@@ -1158,7 +1179,7 @@ const prompt1 = buildGeminiPrompt({
   tone,
 
   // IMPORTANT: keep key name `products` to avoid prompt-builder churn
-  products: capsulesStage1,
+  products: productsForPrompt,
 
   ingredientFacts,
 });
@@ -1166,46 +1187,43 @@ const prompt1 = buildGeminiPrompt({
 // Track prompt size for debug
 try { promptChars = String(prompt1 || "").length; } catch {}
 
-const prompt2 = needWiden
-  ? buildGeminiPrompt({
-      concern,
-      normalizedConcern: concernNorm,
-      category,
-      tone,
-
-      // Phase 2 — widened capsules
-      products: capsulesStage2,
-
-      ingredientFacts,
-    })
-  : null;
-
-// Capsule debug (Phase 2)
+// Debug (keep keys stable)
 try {
-  debugCapsuleCount = capsulesStage1.length;
-  debugCapsuleChars = capsuleCharCount(capsulesStage1);
+  debugCapsuleCount = productsForPrompt.length;
+  debugCapsuleChars = capsuleCharCount(productsForPrompt);
 } catch {}
 
+// Single call (schema-enforced JSON; no retries for speed determinism)
+let raw = null, rawHead = null, vr = { ok: false };
 
-    // Single call (gemini.js handles JSON mode/retries)
-    let raw = null, rawHead = null, vr = { ok: false };
-    try {
-      try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
-      const t0_llm = Date.now();
-      raw = await callGemini(prompt1, {
-        model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
-        temperature: 0.3,
-        topP: 0.8,
-      });
-      llmMs = Date.now() - t0_llm;
+try {
+  try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
 
-      vr = validateConciergeResponse(raw);
-      if (typeof raw === "string") rawHead = raw.slice(0, 220);
-      attempts.push({ stage: 1, ok: vr.ok, ms: llmMs, err: vr.ok ? undefined : (raw ? "validation_failed" : "llm_returned_null") });
-    } catch (e) {
-      console.error("[recommend] Unexpected error during callGemini:", e);
-      attempts.push({ stage: 1, ok: false, err: String(e?.message || e) });
-    }
+  const t0_llm = Date.now();
+  raw = await callGemini(prompt1, {
+    model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+    temperature: 0.3,
+    topP: 0.8,
+
+    // Strongly reduces invalid JSON + repair churn
+    responseMimeType: "application/json",
+    responseSchema: ConciergeResponseSchema,
+  });
+  llmMs = Date.now() - t0_llm;
+
+  vr = validateConciergeResponse(raw);
+  if (typeof raw === "string") rawHead = raw.slice(0, 220);
+  attempts.push({
+    stage: 1,
+    ok: vr.ok,
+    ms: llmMs,
+    err: vr.ok ? undefined : (raw ? "validation_failed" : "llm_returned_null"),
+  });
+} catch (e) {
+  console.error("[recommend] Unexpected error during callGemini:", e);
+  attempts.push({ stage: 1, ok: false, err: String(e?.message || e) });
+}
+
 
     if (!vr.ok) {
       const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
