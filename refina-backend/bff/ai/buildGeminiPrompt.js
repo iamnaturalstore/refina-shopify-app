@@ -134,7 +134,7 @@ export function buildGeminiPrompt({
 }) {
   const concernTokens = tokensFrom(normalizedConcern);
   const compact = (Array.isArray(products) ? products : [])
-    .slice(0, 24)
+    .slice(0, 10)
     .map((p) => productToCompact(p, constraints, concernTokens));
 
   const middleWord = /beauty|skin|hair|cosmetic/i.test(String(category || ""))
