@@ -12,34 +12,16 @@ export function validateConciergeResponse(raw) {
   if (!raw || !s(raw)) return bad("empty model text");
 
   let obj = null;
-
-function tryParseJson(text) {
-  try { return JSON.parse(text); } catch { return null; }
-}
-
-const rawStr = String(raw || "").trim();
-
-// 1) Direct parse
-obj = tryParseJson(rawStr);
-
-// 2) Fenced block parse (```json OR plain ```)
-if (!obj) {
-  const fence = rawStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (fence) obj = tryParseJson(String(fence[1] || "").trim());
-}
-
-// 3) “Preamble text” salvage: parse from first "{" to last "}"
-if (!obj) {
-  const i = rawStr.indexOf("{");
-  const j = rawStr.lastIndexOf("}");
-  if (i >= 0 && j > i) {
-    const slice = rawStr.slice(i, j + 1);
-    obj = tryParseJson(slice);
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    // handle ```json fences if present
+    const m = raw.match(/```json([\s\S]*?)```/i);
+    if (m) {
+      try { obj = JSON.parse(m[1]); } catch {}
+    }
   }
-}
-
-if (!obj || typeof obj !== "object") return bad("non-JSON response");
-
+  if (!obj || typeof obj !== "object") return bad("non-JSON response");
 
   // ── Primary ────────────────────────────────────────────────────────────────
   const primary = {};
