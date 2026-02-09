@@ -720,7 +720,7 @@ let promptChars = 0;
 
       const [qVec, allEmb] = await Promise.all([
         embedText(concern),
-        loadEmbeddings(storeId, cacheEpoch),
+        loadEmbeddingsCached(storeId, cacheEpoch)
       ]);
 
       if (!allEmb.length || !qVec.length) {
