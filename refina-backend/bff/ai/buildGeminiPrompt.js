@@ -131,6 +131,7 @@ export function buildGeminiPrompt({
   rankMode = "relevant",
   routineMode = false,
   ingredientFacts = {},
+  fastMode = true,
 }) {
   const concernTokens = tokensFrom(normalizedConcern);
   const compact = (Array.isArray(products) ? products : [])
@@ -225,7 +226,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   ],
   "explanation": {
     "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
-    "friendlyParagraph": "Exactly 2 paragraphs separated by a blank line. Paragraph 1: overview of why these 3 were chosen (problem→solution framing, grounded). Paragraph 2: explicitly state why the Top Pick is #1 (grounded reasons), then position each alternative in 1 sentence; include a brief how-to tip as a short clause (not a whole extra paragraph).",
+    "friendlyParagraph": "Optional. If you can, write ONE short paragraph (<=350 chars). If not, return an empty string. Do NOT exceed 350 chars.",
     "expertBullets": ["Short evidence chip 1", "Evidence chip 2", "Optional: How-to tip chip"]
   },
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],

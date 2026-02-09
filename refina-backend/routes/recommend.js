@@ -1194,9 +1194,12 @@ try {
       const t0_llm = Date.now();
       raw = await callGemini(prompt1, {
         model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
-        temperature: 0.3,
+        temperature: 0.25,
         topP: 0.8,
+        maxOutputTokens: 320,
+        timeoutMs: 6000,
       });
+
       llmMs = Date.now() - t0_llm;
 
       vr = validateConciergeResponse(raw);
