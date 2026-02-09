@@ -1168,19 +1168,19 @@ let ingredientFacts = {};
 const wantFacts = false;
 timings.factsMs = 0;
 
-// Phase 2 — Prompt build from compact candidates (single shaping path)
-// forStage1 is already compactForPrompt(...). Do NOT re-map through buildCapsuleFromProduct.
-const productsForPrompt = Array.isArray(forStage1) ? forStage1 : [];
+// Phase 2 — Prompt build from finalists (let buildGeminiPrompt do the compacting)
+// IMPORTANT: do NOT pass compactForPrompt output into buildGeminiPrompt.
+// buildGeminiPrompt already compacts via productToCompact().
+
+// reuse existing stage1Count from earlier in this scope
+const productsForPrompt = finalists.slice(0, stage1Count);
 
 const prompt1 = buildGeminiPrompt({
   concern,
   normalizedConcern: concernNorm,
   category,
   tone,
-
-  // IMPORTANT: keep key name `products` to avoid prompt-builder churn
   products: productsForPrompt,
-
   ingredientFacts,
 });
 
