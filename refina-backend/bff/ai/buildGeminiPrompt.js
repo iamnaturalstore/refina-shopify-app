@@ -231,8 +231,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   "friendlyParagraph": "Optional. If present: one short paragraph (max ~3 sentences) summarising why the Top Pick is #1 and when to pick each alternative.",
   "expertBullets": ["Optional short evidence chip (max 2)"]
 },
-  "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
-  "copy": { "why": "", "rationale": "", "extras": "" }
+  "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"}
 }
 `.trim();
 }
