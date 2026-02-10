@@ -1267,8 +1267,13 @@ try {
     }
 
     const allow = finalistsSet;
-    let outIds = vr.value.productIds.filter((id) => allow.has(String(id)));
-    if (!outIds.length) outIds = finalists.slice(0, 3).map((p) => String(p.id));
+    let outIds = [
+  vr.value?.primary?.id,
+  ...(Array.isArray(vr.value?.alternatives) ? vr.value.alternatives.map(a => a?.id) : [])
+].filter(Boolean).map(String);
+
+outIds = outIds.filter((id) => allow.has(id));
+if (!outIds.length) outIds = finalists.slice(0, 3).map((p) => String(p.id));
 
         const tEnrichStart = Date.now();
     const enrichedDocs = await loadProductsByIds(storeId, outIds);
