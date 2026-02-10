@@ -242,9 +242,11 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   { at: 600,    text: "Scanning product catalogue" },
   { at: 1_800,  text: "Shortlisting products" },
   { at: 3_800,  text: "Ranking candidates" },
-  { at: 6_500,  text: "Writing your Top 3" },
-  { at: 9_500,  text: "Finalising" },
+  { at: 6_500,  text: "Selecting your Top 3" },
+  { at: 10_500, text: "Writing the reasons" },
+  { at: 14_500, text: "Finalizing recommendations" },
 ];
+
   function startProgressCycle() {
     progressTimers.current.forEach(clearTimeout);
     progressTimers.current = [];
