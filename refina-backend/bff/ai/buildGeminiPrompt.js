@@ -206,7 +206,10 @@ OUTPUT REQUIREMENTS:
 - Return STRICT JSON only (no markdown/backticks, no commentary).
 - Choose EXACTLY 3 product IDs from candidates: primary + 2 alternatives.
 - Ensure productIds is ordered: [primary, alt1, alt2].
-- Keep reasons short, concrete, and grounded in candidate fields.
+- Keep ALL text fields concise and grounded in candidate fields.
+- oneLiner is REQUIRED (1 sentence).
+- friendlyParagraph is OPTIONAL. If included, it MUST be a single short paragraph (max ~3 sentences). No blank line.
+- expertBullets are OPTIONAL. If included, provide 0–2 bullets, each max ~10 words.
 
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
@@ -224,10 +227,10 @@ RESPONSE JSON SHAPE (STRICT KEYS):
     { "id": "<altId-2>", "when": "sensitive | budget | premium | lighter texture | family-size | colour/material match", "reasons": ["short, concrete reason"] }
   ],
   "explanation": {
-    "oneLiner": "Warm, friendly one-sentence summary tailored to the concern.",
-    "friendlyParagraph": "Exactly 2 paragraphs separated by a blank line. Paragraph 1: overview of why these 3 were chosen (problem→solution framing, grounded). Paragraph 2: explicitly state why the Top Pick is #1 (grounded reasons), then position each alternative in 1 sentence; include a brief how-to tip as a short clause (not a whole extra paragraph).",
-    "expertBullets": ["Short evidence chip 1", "Evidence chip 2", "Optional: How-to tip chip"]
-  },
+  "oneLiner": "One sentence summary tailored to the concern (required).",
+  "friendlyParagraph": "Optional. If present: one short paragraph (max ~3 sentences) summarising why the Top Pick is #1 and when to pick each alternative.",
+  "expertBullets": ["Optional short evidence chip (max 2)"]
+},
   "productIds": ["<primary.id>", "<alt1.id>", "<alt2.id>"],
   "copy": { "why": "", "rationale": "", "extras": "" }
 }
