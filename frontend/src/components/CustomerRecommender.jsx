@@ -237,15 +237,14 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [progressLabel, setProgressLabel] = useState("Thinking…");
   const progressTimers = useRef([]);
 
-  const PROGRESS_PHASES = [
-    { at: 0,       text: "Thinking" },
-    { at: 5_000,   text: "Reading product data" },
-    { at: 10_000,  text: "Shortlisting products" },
-    { at: 15_000,  text: "Ranking your candidates" },
-    { at: 20_000,  text: "Finalizing your Top 3" },
-    { at: 25_000,  text: "Reasons why" },
-  ];
-
+ const PROGRESS_PHASES = [
+  { at: 0,      text: "Thinking" },
+  { at: 600,    text: "Scanning product catalogue" },
+  { at: 1_800,  text: "Shortlisting products" },
+  { at: 3_800,  text: "Ranking candidates" },
+  { at: 6_500,  text: "Writing your Top 3" },
+  { at: 9_500,  text: "Finalising" },
+];
   function startProgressCycle() {
     progressTimers.current.forEach(clearTimeout);
     progressTimers.current = [];
