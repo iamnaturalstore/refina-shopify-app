@@ -1148,8 +1148,8 @@ if (wantFacts) {
 }
 
 // Phase 2 — Capsules-first prompt build
-const capsulesStage1 = (forStage1 || []).map(buildCapsuleFromProduct);
-const capsulesStage2 = (forStage2 || []).map(buildCapsuleFromProduct);
+const capsulesStage1 = (forStage1 || []).map(buildCapsuleFromProduct).slice(0, 4);
+const capsulesStage2 = (forStage2 || []).map(buildCapsuleFromProduct).slice(0, 4);
 
 const prompt1 = buildGeminiPrompt({
   concern,
