@@ -142,6 +142,8 @@ export default function Home() {
   const [logs,      setLogs]      = React.useState([]);
   const [indexer,   setIndexer]   = React.useState(null);
   const [reauthHint, setReauth]   = React.useState(false);
+  const [syncBusy, setSyncBusy]   = React.useState(false);
+  const [syncMsg,  setSyncMsg]    = React.useState("");
 
   // ── initial load ────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -236,6 +238,23 @@ export default function Home() {
   const kbPct           = kbTotal > 0 ? pct(kbProcessed, kbTotal) : 0;
 
   // ── loading ──────────────────────────────────────────────────────────────
+
+  const startSync = React.useCallback(async () => {
+  setSyncMsg("");
+  setSyncBusy(true);
+  try {
+    const { data } = await api.post("/api/sync/start", {});
+    if (data?.queued)                    setSyncMsg("Sync started — progress will update below.");
+    else if (data?.reason === "already_running") setSyncMsg("Sync already in progress.");
+    else if (data?.reason === "cooldown")        setSyncMsg(`Cooling down. ${data?.retryAfterSec ? `Try again in ~${data.retryAfterSec}s.` : ""}`);
+    else                                         setSyncMsg("Nothing to sync right now.");
+  } catch (e) {
+    setSyncMsg(e?.message || "Sync failed.");
+  } finally {
+    setSyncBusy(false);
+  }
+}, []);
+
   if (loading) {
     return (
       <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -392,6 +411,31 @@ export default function Home() {
                 )}
               </>
             )}
+
+            <div style={{ height: "1px", background: "#E4E7EE", margin: "14px 0" }} />
+<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product sync</span>
+  <button
+    onClick={startSync}
+    disabled={syncBusy || kbActive}
+    style={{
+      padding: "6px 12px", borderRadius: "8px",
+      fontSize: "12px", fontWeight: "600",
+      background: syncBusy || kbActive ? "#F2F4F7" : GRAD,
+      color: syncBusy || kbActive ? "#94A3B8" : "white",
+      border: "none", cursor: syncBusy || kbActive ? "not-allowed" : "pointer",
+      fontFamily: "inherit",
+      boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
+    }}
+  >
+    {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
+  </button>
+</div>
+{syncMsg && (
+  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "6px" }}>
+    {syncMsg}
+  </div>
+)}
           </Panel>
 
           {/* Recent activity */}

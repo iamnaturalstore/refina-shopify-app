@@ -51,14 +51,8 @@ function ensureNavigationMenu(app, { host, shop }) {
     const { NavigationMenu } = actions;
     if (!NavigationMenu) return null;
 
-    const items = [
-      { label: "Home",      destination: buildHashDestination("/",          { host, shop }) },
-      { label: "Setup",     destination: buildHashDestination("/setup",     { host, shop }) },
-      { label: "Analytics", destination: buildHashDestination("/analytics", { host, shop }) },
-      { label: "Settings",  destination: buildHashDestination("/settings",  { host, shop }) },
-      { label: "Billing",   destination: buildHashDestination("/billing",   { host, shop }) },
-    ];
-
+   // Navigation handled by AppNav component — Shopify nav intentionally empty
+    const items = [];
     _nav = NavigationMenu.create(app, { items });
 
     // Keep active item synced with current hash route

@@ -238,6 +238,7 @@ export default function Welcome() {
   const [plan,          setPlan]          = React.useState(null);
   const [settings,      setSettings]      = React.useState({});
   const [indexer,       setIndexer]       = React.useState(null);
+  const [embedConfirmed, setEmbedConfirmed] = React.useState(false);
 
   // ── initial load ────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -253,6 +254,7 @@ export default function Welcome() {
         if (!on) return;
         setPlan(resolvedPlan);
         setSettings(sd?.settings || {});
+        setEmbedConfirmed(Boolean(sd?.settings?.themeEmbedConfirmed));
         setIndexer(id?.indexer || null);
         if (returnedFromBilling) {
           if (isActivePlan(resolvedPlan)) clearChargeId();
@@ -302,12 +304,28 @@ export default function Welcome() {
     }
   }, []);
 
+  const confirmEmbed = React.useCallback(async () => {
+  try {
+    await api.post("/api/admin/store-settings", {
+      settings: { themeEmbedConfirmed: true },
+    });
+    setEmbedConfirmed(true);
+  } catch (e) {
+    console.warn("[Welcome] Could not save embed confirmation:", e?.message);
+  }
+}, []);
+
   // ── derived ──────────────────────────────────────────────────────────────
   const hasActivePlan   = React.useMemo(() => isActivePlan(plan), [plan]);
   const indexerPhase    = String(indexer?.phase || "").toLowerCase();
   const hasKnowledge    = indexerPhase === "complete";
   const knowledgeActive = !!indexer && !hasKnowledge && indexerPhase !== "error";
-  const hasThemeEmbed   = Boolean(settings?.themeEmbedEnabled || settings?.appEmbedEnabled || settings?.refinaEnabled);
+  const hasThemeEmbed = Boolean(
+  settings?.themeEmbedEnabled ||
+  settings?.appEmbedEnabled   ||
+  settings?.refinaEnabled     ||
+  embedConfirmed
+);
   const hasCategory     = Boolean(settings?.category);
 
   const steps     = [hasActivePlan, hasKnowledge, hasThemeEmbed, hasCategory];
@@ -486,20 +504,33 @@ export default function Welcome() {
             }
           >
             {!hasThemeEmbed && (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                <a
-                  href={`https://${shop}/admin/themes/current/editor?context=apps&target=newAppsSection/app-embed`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={btnPrimary}
-                >
-                  Open Theme Editor ↗
-                </a>
-                <button style={btnSecondary} onClick={() => navigate(`/settings${qs}`)}>
-                  Setup guide
-                </button>
-              </div>
-            )}
+  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+      
+        <a href={"https://" + shop + "/admin/themes/current/editor?context=apps&target=newAppsSection/app-embed"}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={btnPrimary}
+      >
+        Open Theme Editor ↗
+      </a>
+      <button style={btnSecondary} onClick={() => navigate("/settings" + qs)}>
+        Setup guide
+      </button>
+    </div>
+    <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", background: "#F7F8FA", border: "1px solid #E4E7EE", borderRadius: "8px" }}>
+      <span style={{ fontSize: "13px", color: "#64748B", flex: 1 }}>
+        Once you've toggled Refina on and clicked Save in the Theme Editor:
+      </span>
+      <button
+        style={{ display: "inline-flex", alignItems: "center", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#059669", boxShadow: "none", fontFamily: "inherit" }}
+        onClick={confirmEmbed}
+      >
+        ✓ I've enabled it
+      </button>
+    </div>
+  </div>
+)}
           </StepCard>
 
           {/* Step 4: Category */}
