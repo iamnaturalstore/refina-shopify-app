@@ -1,0 +1,125 @@
+/* refina-admin.css
+ * Companion stylesheet for Refina admin UI.
+ * Handles hover states, transitions, and effects that can't be done with inline styles.
+ * Import once in your app entry point: import "./refina-admin.css";
+ */
+
+/* ── Font ── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+/* ── Base ── */
+.refina-appnav *,
+.refina-appnav *::before,
+.refina-appnav *::after {
+  box-sizing: border-box;
+}
+
+/* ── Step cards: hover lift ── */
+.refina-step-card {
+  cursor: default;
+}
+
+.refina-step-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 24, 41, 0.09), 0 1px 3px rgba(15, 24, 41, 0.05) !important;
+  transform: translateY(-1px);
+  border-color: #CDD2DE !important;
+}
+
+/* Override hover border for complete/in-progress cards so their semantic colour stays */
+.refina-step-card[data-state="complete"]:hover {
+  border-color: #6EE7B7 !important;
+}
+
+.refina-step-card[data-state="inProgress"]:hover {
+  border-color: #FCD34D !important;
+}
+
+/* ── Stat cards: subtle hover ── */
+.refina-stat-card {
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.refina-stat-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 24, 41, 0.09) !important;
+  transform: translateY(-1px);
+}
+
+/* ── Primary buttons: hover glow ── */
+button[style*="4FC3F7"]:hover,
+a[style*="4FC3F7"]:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(107, 143, 255, 0.4) !important;
+}
+
+/* ── Ghost buttons: hover fill ── */
+.refina-ghost-btn:hover {
+  background: #F2F4F7 !important;
+  color: #2D3A55 !important;
+  border-color: #94A3B8 !important;
+}
+
+/* ── Nav items: underline slide-in ── */
+.refina-appnav [role="button"] {
+  position: relative;
+}
+
+/* ── Pulsing KB dot (in-progress) ── */
+@keyframes refina-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.15); }
+  50%       { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.08); }
+}
+
+.refina-kb-pulsing {
+  animation: refina-pulse 2s ease-in-out infinite;
+}
+
+/* ── Progress bar animation ── */
+@keyframes refina-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ── Page fade-in ── */
+@keyframes refina-fadein {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.refina-page-enter {
+  animation: refina-fadein 0.2s ease-out both;
+}
+
+/* ── Responsive: stack stat cards on narrow ── */
+@media (max-width: 600px) {
+  .refina-stats-row {
+    flex-direction: column !important;
+  }
+
+  .refina-two-col {
+    grid-template-columns: 1fr !important;
+  }
+
+  .refina-appnav-items {
+    gap: 0 !important;
+  }
+
+  .refina-appnav [role="button"] {
+    padding: 0 10px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* ── Scrollbar styling (webkit) ── */
+.refina-panel ::-webkit-scrollbar {
+  width: 4px;
+}
+
+.refina-panel ::-webkit-scrollbar-track {
+  background: #F7F8FA;
+}
+
+.refina-panel ::-webkit-scrollbar-thumb {
+  background: #CDD2DE;
+  border-radius: 2px;
+}

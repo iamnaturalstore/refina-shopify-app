@@ -14,6 +14,8 @@ import {
 } from "@shopify/polaris";
 import api from "../api/client";
 
+import AppNav from "../components/AppNav";
+
 // A simple page header that doesn't conflict with legacy title bars.
 function PageHeader({ title, primaryAction }) {
   return (
@@ -147,6 +149,8 @@ export default function Settings() {
   }
 
   return (
+    <>
+    <AppNav />
     <div style={{ padding: "1rem 1.6rem" }}>
       <PageHeader
         title="Settings"
@@ -212,5 +216,6 @@ export default function Settings() {
         </Layout.Section>
       </Layout>
     </div>
+    </>
   );
 }

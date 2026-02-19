@@ -22,6 +22,8 @@ import { Redirect } from "@shopify/app-bridge/actions";
 
 import { useEffect, useMemo, useState } from "react";
 
+import AppNav from "../components/AppNav";
+
 
 const PENDING_KEY = "refina:billing:pending";
 
@@ -503,6 +505,8 @@ const premiumMeta = PLAN_DETAILS.premium;
 }
 
   return (
+    <>
+    <AppNav />
     <Box padding="400" maxWidth="1200" width="100%" marginInline="auto">
       {reauthUrl && (
         <Box paddingBlockEnd="400">
@@ -686,5 +690,6 @@ const premiumMeta = PLAN_DETAILS.premium;
         </Box>
       )}
     </Box>
+    </>
   );
 }

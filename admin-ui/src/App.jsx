@@ -13,7 +13,10 @@ import Home from "./pages/Home.jsx";
 import Analytics from "./pages/Analytics.jsx";
 import Settings from "./pages/Settings.jsx";
 import Billing from "./pages/Billing.jsx";
-import Setup from "./pages/Setup.jsx";
+import Welcome from "./pages/Welcome.jsx";
+
+import "./refina-admin.css";
+
 
 // ---------- Safe shells (used by 404 etc.)
 function PageShell({ title, children }) {
@@ -119,11 +122,11 @@ export default function App() {
 
         <P.Box padding="400">
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/setup" element={<Setup />} />
+            <Route path="/" element={<Welcome />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/billing" element={<Billing />} />
+            <Route path="/dashboard" element={<Home />} />
             {/* optional alias: */}
             <Route path="/home" element={<Navigate to="/" replace />} />
             <Route path="*" element={<NotFound />} />

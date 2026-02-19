@@ -18,6 +18,8 @@ import {
 import { adminApi, getShop } from "../api/client.js";
 import styles from "./Analytics.module.css";
 
+import AppNav from "../components/AppNav";
+
 /**
  * Guardrails:
  * - Always use full <shop>.myshopify.com (no short IDs)
@@ -201,6 +203,7 @@ export default function Analytics() {
 
   return (
     <Page>
+      <AppNav />
       <BlockStack gap="400">
         <Text as="h1" variant="headingLg" className={styles.pageTitle}>Analytics</Text>
         <Text as="p" tone="subdued">See what your customers are asking for and how Refina is helping them find the perfect product.</Text>
