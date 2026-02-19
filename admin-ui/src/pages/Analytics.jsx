@@ -202,8 +202,9 @@ export default function Analytics() {
   }
 
   return (
+     <>
+    <AppNav />
     <Page>
-      <AppNav />
       <BlockStack gap="400">
         <Text as="h1" variant="headingLg" className={styles.pageTitle}>Analytics</Text>
         <Text as="p" tone="subdued">See what your customers are asking for and how Refina is helping them find the perfect product.</Text>
@@ -321,5 +322,6 @@ export default function Analytics() {
         )}
       </BlockStack>
     </Page>
+    </>
   );
 }
