@@ -118,7 +118,6 @@ export default function App() {
     <P.Frame>
       <HashRouter>
         <TitleBarSync />
-        <TopNav />
 
         <P.Box padding="400">
           <Routes>
