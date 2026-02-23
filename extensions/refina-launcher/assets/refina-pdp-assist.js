@@ -530,16 +530,18 @@
       prefill,
       headline: ds.headline || "",
       subcopy: ds.subcopy || "",
+      drawerHeading: ds.drawerHeading || "",
+      drawerSubheading: ds.drawerSubheading || "",
       buttonText: ds.buttonText || ""
     };
   }
 
   function resolveAccentHex(name) {
     switch ((name || "").toLowerCase()) {
-      case "forest":   return "#2D4A3E";
-      case "midnight":    return "#1E3A5F";
+      case "amber":   return "#FFC466";
+      case "teal":    return "#17E6C3";
       case "neutral": return null; // use primary colour
-      default:        return "#8B3A28"; // sienna
+      default:        return "#7A5CFF"; // violet
     }
   }
 
@@ -928,12 +930,14 @@
     let host = document.getElementById("refina-pdp-drawer");
     if (host) {
       // Update accent/primary in case a different PDP block triggered it
+      const finalAccent = accentHex || primaryHex;
       if (accentHex) host.style.setProperty("--rf-accent", accentHex);
       if (primaryHex) {
         host.style.setProperty("--rf-primary", primaryHex);
-        host.style.setProperty("--rf-accent", primaryHex);
-        host.style.setProperty("--rf-accent-light", hexToLightBg(primaryHex));
+        if (!accentHex) host.style.setProperty("--rf-accent", primaryHex);
       }
+      // Always re-derive the tint from whatever accent won
+      if (finalAccent) host.style.setProperty("--rf-accent-light", hexToLightBg(finalAccent));
       host.style.setProperty("--rf-dw-radius", radiusPx);
       return host;
     }
@@ -1015,28 +1019,27 @@
     document.body.appendChild(host);
 
     host.style.setProperty("--rf-dw-radius", radiusPx);
-    if (accentHex) host.style.setProperty("--rf-accent", accentHex);
-    if (primaryHex) {
-      host.style.setProperty("--rf-primary", primaryHex);
-      // When merchant sets "neutral" accent, use their primary as accent too
-      if (!accentHex) {
-        host.style.setProperty("--rf-accent", primaryHex);
-        host.style.setProperty("--rf-accent-light", hexToLightBg(primaryHex));
-      }
+    if (primaryHex) host.style.setProperty("--rf-primary", primaryHex);
+
+    // Determine the winning accent: explicit accentHex > primaryHex fallback
+    const resolvedAccent = accentHex || primaryHex;
+    if (resolvedAccent) {
+      host.style.setProperty("--rf-accent", resolvedAccent);
+      host.style.setProperty("--rf-accent-light", hexToLightBg(resolvedAccent));
     }
 
     return host;
   }
 
-  // Derive a very light tint from a hex for the context strip background
+  // Derive a light tint from a hex colour for the context strip + hover backgrounds
   function hexToLightBg(hex) {
     try {
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
       const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, 0.08)`;
+      return `rgba(${r}, ${g}, ${b}, 0.10)`;
     } catch {
-      return "rgba(45, 74, 62, 0.08)";
+      return "rgba(45, 74, 62, 0.10)";
     }
   }
 
@@ -1073,8 +1076,12 @@
     if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
 
     titleEl.textContent =
-      (basePayload.headline && basePayload.headline.trim()) || "Similar options";
-    subEl.textContent = (basePayload.subcopy || "").trim();
+      (basePayload.drawerHeading && basePayload.drawerHeading.trim()) ||
+      (basePayload.headline && basePayload.headline.trim()) ||
+      "Similar options";
+    subEl.textContent =
+      (basePayload.drawerSubheading && basePayload.drawerSubheading.trim()) ||
+      "";
 
     // Context strip
     if (basePayload.productTitle) {

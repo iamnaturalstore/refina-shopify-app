@@ -25,6 +25,8 @@ Requires asset: assets/refina-pdp-assist.js
   data-shop="{{ shop.permanent_domain }}"
   data-button-text="{{ block.settings.button_text }}"
   data-headline="{{ block.settings.headline }}"
+  data-drawer-heading="{{ block.settings.drawer_heading }}"
+  data-drawer-subheading="{{ block.settings.drawer_subheading }}"
   data-subcopy="{{ block.settings.subcopy }}"
   data-price-cap="{{ block.settings.price_cap }}"
   data-chip-1="{{ block.settings.chip_1 }}"
@@ -222,18 +224,19 @@ Requires asset: assets/refina-pdp-assist.js
   "settings": [
     {
       "type": "header",
-      "content": "Content"
+      "content": "Content — Product Page Card"
     },
     {
       "type": "text",
       "id": "headline",
-      "label": "Headline",
-      "default": "Not sure this is the one?"
+      "label": "Card headline",
+      "default": "Not sure this is the one?",
+      "info": "Shown on the product page card only."
     },
     {
       "type": "text",
       "id": "subcopy",
-      "label": "Subcopy",
+      "label": "Card subcopy",
       "default": "Get 2–3 best-fit alternatives with reason 'why'."
     },
     {
@@ -241,6 +244,24 @@ Requires asset: assets/refina-pdp-assist.js
       "id": "button_text",
       "label": "Button label",
       "default": "Show me alternatives"
+    },
+    {
+      "type": "header",
+      "content": "Content — Drawer"
+    },
+    {
+      "type": "text",
+      "id": "drawer_heading",
+      "label": "Drawer heading",
+      "default": "Similar options",
+      "info": "Shown at the top of the comparison drawer."
+    },
+    {
+      "type": "text",
+      "id": "drawer_subheading",
+      "label": "Drawer subheading",
+      "default": "3 close matches, ranked for you.",
+      "info": "Shown below the drawer heading."
     },
     {
       "type": "text",
@@ -317,9 +338,9 @@ Requires asset: assets/refina-pdp-assist.js
       "default": "neutral",
       "options": [
         { "value": "neutral", "label": "Neutral (matches button colour)" },
-        { "value": "sienna",  "label": "Sienna" },
-        { "value": "forest",   "label": "Forest" },
-        { "value": "midnight",    "label": "Midnight" }
+        { "value": "violet",  "label": "Violet" },
+        { "value": "amber",   "label": "Amber" },
+        { "value": "teal",    "label": "Teal" }
       ]
     }
   ]
