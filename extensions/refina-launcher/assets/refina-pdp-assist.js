@@ -530,16 +530,18 @@
       prefill,
       headline: ds.headline || "",
       subcopy: ds.subcopy || "",
+      drawerHeading: ds.drawerHeading || "",
+      drawerSubheading: ds.drawerSubheading || "",
       buttonText: ds.buttonText || ""
     };
   }
 
   function resolveAccentHex(name) {
     switch ((name || "").toLowerCase()) {
-      case "amber":   return "#FFC466";
-      case "teal":    return "#17E6C3";
+      case "forest":   return "#2D4A3E";
+      case "midnight":    return "#1E3A5F";
       case "neutral": return null; // use primary colour
-      default:        return "#7A5CFF"; // violet
+      default:        return "#8B3A28"; // sienna
     }
   }
 
@@ -1074,8 +1076,12 @@
     if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
 
     titleEl.textContent =
-      (basePayload.headline && basePayload.headline.trim()) || "Similar options";
-    subEl.textContent = (basePayload.subcopy || "").trim();
+      (basePayload.drawerHeading && basePayload.drawerHeading.trim()) ||
+      (basePayload.headline && basePayload.headline.trim()) ||
+      "Similar options";
+    subEl.textContent =
+      (basePayload.drawerSubheading && basePayload.drawerSubheading.trim()) ||
+      "";
 
     // Context strip
     if (basePayload.productTitle) {
