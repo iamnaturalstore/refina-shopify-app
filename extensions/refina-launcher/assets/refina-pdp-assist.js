@@ -536,10 +536,10 @@
 
   function resolveAccentHex(name) {
     switch ((name || "").toLowerCase()) {
-      case "amber":   return "#FFC466";
-      case "teal":    return "#17E6C3";
+      case "forest":   return "#2D4A3E";
+      case "midnight":    return "#1E3A5F";
       case "neutral": return null; // use primary colour
-      default:        return "#7A5CFF"; // violet
+      default:        return "#8B3A28"; // sienna
     }
   }
 
