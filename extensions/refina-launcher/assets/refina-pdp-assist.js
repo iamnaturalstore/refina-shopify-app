@@ -994,7 +994,7 @@
               class="refina-dw-input"
               data-input
               rows="3"
-              placeholder="e.g. sensitive skin, no fragrance, under $40…"
+              placeholder="e.g. what product is best for dark spots and sensitive skin…"
             ></textarea>
           </div>
 
