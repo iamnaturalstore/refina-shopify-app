@@ -26,39 +26,36 @@
     if (document.getElementById("refina-pdp-drawer-css")) return;
 
     const css = `
-/* ── Host + backdrop ── */
+/* ── Host ── */
 .refina-dw-host {
   position: fixed;
   inset: 0;
   z-index: 2147483645;
   pointer-events: none;
-}
-.refina-dw-host.is-open { pointer-events: auto; }
-
-/* Force light rendering; safe fallback palette */
-.refina-dw-host {
-  --rf-bg:          #FAFAF8;
-  --rf-bg-alt:      #F4F1EB;
-  --rf-fg:          #1C1A18;
-  --rf-muted:       #6B6560;
-  --rf-rule:        rgba(28, 26, 24, 0.10);
-  --rf-chip-bg:     #EDEBE5;
-  --rf-accent:      #2D4A3E;
-  --rf-accent-light:#EAF0EA;
-  --rf-dw-radius:   16px;
-  --rf-primary:     #1C1A18;
-  --rf-primary-txt: #FAF8F5;
+  /* Design tokens — overridable per-instance via JS */
+  --rf-bg:           #FFFFFF;
+  --rf-bg-alt:       #F7F5F1;
+  --rf-fg:           #1C1A18;
+  --rf-muted:        #7A756F;
+  --rf-rule:         rgba(28, 26, 24, 0.09);
+  --rf-chip-bg:      #EEEBE5;
+  --rf-accent:       #2D4A3E;
+  --rf-accent-light: #EBF2EB;
+  --rf-dw-radius:    16px;
+  --rf-primary:      #1C1A18;
+  --rf-primary-txt:  #FAFAF8;
   color-scheme: light;
   isolation: isolate;
 }
+.refina-dw-host.is-open { pointer-events: auto; }
 
 /* ── Backdrop ── */
 .refina-dw-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: rgba(0, 0, 0, 0.38);
   opacity: 0;
-  transition: opacity 0.22s ease;
+  transition: opacity 0.24s ease;
 }
 .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
 
@@ -68,26 +65,22 @@
   right: 0;
   top: 50%;
   width: min(400px, 92vw);
-  height: auto;
-  max-height: min(80vh, 740px);
-
+  max-height: min(82vh, 760px);
   background: var(--rf-bg);
-  border: 1px solid var(--rf-rule);
-  border-right: none;
-
+  /* No border by default — shadow only when open avoids the keyline flash */
   transform: translateX(100%) translateY(-50%);
-  transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
-
-  display: grid;
-  grid-template-rows: auto auto 1fr auto auto;
-
+  transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 0.26s ease;
+  display: flex;
+  flex-direction: column;
   border-radius: var(--rf-dw-radius) 0 0 var(--rf-dw-radius);
   overflow: hidden;
   color: var(--rf-fg);
 }
 .refina-dw-host.is-open .refina-dw {
   transform: translateX(0) translateY(-50%);
-  box-shadow: -16px 0 60px rgba(0, 0, 0, 0.20);
+  box-shadow: -2px 0 0 0 var(--rf-rule),
+              -20px 0 70px rgba(0, 0, 0, 0.18);
 }
 
 /* ── Header ── */
@@ -95,15 +88,16 @@
   display: flex;
   flex-direction: row;
   align-items: flex-start;
-  gap: 11px;
-  padding: 16px 18px 14px;
+  gap: 12px;
+  padding: 18px 18px 16px;
   border-bottom: 1px solid var(--rf-rule);
+  flex-shrink: 0;
 }
 
 .refina-dw-icon {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   border-radius: 10px;
   background: var(--rf-accent);
   display: flex;
@@ -111,13 +105,17 @@
   justify-content: center;
   flex-shrink: 0;
   align-self: flex-start;
+  margin-top: 1px;
 }
-.refina-dw-icon svg {
-  width: 16px;
-  height: 16px;
-}
+.refina-dw-icon svg { width: 16px; height: 16px; }
 
-.refina-dw-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.refina-dw-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 
 .refina-dw-title {
   font-weight: 500;
@@ -126,8 +124,8 @@
   color: var(--rf-fg);
 }
 .refina-dw-sub {
-  font-size: 0.84em;
-  line-height: 1.35;
+  font-size: 0.83em;
+  line-height: 1.4;
   color: var(--rf-muted);
 }
 
@@ -144,112 +142,122 @@
   color: var(--rf-muted);
   flex-shrink: 0;
   transition: background 0.15s;
+  align-self: flex-start;
 }
-.refina-dw-close:hover { background: var(--rf-rule); }
-.refina-dw-close svg { width: 11px; height: 11px; }
+.refina-dw-close:hover { background: rgba(28,26,24,0.14); }
+.refina-dw-close svg { width: 10px; height: 10px; }
 
 /* ── Context strip ── */
 .refina-dw-context {
   padding: 9px 18px;
   border-bottom: 1px solid var(--rf-rule);
   background: var(--rf-accent-light);
-  font-size: 0.83em;
+  font-size: 0.82em;
   color: var(--rf-accent);
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 0;
+  flex-shrink: 0;
 }
-.refina-dw-context:empty { display: none; }
+.refina-dw-context[data-hidden] { display: none; }
 .refina-dw-context svg {
-  width: 12px;
-  height: 12px;
-  opacity: 0.7;
+  width: 13px; height: 13px;
+  opacity: 0.65;
   flex-shrink: 0;
 }
 .refina-dw-context strong { font-weight: 500; }
 
 /* ── Scrollable body ── */
 .refina-dw-body {
-  padding: 14px 18px 10px;
+  padding: 16px 18px 14px;
   overflow-y: auto;
-  display: grid;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   gap: 0;
 }
 
 /* ── Results section ── */
-.refina-dw-results { margin-bottom: 6px; }
+.refina-dw-results { margin-bottom: 4px; }
 
 .refina-dw-results-head {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
-  margin-bottom: 10px;
+  margin-bottom: 11px;
 }
 
 .refina-dw-results-title {
-  font-size: 0.72em;
+  font-size: 0.70em;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--rf-muted);
 }
-
 .refina-dw-results-sub {
   font-size: 0.84em;
   color: var(--rf-muted);
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
-.refina-dw-results-list { display: grid; gap: 7px; }
+.refina-dw-results-list { display: flex; flex-direction: column; gap: 8px; }
 
-/* ── Product result card ── */
+/* ── Product result card: 3-col grid: image | info | price ── */
 .refina-dw-result {
   display: grid;
-  grid-template-columns: 46px 1fr;
-  gap: 11px;
+  grid-template-columns: 52px 1fr auto;
+  gap: 12px;
   align-items: center;
-  padding: 11px 13px;
-  border-radius: 11px;
+  padding: 12px 14px;
+  border-radius: 12px;
   border: 1.5px solid var(--rf-rule);
   background: var(--rf-bg);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.15s ease;
+  transition: border-color 0.18s, background 0.18s, transform 0.14s;
   position: relative;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 .refina-dw-result:hover {
   border-color: var(--rf-accent);
   background: var(--rf-accent-light);
   transform: translateX(3px);
 }
-.refina-dw-result:active { transform: translateY(1px) translateX(0); }
+.refina-dw-result:active { transform: translateY(1px); }
 
-/* Left accent bar on hover/focus */
+/* Accent left bar */
 .refina-dw-result::before {
   content: '';
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 0;
   background: var(--rf-accent);
-  border-radius: 11px 0 0 11px;
   transition: width 0.15s ease;
+  border-radius: 12px 0 0 12px;
 }
 .refina-dw-result:hover::before { width: 3px; }
 
 .refina-dw-result-img {
-  width: 46px;
-  height: 46px;
+  width: 52px;
+  height: 52px;
   border-radius: 9px;
   object-fit: cover;
   background: var(--rf-chip-bg);
   border: 1px solid var(--rf-rule);
-  flex-shrink: 0;
+  display: block;
 }
 
-.refina-dw-result-meta { display: grid; gap: 4px; min-width: 0; }
+.refina-dw-result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
 
 .refina-dw-result-title {
-  font-size: 0.9em;
+  font-size: 0.88em;
   font-weight: 500;
   line-height: 1.2;
   color: var(--rf-fg);
@@ -257,14 +265,43 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.refina-dw-result-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .refina-dw-result-why {
-  font-size: 0.81em;
+  font-size: 0.80em;
   color: var(--rf-muted);
   line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+}
+
+/* ── Badge pills ── */
+.refina-dw-badge {
+  display: inline-block;
+  font-size: 0.73em;
+  font-weight: 400;
+  padding: 2px 8px;
+  border-radius: 100px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.refina-dw-badge--value   { background: #DFF0E0; color: #2A6035; }
+.refina-dw-badge--similar { background: var(--rf-chip-bg); color: var(--rf-muted); }
+.refina-dw-badge--upgrade { background: #F5E8E0; color: #9C4A28; }
+
+/* ── Price ── */
+.refina-dw-result-price {
+  font-size: 0.92em;
+  font-weight: 500;
+  color: var(--rf-fg);
+  white-space: nowrap;
+  text-align: right;
+  align-self: center;
 }
 
 /* ── Empty state ── */
@@ -277,13 +314,19 @@
   color: var(--rf-muted);
 }
 
+/* ── Divider inside body ── */
+.refina-dw-divider {
+  height: 1px;
+  background: var(--rf-rule);
+  margin: 18px -18px;
+}
+
 /* ── Rank chips section ── */
 .refina-dw-rank-title {
-  margin-top: 20px;
   margin-bottom: 9px;
-  font-size: 0.72em;
+  font-size: 0.70em;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--rf-muted);
 }
@@ -295,17 +338,27 @@
 
 .refina-dw-chip {
   flex: 1;
-  padding: 9px 8px;
-  border-radius: 9px;
+  padding: 10px 8px 9px;
+  border-radius: 10px;
   border: 1.5px solid var(--rf-rule);
   background: var(--rf-bg);
-  font-size: 0.85em;
+  font-size: 0.83em;
   font-weight: 400;
   color: var(--rf-fg);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
   text-align: center;
-  letter-spacing: 0.01em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+  font-family: inherit;
+}
+.refina-dw-chip-icon {
+  font-size: 15px;
+  line-height: 1;
+  display: block;
 }
 .refina-dw-chip:hover {
   border-color: var(--rf-fg);
@@ -314,76 +367,64 @@
 .refina-dw-chip.is-active {
   background: var(--rf-fg);
   border-color: var(--rf-fg);
-  color: #FAF8F5;
+  color: #FAFAF8;
 }
 .refina-dw-chip:active { transform: translateY(1px); }
 
-/* ── "Dive deeper" section (text input) ── */
-.refina-dw-deeper-title {
-  margin-top: 20px;
-  margin-bottom: 4px;
-  font-size: 0.72em;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--rf-muted);
-}
-
-.refina-dw-label {
-  display: block;
-  font-size: 0.85em;
-  color: var(--rf-muted);
-  margin-bottom: 7px;
-  line-height: 1.3;
-}
-
+/* ── Text input ── */
 .refina-dw-input {
   width: 100%;
-  min-height: 76px;
+  min-height: 72px;
   padding: 10px 12px;
   border-radius: 11px;
   border: 1.5px solid var(--rf-rule);
   background: var(--rf-bg);
   color: var(--rf-fg);
-  font-size: 0.88em;
+  font-size: 0.87em;
   line-height: 1.45;
   resize: vertical;
   transition: border-color 0.15s;
   font-family: inherit;
+  box-sizing: border-box;
 }
 .refina-dw-input:focus {
   outline: none;
   border-color: var(--rf-accent);
 }
-.refina-dw-input::placeholder { color: var(--rf-muted); opacity: 0.75; }
+.refina-dw-input::placeholder { color: var(--rf-muted); opacity: 0.7; }
 
 /* ── Footer ── */
 .refina-dw-foot {
-  padding: 13px 18px 16px;
+  padding: 14px 18px 16px;
   border-top: 1px solid var(--rf-rule);
   background: var(--rf-bg-alt);
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-shrink: 0;
 }
 
 .refina-dw-foot-note {
   flex: 1;
-  font-size: 0.84em;
-  color: var(--rf-muted);
-  line-height: 1.35;
+  min-width: 0;
 }
 .refina-dw-foot-note strong {
   display: block;
-  font-size: 1.0em;
+  font-size: 0.92em;
   font-weight: 500;
   color: var(--rf-fg);
+  line-height: 1.3;
   margin-bottom: 2px;
+}
+.refina-dw-foot-note span {
+  font-size: 0.82em;
+  color: var(--rf-muted);
+  line-height: 1.3;
 }
 
 .refina-dw-continue {
-  padding: 10px 16px;
-  border-radius: 9px;
+  padding: 11px 18px;
+  border-radius: 10px;
   border: none;
   background: var(--rf-primary);
   color: var(--rf-primary-txt);
@@ -399,9 +440,9 @@
   flex-shrink: 0;
   font-family: inherit;
 }
-.refina-dw-continue:hover { opacity: 0.86; }
+.refina-dw-continue:hover { opacity: 0.84; }
 .refina-dw-continue:active { transform: translateY(1px); }
-.refina-dw-continue svg { width: 12px; height: 12px; opacity: 0.7; }
+.refina-dw-continue svg { width: 12px; height: 12px; opacity: 0.75; }
 
 /* ── Empty-state actions ── */
 .refina-dw-empty-btn {
@@ -422,7 +463,6 @@
   .refina-dw {
     top: 0;
     max-height: 100dvh;
-    height: 100%;
     transform: translateX(100%);
     border-radius: var(--rf-dw-radius) 0 0 0;
   }
@@ -720,33 +760,68 @@
           : `Found ${candidates.length} close matches to compare.`;
     }
 
-    candidates.forEach((p) => {
+    candidates.forEach((p, idx) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "refina-dw-result";
 
+      // Image
       const img = document.createElement("img");
       img.className = "refina-dw-result-img";
       img.alt = p.title ? String(p.title) : "Alternative product";
       if (p.image) img.src = p.image;
 
+      // Meta column (title + badge row)
       const meta = document.createElement("div");
       meta.className = "refina-dw-result-meta";
 
       const t = document.createElement("div");
       t.className = "refina-dw-result-title";
-      const price =
-        p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
-      t.textContent = price ? `${p.title} · ${price}` : p.title;
+      t.textContent = p.title || "";
 
-      const why = document.createElement("div");
+      // Badge + why row
+      const row = document.createElement("div");
+      row.className = "refina-dw-result-row";
+
+      // Badge based on intent or position
+      const badge = document.createElement("span");
+      badge.className = "refina-dw-badge";
+      const intentKey = (payload.intent || "").toLowerCase();
+      if (intentKey === "rank-value" || intentKey === "util-value" || idx === 0) {
+        badge.classList.add("refina-dw-badge--value");
+        badge.textContent = intentKey.includes("budget") ? "Cheaper" :
+                            intentKey.includes("upgrade") ? "Premium" : "Best value";
+      } else if (intentKey === "rank-upgrade" || intentKey === "util-upgrade") {
+        badge.classList.add("refina-dw-badge--upgrade");
+        badge.textContent = "Premium";
+      } else if (intentKey === "rank-budget" || intentKey === "util-cheaper") {
+        badge.classList.add("refina-dw-badge--value");
+        badge.textContent = "Cheaper";
+      } else {
+        badge.classList.add("refina-dw-badge--similar");
+        badge.textContent = "Similar";
+      }
+
+      const why = document.createElement("span");
       why.className = "refina-dw-result-why";
-      why.textContent = p.why || "Tap to view this option.";
+      why.textContent = p.why || "";
+
+      row.appendChild(badge);
+      if (p.why) row.appendChild(why);
 
       meta.appendChild(t);
-      meta.appendChild(why);
+      meta.appendChild(row);
+
+      // Price column
+      const price = document.createElement("div");
+      price.className = "refina-dw-result-price";
+      if (p.priceCents != null) {
+        price.textContent = formatMoneyFromCents(p.priceCents, payload.currency);
+      }
+
       btn.appendChild(img);
       btn.appendChild(meta);
+      btn.appendChild(price);
 
       if (p.url) {
         btn.onclick = () => { try { window.location.href = p.url; } catch {} };
@@ -905,25 +980,26 @@
             <div class="refina-dw-results-list" data-results></div>
           </section>
 
+          <div class="refina-dw-divider"></div>
+
           <div class="refina-dw-rank-title">Refine these picks</div>
           <div class="refina-dw-chips" data-chips></div>
 
-          <div class="refina-dw-deeper-title">Want something more specific?</div>
-          <label class="refina-dw-label" id="rf-dw-label">Describe what you need and we'll update the picks</label>
-          <textarea
-            class="refina-dw-input"
-            data-input
-            rows="3"
-            aria-describedby="rf-dw-label"
-            placeholder="e.g. sensitive skin, no fragrance, under $40…"
-          ></textarea>
+          <div style="margin-top:18px;">
+            <textarea
+              class="refina-dw-input"
+              data-input
+              rows="3"
+              placeholder="e.g. sensitive skin, no fragrance, under $40…"
+            ></textarea>
+          </div>
 
         </div>
 
         <footer class="refina-dw-foot">
           <div class="refina-dw-foot-note">
             <strong>Want a deeper recommendation?</strong>
-            Tell me what matters most to you
+            <span>Tell me what matters most to you</span>
           </div>
           <button type="button" class="refina-dw-continue" data-continue>
             Open chat
@@ -1003,21 +1079,34 @@
     // Context strip
     if (basePayload.productTitle) {
       ctxEl.textContent = `Using "${basePayload.productTitle}" as context`;
-      ctxWrap.style.display = "";
+      ctxWrap.removeAttribute("data-hidden");
     } else {
-      ctxWrap.style.display = "none";
+      ctxWrap.setAttribute("data-hidden", "");
     }
 
     input.value = "";
 
-    // Rank chips
-    const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
+    // Rank chips with icons
+    const rankChips = [
+      { label: "Best value", icon: "◎" },
+      { label: "Cheaper",    icon: "↓" },
+      { label: "Upgrade pick", icon: "↑" },
+    ];
     chipsBox.innerHTML = "";
-    rankChips.forEach((label, i) => {
+    rankChips.forEach(({ label, icon }, i) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "refina-dw-chip";
-      b.textContent = label;
+
+      const iconEl = document.createElement("span");
+      iconEl.className = "refina-dw-chip-icon";
+      iconEl.textContent = icon;
+
+      const labelEl = document.createElement("span");
+      labelEl.textContent = label;
+
+      b.appendChild(iconEl);
+      b.appendChild(labelEl);
 
       b.addEventListener("click", () => {
         chipsBox.querySelectorAll(".refina-dw-chip").forEach(c => c.classList.remove("is-active"));
