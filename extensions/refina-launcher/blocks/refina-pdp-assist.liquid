@@ -36,9 +36,20 @@ Requires asset: assets/refina-pdp-assist.js
   data-style-compact="{{ block.settings.compact }}"
   data-style-accent="{{ block.settings.accent }}"
 >
-  <div class="refina-pdp-assist__card" style="border-radius: {{ block.settings.radius }}">
+  <div
+    class="refina-pdp-assist__card"
+    style="
+      border-radius: {{ block.settings.radius }};
+      --rf-pdp-primary: {{ block.settings.primary_color }};
+      --rf-pdp-primary-text: {{ block.settings.primary_color_text }};
+    "
+  >
     <div class="refina-pdp-assist__head">
-      <span class="refina-pdp-assist__icon" aria-hidden="true">✨</span>
+      <span class="refina-pdp-assist__icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 2L10.5 6.5H15.5L11.5 9.2L13 14L9 11.3L5 14L6.5 9.2L2.5 6.5H7.5L9 2Z" fill="currentColor" opacity="0.85"/>
+        </svg>
+      </span>
       <div class="refina-pdp-assist__text">
         <div class="refina-pdp-assist__headline">{{ block.settings.headline }}</div>
         <div class="refina-pdp-assist__sub">{{ block.settings.subcopy }}</div>
@@ -59,72 +70,146 @@ Requires asset: assets/refina-pdp-assist.js
         {% if block.settings.chip_4 != blank %}<button type="button" class="refina-pdp-assist__chip">{{ block.settings.chip_4 }}</button>{% endif %}
       </div>
     </div>
-
-    <div class="refina-pdp-assist__foot">See up to 3 alternatives and reasons why.</div>
   </div>
 </div>
 
 <script src="{{ 'refina-pdp-assist.js' | asset_url }}" defer></script>
 
 <style>
-  /* Scope: make the block self-themed (light) regardless of parent section */
+  /* ─────────────────────────────────────────────────────────
+     Refina PDP Assist Card
+     • Scoped to .refina-pdp-assist — no theme leakage
+     • color-scheme: light forces light rendering regardless
+       of ancestor dark modes
+     • Colors driven by --rf-pdp-primary (merchant color picker)
+       with a safe #111111 fallback — no more violet bleed
+  ───────────────────────────────────────────────────────── */
+
   .refina-pdp-assist {
-    /* Light defaults if theme tokens are missing */
-    --color-background: #ffffff;
-    --color-foreground: #111111;
-    --refina-border: rgba(17,17,17,0.08);
+    --rf-pdp-primary:       #111111;
+    --rf-pdp-primary-text:  #ffffff;
+    --rf-pdp-bg:            #ffffff;
+    --rf-pdp-border:        rgba(17, 17, 17, 0.09);
+    --rf-pdp-chip-bg:       rgba(17, 17, 17, 0.05);
+    --rf-pdp-chip-border:   rgba(17, 17, 17, 0.11);
+    --rf-pdp-muted:         rgba(17, 17, 17, 0.55);
+    --rf-pdp-icon-bg:       rgba(17, 17, 17, 0.07);
 
-    color-scheme: light;   /* ignore ancestor dark schemes */
-    isolation: isolate;    /* prevent overlay/blend leakage */
+    color-scheme: light;
+    isolation: isolate;
   }
 
-  .refina-pdp-assist,
-  .refina-pdp-assist * {
-    color: var(--color-foreground);
-  }
-
+  /* ── Card shell ── */
   .refina-pdp-assist__card {
-    /* Was defaulting to #0b0b0e → dark. Flip fallback to white. */
-    background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
-    border: 1px solid var(--refina-border);
-    padding: 12px 14px;
-    /* keeps your radius via inline style */
-    box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
+    background: var(--rf-pdp-bg);
+    border: 1px solid var(--rf-pdp-border);
+    border-radius: 14px; /* overridden by inline style */
+    padding: 14px 16px;
+    box-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.03),
+      0 4px 16px rgba(0, 0, 0, 0.07);
   }
 
-  .refina-pdp-assist__head { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; }
-  .refina-pdp-assist__icon { font-size: 20px; }
-  .refina-pdp-assist__headline { font-weight: 600; line-height: 1.3; }
-  .refina-pdp-assist__sub { opacity: .8; font-size: .9em; margin-top: 2px; }
-  .refina-pdp-assist__verdict { margin: 8px 0 4px; min-height: 22px; font-size: .92em; opacity: .95; }
-  .refina-pdp-assist__actions { display: grid; gap: 8px; margin-top: 10px; }
+  /* ── Header row: icon + text ── */
+  .refina-pdp-assist__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 
+  .refina-pdp-assist__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: var(--rf-pdp-primary);
+    color: var(--rf-pdp-primary-text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .refina-pdp-assist__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .refina-pdp-assist__headline {
+    font-weight: 500;
+    font-size: 0.95em;
+    line-height: 1.3;
+    color: #111111;
+  }
+
+  .refina-pdp-assist__sub {
+    font-size: 0.84em;
+    line-height: 1.35;
+    color: var(--rf-pdp-muted);
+  }
+
+  /* ── Verdict (hydrated by JS; hidden by default) ── */
+  .refina-pdp-assist__verdict {
+    display: none;
+    margin-top: 10px;
+    font-size: 0.88em;
+    color: var(--rf-pdp-muted);
+  }
+
+  /* ── Actions ── */
+  .refina-pdp-assist__actions {
+    display: grid;
+    gap: 9px;
+    margin-top: 13px;
+  }
+
+  /* Primary CTA button — solid merchant colour, no accent bleed */
   .refina-pdp-assist__button {
     width: 100%;
-    padding: 10px 12px;
+    padding: 11px 14px;
     border-radius: inherit;
-    /* Theme-safe borders on light bg (was white, invisible) */
-    border: 1px solid rgba(17,17,17,.14);
-    /* Accent wash preserved; falls back to violet */
-    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 18%, transparent);
+    border: none;
+    background: var(--rf-pdp-primary);
+    color: var(--rf-pdp-primary-text);
+    font-size: 0.93em;
+    font-weight: 500;
     cursor: pointer;
+    letter-spacing: 0.02em;
+    transition: opacity 0.15s ease, transform 0.12s ease;
   }
 
-  .refina-pdp-assist__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .refina-pdp-assist__button:hover  { opacity: 0.88; }
+  .refina-pdp-assist__button:active { transform: translateY(1px); opacity: 0.82; }
+
+  /* Chip row */
+  .refina-pdp-assist__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
   .refina-pdp-assist__chip {
-    padding: 6px 10px;
+    padding: 7px 13px;
     border-radius: 999px;
-    /* Theme-safe border on light bg (was white) */
-    border: 1px solid rgba(17,17,17,.12);
-    background: transparent;
+    border: 1px solid var(--rf-pdp-chip-border);
+    background: var(--rf-pdp-chip-bg);
+    color: #111111;
+    font-size: 0.86em;
     cursor: pointer;
-    font-size: .9em;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
   }
 
-  .refina-pdp-assist__foot { opacity: .7; font-size: .8em; margin-top: 6px; }
+  .refina-pdp-assist__chip:hover {
+    background: var(--rf-pdp-primary);
+    border-color: var(--rf-pdp-primary);
+    color: var(--rf-pdp-primary-text);
+  }
+
+  .refina-pdp-assist__chip:active { transform: translateY(1px); }
 
   {% if block.settings.compact %}
-  .refina-pdp-assist__sub, .refina-pdp-assist__foot { display: none; }
+  .refina-pdp-assist__sub { display: none; }
   {% endif %}
 </style>
 
@@ -135,34 +220,108 @@ Requires asset: assets/refina-pdp-assist.js
   "target": "section",
   "templates": ["product"],
   "settings": [
-    { "type": "text", "id": "headline", "label": "Headline", "default": "Not sure this is the one?" },
-    { "type": "text", "id": "subcopy", "label": "Subcopy", "default": "Get 2–3 best-fit alternatives with reason ‘why’." },
-    { "type": "text", "id": "button_text", "label": "Button label", "default": "Show me alternatives" },
-
-    { "type": "text", "id": "chip_1", "label": "Chip 1", "default": "Compare similar" },
-    { "type": "text", "id": "chip_2", "label": "Chip 2", "default": "Best value" },
-    { "type": "text", "id": "chip_3", "label": "Chip 3", "default": "Cheaper options" },
-    { "type": "text", "id": "chip_4", "label": "Chip 4", "default": "Premium choices" },
-
-    { "type": "text", "id": "price_cap", "label": "Default price cap (optional)", "default": "50" },
-
-    { "type": "radio", "id": "accent", "label": "Accent", "default": "violet",
-      "options": [
-        { "value": "violet", "label": "Violet" },
-        { "value": "amber", "label": "Amber" },
-        { "value": "teal", "label": "Teal" }
-      ]
+    {
+      "type": "header",
+      "content": "Content"
     },
-    { "type": "select", "id": "radius", "label": "Border radius", "default": "16px",
+    {
+      "type": "text",
+      "id": "headline",
+      "label": "Headline",
+      "default": "Not sure this is the one?"
+    },
+    {
+      "type": "text",
+      "id": "subcopy",
+      "label": "Subcopy",
+      "default": "Get 2–3 best-fit alternatives with reason 'why'."
+    },
+    {
+      "type": "text",
+      "id": "button_text",
+      "label": "Button label",
+      "default": "Show me alternatives"
+    },
+    {
+      "type": "text",
+      "id": "chip_1",
+      "label": "Chip 1",
+      "default": "Compare similar"
+    },
+    {
+      "type": "text",
+      "id": "chip_2",
+      "label": "Chip 2",
+      "default": "Best value"
+    },
+    {
+      "type": "text",
+      "id": "chip_3",
+      "label": "Chip 3",
+      "default": "Cheaper options"
+    },
+    {
+      "type": "text",
+      "id": "chip_4",
+      "label": "Chip 4",
+      "default": "Premium choices"
+    },
+    {
+      "type": "text",
+      "id": "price_cap",
+      "label": "Default price cap (optional)",
+      "default": "50"
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "primary_color",
+      "label": "Button colour",
+      "default": "#111111",
+      "info": "Background colour of the primary CTA button and icon."
+    },
+    {
+      "type": "color",
+      "id": "primary_color_text",
+      "label": "Button text colour",
+      "default": "#ffffff",
+      "info": "Text colour on the primary button. Use white for dark backgrounds, black for light ones."
+    },
+    {
+      "type": "select",
+      "id": "radius",
+      "label": "Border radius",
+      "default": "14px",
       "options": [
-        { "value": "0px", "label": "None" },
-        { "value": "8px", "label": "8px" },
+        { "value": "0px",  "label": "None" },
+        { "value": "8px",  "label": "8px" },
         { "value": "12px", "label": "12px" },
-        { "value": "16px", "label": "16px" },
+        { "value": "14px", "label": "14px (default)" },
+        { "value": "20px", "label": "20px" },
         { "value": "24px", "label": "24px" }
       ]
     },
-    { "type": "checkbox", "id": "compact", "label": "Compact mode (hide sub/foot)", "default": false }
+    {
+      "type": "checkbox",
+      "id": "compact",
+      "label": "Compact mode (hide subcopy)",
+      "default": false
+    },
+    {
+      "type": "radio",
+      "id": "accent",
+      "label": "Drawer accent (for the side drawer only)",
+      "default": "neutral",
+      "options": [
+        { "value": "neutral", "label": "Neutral (matches button colour)" },
+        { "value": "violet",  "label": "Violet" },
+        { "value": "amber",   "label": "Amber" },
+        { "value": "teal",    "label": "Teal" }
+      ]
+    }
   ]
 }
 {% endschema %}

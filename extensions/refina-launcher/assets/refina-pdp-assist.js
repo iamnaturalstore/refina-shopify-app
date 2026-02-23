@@ -19,235 +19,415 @@
     IN_ADMIN = /(^|\.)admin\.shopify\.com$/i.test(refHost);
   } catch {}
 
-  // Minimal CSS for drawer (glass look) + header/subcopy/micro-prompt
+  // ─────────────────────────────────────────────
+  // Drawer CSS injection
+  // ─────────────────────────────────────────────
   (function injectDrawerCssOnce() {
     if (document.getElementById("refina-pdp-drawer-css")) return;
+
     const css = `
-  .refina-dw-host { position: fixed; inset: 0; z-index: 2147483645; pointer-events: none; }
-  .refina-dw-host.is-open { pointer-events: auto; }
+/* ── Host + backdrop ── */
+.refina-dw-host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  pointer-events: none;
+}
+.refina-dw-host.is-open { pointer-events: auto; }
 
-  /* Force light scheme locally + safe fallbacks */
-  .refina-dw-host {
-    --color-background: #ffffff;
-    --color-foreground: #111111;
-    --refina-border: rgba(17,17,17,.10);
-    color-scheme: light;
-    isolation: isolate;
-  }
+/* Force light rendering; safe fallback palette */
+.refina-dw-host {
+  --rf-bg:          #FAFAF8;
+  --rf-bg-alt:      #F4F1EB;
+  --rf-fg:          #1C1A18;
+  --rf-muted:       #6B6560;
+  --rf-rule:        rgba(28, 26, 24, 0.10);
+  --rf-chip-bg:     #EDEBE5;
+  --rf-accent:      #2D4A3E;
+  --rf-accent-light:#EAF0EA;
+  --rf-dw-radius:   16px;
+  --rf-primary:     #1C1A18;
+  --rf-primary-txt: #FAF8F5;
+  color-scheme: light;
+  isolation: isolate;
+}
 
-  .refina-dw-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); opacity: 0; transition: opacity .22s ease; }
-  .refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
+/* ── Backdrop ── */
+.refina-dw-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.refina-dw-host.is-open .refina-dw-backdrop { opacity: 1; }
 
+/* ── Drawer panel ── */
 .refina-dw {
   position: absolute;
   right: 0;
   top: 50%;
-  width: min(420px, 92vw);
+  width: min(400px, 92vw);
   height: auto;
-  max-height: min(78vh, 720px);
+  max-height: min(80vh, 740px);
 
-  background: color-mix(in srgb, var(--color-background, #ffffff) 100%, transparent);
-  border-left: 1px solid var(--refina-border);
+  background: var(--rf-bg);
+  border: 1px solid var(--rf-rule);
+  border-right: none;
 
   transform: translateX(100%) translateY(-50%);
-  transition: transform .24s cubic-bezier(.2,.8,.2,1);
+  transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
 
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  border-top-left-radius: var(--rfina-dw-radius, 16px);
-  border-bottom-left-radius: var(--rfina-dw-radius, 16px);
+  grid-template-rows: auto auto 1fr auto auto;
+
+  border-radius: var(--rf-dw-radius) 0 0 var(--rf-dw-radius);
   overflow: hidden;
-  color: var(--color-foreground);
+  color: var(--rf-fg);
 }
-
-/* Shadow ONLY when open */
 .refina-dw-host.is-open .refina-dw {
-  box-shadow: -20px 0 60px rgba(0,0,0,.35);
+  transform: translateX(0) translateY(-50%);
+  box-shadow: -16px 0 60px rgba(0, 0, 0, 0.20);
 }
 
-  .refina-dw-host.is-open .refina-dw { transform: translateX(0) translateY(-50%); }
+/* ── Header ── */
+.refina-dw-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--rf-rule);
+}
 
-  .refina-dw-head { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 12px; padding: 14px 14px 10px; }
-  .refina-dw-copy { display: grid; gap: 4px; }
-  .refina-dw-title { font-weight: 500; line-height: 1.25; }
-  .refina-dw-sub { opacity: .85; font-size: .92em; line-height: 1.35; }
-  .refina-dw-micro { opacity: .7; font-size: .85em; line-height: 1.3; }
-
-  .refina-dw-close {
-    border: 1px solid rgba(17,17,17,.14);
-    background: transparent;
-    border-radius: 8px; padding: 6px 10px; cursor: pointer; color: var(--color-foreground);
-  }
-
-  .refina-dw-body { padding: 0 14px 14px; overflow: auto; }
-  .refina-dw-chips {
+.refina-dw-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--rf-accent);
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin: 12px 0 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.refina-dw-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
-  .refina-dw-rank-title {
-  margin-top: 34px;
+.refina-dw-copy { display: grid; gap: 3px; }
+
+.refina-dw-title {
+  font-weight: 500;
+  font-size: 1.05em;
+  line-height: 1.25;
+  color: var(--rf-fg);
+}
+.refina-dw-sub {
+  font-size: 0.84em;
+  line-height: 1.35;
+  color: var(--rf-muted);
+}
+
+.refina-dw-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--rf-chip-bg);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rf-muted);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.refina-dw-close:hover { background: var(--rf-rule); }
+.refina-dw-close svg { width: 11px; height: 11px; }
+
+/* ── Context strip ── */
+.refina-dw-context {
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--rf-rule);
+  background: var(--rf-accent-light);
+  font-size: 0.83em;
+  color: var(--rf-accent);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 0;
+}
+.refina-dw-context:empty { display: none; }
+.refina-dw-context svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.refina-dw-context strong { font-weight: 500; }
+
+/* ── Scrollable body ── */
+.refina-dw-body {
+  padding: 14px 18px 10px;
+  overflow-y: auto;
+  display: grid;
+  gap: 0;
+}
+
+/* ── Results section ── */
+.refina-dw-results { margin-bottom: 6px; }
+
+.refina-dw-results-head {
+  display: grid;
+  gap: 2px;
   margin-bottom: 10px;
-  text-align: center;
-  font-weight: 600;
-  font-size: 1.0em;
-  line-height: 1.2;
-  opacity: .92;
 }
 
-.refina-dw-deeper-title {
-  margin-top: 34px;
-  margin-bottom: 6px;
-  text-align: center;
-  font-weight: 600;
-  font-size: 1.0em;
-  line-height: 1.2;
-  opacity: .92;
+.refina-dw-results-title {
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rf-muted);
 }
 
-.refina-dw-deeper-copy {
-  margin: 0 auto 12px;
-  text-align: center;
-  max-width: 320px;
-  font-size: .86em;
+.refina-dw-results-sub {
+  font-size: 0.84em;
+  color: var(--rf-muted);
   line-height: 1.3;
-  opacity: .75;
+}
+
+.refina-dw-results-list { display: grid; gap: 7px; }
+
+/* ── Product result card ── */
+.refina-dw-result {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 11px;
+  align-items: center;
+  padding: 11px 13px;
+  border-radius: 11px;
+  border: 1.5px solid var(--rf-rule);
+  background: var(--rf-bg);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.15s ease;
+  position: relative;
+}
+.refina-dw-result:hover {
+  border-color: var(--rf-accent);
+  background: var(--rf-accent-light);
+  transform: translateX(3px);
+}
+.refina-dw-result:active { transform: translateY(1px) translateX(0); }
+
+/* Left accent bar on hover/focus */
+.refina-dw-result::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: var(--rf-accent);
+  border-radius: 11px 0 0 11px;
+  transition: width 0.15s ease;
+}
+.refina-dw-result:hover::before { width: 3px; }
+
+.refina-dw-result-img {
+  width: 46px;
+  height: 46px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--rf-chip-bg);
+  border: 1px solid var(--rf-rule);
+  flex-shrink: 0;
+}
+
+.refina-dw-result-meta { display: grid; gap: 4px; min-width: 0; }
+
+.refina-dw-result-title {
+  font-size: 0.9em;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--rf-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.refina-dw-result-why {
+  font-size: 0.81em;
+  color: var(--rf-muted);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Empty state ── */
+.refina-dw-empty {
+  padding: 12px 14px;
+  border-radius: 11px;
+  border: 1.5px dashed var(--rf-rule);
+  font-size: 0.86em;
+  line-height: 1.4;
+  color: var(--rf-muted);
+}
+
+/* ── Rank chips section ── */
+.refina-dw-rank-title {
+  margin-top: 20px;
+  margin-bottom: 9px;
+  font-size: 0.72em;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rf-muted);
+}
+
+.refina-dw-chips {
+  display: flex;
+  gap: 7px;
 }
 
 .refina-dw-chip {
-  padding: 9px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(17,17,17,.14);
-  background: #fff;
+  flex: 1;
+  padding: 9px 8px;
+  border-radius: 9px;
+  border: 1.5px solid var(--rf-rule);
+  background: var(--rf-bg);
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--rf-fg);
   cursor: pointer;
-  font-size: .9em;
-  font-weight: 200;
-  color: var(--color-foreground);
+  transition: all 0.15s ease;
+  text-align: center;
+  letter-spacing: 0.01em;
 }
-
+.refina-dw-chip:hover {
+  border-color: var(--rf-fg);
+  background: var(--rf-chip-bg);
+}
+.refina-dw-chip.is-active {
+  background: var(--rf-fg);
+  border-color: var(--rf-fg);
+  color: #FAF8F5;
+}
 .refina-dw-chip:active { transform: translateY(1px); }
 
-  .refina-dw-update {
-    width: 100%;
-    margin-top: 8px;
-    padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(17,17,17,.12);
-    background: rgba(17,17,17,.06);
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .refina-dw-update:active { transform: translateY(1px); }
-
-  .refina-dw-context { opacity: .75; font-size: .85em; margin-bottom: 6px; }
-  .refina-dw-label { display: block; font-size: .9em; opacity: .85; margin-bottom: 6px; }
-
-    /* Step 4 — Results section */
-  .refina-dw-results { margin: 6px 0 10px; }
-  .refina-dw-results-head { display: grid; gap: 2px; margin-bottom: 8px; }
-  .refina-dw-results-title { font-weight: 600; font-size: .95em; }
-  .refina-dw-results-sub { opacity: .75; font-size: .85em; line-height: 1.25; }
-
-  .refina-dw-results-list { display: grid; gap: 8px; }
-
-  .refina-dw-result {
-    display: grid;
-    grid-template-columns: 44px 1fr;
-    gap: 10px;
-    align-items: center;
-    padding: 10px;
-    border-radius: 14px;
-    border: 1px solid rgba(17,17,17,.12);
-    background: color-mix(in srgb, var(--color-background, #ffffff) 92%, var(--color-accent, #7A5CFF) 8%);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .refina-dw-result:active { transform: translateY(1px); }
-
-  .refina-dw-result-img {
-    width: 44px; height: 44px;
-    border-radius: 12px;
-    object-fit: cover;
-    background: rgba(17,17,17,.06);
-  }
-
-  .refina-dw-result-meta { display: grid; gap: 3px; min-width: 0; }
-  .refina-dw-result-title {
-    font-weight: 600;
-    font-size: .92em;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .refina-dw-result-why {
-    opacity: .75;
-    font-size: .84em;
-    line-height: 1.25;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .refina-dw-empty {
-    padding: 10px;
-    border-radius: 14px;
-    border: 1px dashed rgba(17,17,17,.18);
-    opacity: .85;
-    font-size: .88em;
-    line-height: 1.25;
-  }
-
-  .refina-dw-input {
-    width: 100%; min-height: 80px; padding: 10px 12px; border-radius: 12px;
-    border: 1px solid rgba(17,17,17,.14);
-    background: color-mix(in srgb, var(--color-accent, #7A5CFF) 10%, transparent);
-    color: var(--color-foreground); resize: vertical;
-  }
-
-  .refina-dw-foot { padding: 12px 14px 14px; display: grid; gap: 8px; }
-
-  .refina-dw-foot-note {
-    font-size: .85em;
-    opacity: .75;
-    line-height: 1.25;
-    margin-bottom: 8px;
-  }
-
-.refina-dw-continue {
-  width: 100%;
-  padding: 12px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(17,17,17,.16);
-  background: #fff;
+/* ── "Dive deeper" section (text input) ── */
+.refina-dw-deeper-title {
+  margin-top: 20px;
+  margin-bottom: 4px;
+  font-size: 0.72em;
   font-weight: 500;
-  cursor: pointer;
-  color: var(--color-foreground);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--rf-muted);
 }
 
+.refina-dw-label {
+  display: block;
+  font-size: 0.85em;
+  color: var(--rf-muted);
+  margin-bottom: 7px;
+  line-height: 1.3;
+}
+
+.refina-dw-input {
+  width: 100%;
+  min-height: 76px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  border: 1.5px solid var(--rf-rule);
+  background: var(--rf-bg);
+  color: var(--rf-fg);
+  font-size: 0.88em;
+  line-height: 1.45;
+  resize: vertical;
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+.refina-dw-input:focus {
+  outline: none;
+  border-color: var(--rf-accent);
+}
+.refina-dw-input::placeholder { color: var(--rf-muted); opacity: 0.75; }
+
+/* ── Footer ── */
+.refina-dw-foot {
+  padding: 13px 18px 16px;
+  border-top: 1px solid var(--rf-rule);
+  background: var(--rf-bg-alt);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.refina-dw-foot-note {
+  flex: 1;
+  font-size: 0.84em;
+  color: var(--rf-muted);
+  line-height: 1.35;
+}
+.refina-dw-foot-note strong {
+  display: block;
+  font-size: 1.0em;
+  font-weight: 500;
+  color: var(--rf-fg);
+  margin-bottom: 2px;
+}
+
+.refina-dw-continue {
+  padding: 10px 16px;
+  border-radius: 9px;
+  border: none;
+  background: var(--rf-primary);
+  color: var(--rf-primary-txt);
+  font-size: 0.86em;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+.refina-dw-continue:hover { opacity: 0.86; }
 .refina-dw-continue:active { transform: translateY(1px); }
+.refina-dw-continue svg { width: 12px; height: 12px; opacity: 0.7; }
 
-  .refina-dw-empty-btn {
-    padding: 8px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(17,17,17,.16);
-    background: rgba(17,17,17,.04);
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .refina-dw-empty-btn:active { transform: translateY(1px); }
+/* ── Empty-state actions ── */
+.refina-dw-empty-btn {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--rf-rule);
+  background: var(--rf-chip-bg);
+  font-size: 0.84em;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--rf-fg);
+  font-family: inherit;
+}
+.refina-dw-empty-btn:active { transform: translateY(1px); }
 
-  @media (max-width: 640px) {
-    .refina-dw { top: 0; max-height: 100vh; height: 100%; transform: translateX(100%); }
-    .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
+/* ── Mobile ── */
+@media (max-width: 640px) {
+  .refina-dw {
+    top: 0;
+    max-height: 100dvh;
+    height: 100%;
+    transform: translateX(100%);
+    border-radius: var(--rf-dw-radius) 0 0 0;
   }
-  `;
+  .refina-dw-host.is-open .refina-dw { transform: translateX(0); }
+}
+    `;
 
     const el = document.createElement("style");
     el.id = "refina-pdp-drawer-css";
@@ -255,7 +435,9 @@
     document.head.appendChild(el);
   })();
 
+  // ─────────────────────────────────────────────
   // Helpers
+  // ─────────────────────────────────────────────
   const uuid = () =>
     ([1e7]+-1e3+-4e3+-8e3+-1e11)
       .replace(/[018]/g,c=>(c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
@@ -273,662 +455,617 @@
   }
 
   function getPayload(root, overrides = {}) {
-  const ds = root.dataset || {};
-  const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4]
-    .filter(Boolean)
-    .map((s) => s.trim());
+    const ds = root.dataset || {};
+    const chips = [ds.chip1, ds.chip2, ds.chip3, ds.chip4]
+      .filter(Boolean)
+      .map((s) => s.trim());
 
-  const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
-  const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
-  const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
+    const priceCap = (overrides.priceCap ?? ds.priceCap ?? "").toString().trim();
+    const productTitle = (overrides.productTitle ?? ds.productTitle ?? "").toString().trim();
+    const productType = (overrides.productType ?? ds.productType ?? "").toString().trim();
 
-  const defaultPrefill = productTitle
-    ? `I’m looking at “${productTitle}”. Can you suggest better fits for me?`
-    : `Can you suggest the best fit for me from this store?`;
+    const defaultPrefill = productTitle
+      ? `I'm looking at "${productTitle}". Can you suggest better fits for me?`
+      : `Can you suggest the best fit for me from this store?`;
 
-  const prefill = (overrides.prefill && overrides.prefill.trim()) || defaultPrefill;
+    const prefill = (overrides.prefill && overrides.prefill.trim()) || defaultPrefill;
 
-  return {
-    source: "pdp",
-    shop: ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "",
-    productId: ds.productId || null,
-    productTitle,
-    productType: productType || null,
-    variantId: ds.selectedVariantId || null,
-    variantTitle: ds.selectedVariantTitle || null,
-    available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
-    price: coerceInt(ds.priceCents),
-    compareAtPrice: coerceInt(ds.compareAtPriceCents),
-    currency: ds.currency || (window.Shopify && Shopify.currency && Shopify.currency.active) || null,
-    priceCap: priceCap || null,
-    chips,
-    intent: null,
-    contextId: null,
-    prefill,
-    headline: ds.headline || "",
-    subcopy: ds.subcopy || "",
-    buttonText: ds.buttonText || ""
-  };
-}
+    return {
+      source: "pdp",
+      shop: ds.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "",
+      productId: ds.productId || null,
+      productTitle,
+      productType: productType || null,
+      variantId: ds.selectedVariantId || null,
+      variantTitle: ds.selectedVariantTitle || null,
+      available: String(ds.selectedVariantAvailable || "").toLowerCase() === "true",
+      price: coerceInt(ds.priceCents),
+      compareAtPrice: coerceInt(ds.compareAtPriceCents),
+      currency: ds.currency || (window.Shopify && Shopify.currency && Shopify.currency.active) || null,
+      priceCap: priceCap || null,
+      chips,
+      intent: null,
+      contextId: null,
+      prefill,
+      headline: ds.headline || "",
+      subcopy: ds.subcopy || "",
+      buttonText: ds.buttonText || ""
+    };
+  }
 
   function resolveAccentHex(name) {
-  switch ((name || "").toLowerCase()) {
-    case "amber": return "#FFC466";
-    case "teal":  return "#17E6C3";
-    default:      return "#7A5CFF"; // violet (default)
-  }
-}
-
-    function parseChipKeys(root) {
-  const raw =
-    root && root.dataset && root.dataset.chipKeys ? String(root.dataset.chipKeys) : "";
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function mapChipKeyToIntent(key) {
-  const k = String(key || "").toLowerCase().trim();
-
-  // PDP shortlist intents (fetch a fresh Top 3)
-  if (k === "compare") return "util-compare";
-  if (k === "value" || k === "best-value") return "util-value";
-  if (k === "cheaper" || k === "budget") return "util-cheaper";
-  if (k === "upgrade") return "util-upgrade";
-
-  return null;
-}
-
-function mapChipToIntent(chip) {
-  const s = String(chip || "").toLowerCase();
-
-  // PDP shortlist intents (chip labels)
-  if (s.includes("compare")) return "util-compare";
-  if (s.includes("best value") || s.includes("value")) return "util-value";
-  if (s.includes("cheaper")) return "util-cheaper";
-  if (s.includes("upgrade")) return "util-upgrade";
-
-  // Drawer rank intents (rank labels)
-  if (s.includes("best value") || s.includes("value")) return "rank-value";
-  if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
-  if (s.includes("upgrade")) return "rank-upgrade";
-
-  return null;
-}
-
-function getIntentForPdpChip(root, chipEl) {
-  const keys = parseChipKeys(root);
-  const chips = Array.from(root.querySelectorAll(".refina-pdp-assist__chip"));
-  const idx = Math.max(0, chips.indexOf(chipEl));
-
-  const key = keys && keys[idx] ? keys[idx] : null;
-  const text = (chipEl && chipEl.textContent ? chipEl.textContent : "").trim();
-
-  return mapChipKeyToIntent(key) || mapChipToIntent(text);
-}
-
-function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
-  // Drawer rank chips must ALWAYS resolve to rank-* intents (never util-*).
-  // They reorder the existing 3 instantly (no fetch).
-  const s = String(chipLabelText || "").toLowerCase();
-
-  if (s.includes("best value") || s.includes("value")) return "rank-value";
-  if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
-  if (s.includes("upgrade")) return "rank-upgrade";
-
-  return null;
-}
-
-// ─────────────────────────────────────────────
-// Step 4 — Drawer instant “Top alternatives”
-// IMPORTANT: must be TOP-LEVEL scope so openDrawerFrom() can call it.
-// ─────────────────────────────────────────────
-
-function formatMoneyFromCents(cents, currency) {
-  const n = Number(cents);
-  if (!Number.isFinite(n)) return "";
-  const cur = (currency || "USD").toUpperCase();
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: cur,
-      maximumFractionDigits: 0,
-    }).format(n / 100);
-  } catch {
-    return `$${Math.round(n / 100)}`;
-  }
-}
-
-function normalizePeekCandidates(data) {
-  const raw =
-    (data && Array.isArray(data.candidates) && data.candidates) ||
-    (data && Array.isArray(data.alts) && data.alts) ||
-    (data && Array.isArray(data.alternatives) && data.alternatives) ||
-    [];
-
-  return raw
-    .map((p) => {
-      if (!p || typeof p !== "object") return null;
-
-      const id = p.id || p.productId || p.shopifyId || null;
-      const title = p.title || p.name || "";
-      const why = p.why || p.reason || p.subtitle || "";
-
-      const image =
-        (Array.isArray(p.images) &&
-          p.images[0] &&
-          (p.images[0].src || p.images[0].url)) ||
-        p.image ||
-        p.imageUrl ||
-        "";
-
-      const handle = p.handle || "";
-      const url = p.url || (handle ? `/products/${handle}` : "");
-
-      const priceCents =
-        p.priceCents ??
-        p.price_cents ??
-        (typeof p.price === "number" ? Math.round(p.price * 100) : null);
-
-      const score = typeof p.score === "number" ? p.score : null;
-
-      return { id, title, why, image, url, priceCents, score };
-    })
-    .filter(Boolean)
-    .slice(0, 3);
-}
-
-function getRankLabel(intent) {
-  switch (intent) {
-    case "rank-value":
-      return "Best value";
-    case "rank-budget":
-      return "Cheaper";
-    case "rank-upgrade":
-      return "Upgrade pick";
-    default:
-      return "";
-  }
-}
-
-function getRankWhy(intent) {
-  switch (intent) {
-    case "rank-value":
-      return "Best balance of fit and price.";
-    case "rank-budget":
-      return "Cheaper options from these picks.";
-    case "rank-upgrade":
-      return "Premium step-up from these picks.";
-    default:
-      return "";
-  }
-}
-
-function rankCandidatesByIntent(candidates, intent) {
-  const list = Array.isArray(candidates) ? [...candidates] : [];
-  if (!list.length) return list;
-
-  const getPrice = (x) =>
-    x && x.priceCents != null && Number.isFinite(Number(x.priceCents))
-      ? Number(x.priceCents)
-      : null;
-
-  const getScore = (x) =>
-    x && x.score != null && Number.isFinite(Number(x.score))
-      ? Number(x.score)
-      : null;
-
-  if (intent === "rank-budget") {
-    // Cheaper first (unknown price goes last)
-    return list.sort((a, b) => {
-      const ap = getPrice(a);
-      const bp = getPrice(b);
-      if (ap == null && bp == null) return 0;
-      if (ap == null) return 1;
-      if (bp == null) return -1;
-      return ap - bp;
-    });
+    switch ((name || "").toLowerCase()) {
+      case "amber":   return "#FFC466";
+      case "teal":    return "#17E6C3";
+      case "neutral": return null; // use primary colour
+      default:        return "#7A5CFF"; // violet
+    }
   }
 
-  if (intent === "rank-upgrade") {
-    // Higher price first (unknown price goes last)
-    return list.sort((a, b) => {
-      const ap = getPrice(a);
-      const bp = getPrice(b);
-      if (ap == null && bp == null) return 0;
-      if (ap == null) return 1;
-      if (bp == null) return -1;
-      return bp - ap;
-    });
+  function parseChipKeys(root) {
+    const raw =
+      root && root.dataset && root.dataset.chipKeys ? String(root.dataset.chipKeys) : "";
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
-  if (intent === "rank-value") {
-    // Best value = strongest match (score) then cheaper (price)
-    return list.sort((a, b) => {
-      const as = getScore(a);
-      const bs = getScore(b);
-      if (as != null && bs != null && as !== bs) return bs - as;
-      if (as != null && bs == null) return -1;
-      if (as == null && bs != null) return 1;
-
-      const ap = getPrice(a);
-      const bp = getPrice(b);
-      if (ap == null && bp == null) return 0;
-      if (ap == null) return 1;
-      if (bp == null) return -1;
-      return ap - bp;
-    });
+  function mapChipKeyToIntent(key) {
+    const k = String(key || "").toLowerCase().trim();
+    if (k === "compare") return "util-compare";
+    if (k === "value" || k === "best-value") return "util-value";
+    if (k === "cheaper" || k === "budget") return "util-cheaper";
+    if (k === "upgrade") return "util-upgrade";
+    return null;
   }
 
-  return list;
-}
-
-function applyRankWhy(candidates, intent) {
-  const why = getRankWhy(intent);
-  if (!why) return candidates;
-
-  return (candidates || []).map((p) => ({
-    ...p,
-    why,
-  }));
-}
-
-function renderDrawerCandidates(host, payload, candidates) {
-  const list = host.querySelector("[data-results]");
-  const sub = host.querySelector("[data-results-sub]");
-  if (!list || !sub) return;
-
-  list.innerHTML = "";
-
-  if (!candidates || !candidates.length) {
-    const hasRefine = !!String(payload?.refineText || "").trim();
-    sub.textContent = hasRefine
-      ? `No strong matches found for: “${payload.refineText}”.`
-      : "No instant alternatives found for this item.";
-
-    const wrap = document.createElement("div");
-    wrap.className = "refina-dw-empty";
-
-    const line1 = document.createElement("div");
-    line1.textContent = "This may already be one of the best fits in this store.";
-
-    const line2 = document.createElement("div");
-    line2.style.marginTop = "6px";
-    line2.textContent =
-      "Try a different preference, or open the full assistant for deeper recommendations.";
-
-    const actions = document.createElement("div");
-    actions.style.display = "flex";
-    actions.style.gap = "8px";
-    actions.style.marginTop = "10px";
-    actions.style.flexWrap = "wrap";
-
-    const btnClosest = document.createElement("button");
-    btnClosest.type = "button";
-    btnClosest.className = "refina-dw-empty-btn";
-    btnClosest.textContent = "Show closest matches";
-    btnClosest.onclick = () => {
-      try {
-        payload.intent = "compare-3";
-        hydrateDrawerPeek(host, payload);
-      } catch {}
-    };
-
-    actions.appendChild(btnClosest);
-    wrap.appendChild(line1);
-    wrap.appendChild(line2);
-    wrap.appendChild(actions);
-
-    list.appendChild(wrap);
-    return;
+  function mapChipToIntent(chip) {
+    const s = String(chip || "").toLowerCase();
+    if (s.includes("compare")) return "util-compare";
+    if (s.includes("best value") || s.includes("value")) return "util-value";
+    if (s.includes("cheaper")) return "util-cheaper";
+    if (s.includes("upgrade")) return "util-upgrade";
+    if (s.includes("best value") || s.includes("value")) return "rank-value";
+    if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
+    if (s.includes("upgrade")) return "rank-upgrade";
+    return null;
   }
 
-  if (payload.refineText) {
-    sub.textContent = `Updated for: “${payload.refineText}”`;
-  } else {
-    sub.textContent =
-      candidates.length === 1
-        ? "Found 1 close match to compare."
-        : `Found ${candidates.length} close matches to compare.`;
+  function getIntentForPdpChip(root, chipEl) {
+    const keys = parseChipKeys(root);
+    const chips = Array.from(root.querySelectorAll(".refina-pdp-assist__chip"));
+    const idx = Math.max(0, chips.indexOf(chipEl));
+    const key = keys && keys[idx] ? keys[idx] : null;
+    const text = (chipEl && chipEl.textContent ? chipEl.textContent : "").trim();
+    return mapChipKeyToIntent(key) || mapChipToIntent(text);
   }
 
-  candidates.forEach((p) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "refina-dw-result";
+  function getIntentForDrawerChip(root, chipIndex, chipLabelText) {
+    const s = String(chipLabelText || "").toLowerCase();
+    if (s.includes("best value") || s.includes("value")) return "rank-value";
+    if (s.includes("cheaper") || s.includes("budget")) return "rank-budget";
+    if (s.includes("upgrade")) return "rank-upgrade";
+    return null;
+  }
 
-    const img = document.createElement("img");
-    img.className = "refina-dw-result-img";
-    img.alt = p.title ? String(p.title) : "Alternative product";
-    if (p.image) img.src = p.image;
+  // ─────────────────────────────────────────────
+  // Money / candidate helpers
+  // ─────────────────────────────────────────────
+  function formatMoneyFromCents(cents, currency) {
+    const n = Number(cents);
+    if (!Number.isFinite(n)) return "";
+    const cur = (currency || "USD").toUpperCase();
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: cur,
+        maximumFractionDigits: 0,
+      }).format(n / 100);
+    } catch {
+      return `$${Math.round(n / 100)}`;
+    }
+  }
 
-    const meta = document.createElement("div");
-    meta.className = "refina-dw-result-meta";
+  function normalizePeekCandidates(data) {
+    const raw =
+      (data && Array.isArray(data.candidates) && data.candidates) ||
+      (data && Array.isArray(data.alts) && data.alts) ||
+      (data && Array.isArray(data.alternatives) && data.alternatives) ||
+      [];
 
-    const t = document.createElement("div");
-    t.className = "refina-dw-result-title";
+    return raw
+      .map((p) => {
+        if (!p || typeof p !== "object") return null;
+        const id = p.id || p.productId || p.shopifyId || null;
+        const title = p.title || p.name || "";
+        const why = p.why || p.reason || p.subtitle || "";
+        const image =
+          (Array.isArray(p.images) && p.images[0] && (p.images[0].src || p.images[0].url)) ||
+          p.image || p.imageUrl || "";
+        const handle = p.handle || "";
+        const url = p.url || (handle ? `/products/${handle}` : "");
+        const priceCents =
+          p.priceCents ?? p.price_cents ??
+          (typeof p.price === "number" ? Math.round(p.price * 100) : null);
+        const score = typeof p.score === "number" ? p.score : null;
+        return { id, title, why, image, url, priceCents, score };
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+  }
 
-    const price =
-      p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
-    t.textContent = price ? `${p.title} · ${price}` : p.title;
+  function getRankLabel(intent) {
+    switch (intent) {
+      case "rank-value":  return "Best value";
+      case "rank-budget": return "Cheaper";
+      case "rank-upgrade":return "Upgrade pick";
+      default:            return "";
+    }
+  }
 
-    const why = document.createElement("div");
-    why.className = "refina-dw-result-why";
-    why.textContent = p.why || "Tap to view this option.";
+  function getRankWhy(intent) {
+    switch (intent) {
+      case "rank-value":  return "Best balance of fit and price.";
+      case "rank-budget": return "Cheaper options from these picks.";
+      case "rank-upgrade":return "Premium step-up from these picks.";
+      default:            return "";
+    }
+  }
 
-    meta.appendChild(t);
-    meta.appendChild(why);
+  function rankCandidatesByIntent(candidates, intent) {
+    const list = Array.isArray(candidates) ? [...candidates] : [];
+    if (!list.length) return list;
 
-    btn.appendChild(img);
-    btn.appendChild(meta);
+    const getPrice = (x) =>
+      x && x.priceCents != null && Number.isFinite(Number(x.priceCents))
+        ? Number(x.priceCents) : null;
+    const getScore = (x) =>
+      x && x.score != null && Number.isFinite(Number(x.score))
+        ? Number(x.score) : null;
 
-    if (p.url) {
-      btn.onclick = () => {
-        try {
-          window.location.href = p.url;
-        } catch {}
+    if (intent === "rank-budget") {
+      return list.sort((a, b) => {
+        const ap = getPrice(a), bp = getPrice(b);
+        if (ap == null && bp == null) return 0;
+        if (ap == null) return 1;
+        if (bp == null) return -1;
+        return ap - bp;
+      });
+    }
+    if (intent === "rank-upgrade") {
+      return list.sort((a, b) => {
+        const ap = getPrice(a), bp = getPrice(b);
+        if (ap == null && bp == null) return 0;
+        if (ap == null) return 1;
+        if (bp == null) return -1;
+        return bp - ap;
+      });
+    }
+    if (intent === "rank-value") {
+      return list.sort((a, b) => {
+        const as = getScore(a), bs = getScore(b);
+        if (as != null && bs != null && as !== bs) return bs - as;
+        if (as != null && bs == null) return -1;
+        if (as == null && bs != null) return 1;
+        const ap = getPrice(a), bp = getPrice(b);
+        if (ap == null && bp == null) return 0;
+        if (ap == null) return 1;
+        if (bp == null) return -1;
+        return ap - bp;
+      });
+    }
+    return list;
+  }
+
+  function applyRankWhy(candidates, intent) {
+    const why = getRankWhy(intent);
+    if (!why) return candidates;
+    return (candidates || []).map((p) => ({ ...p, why }));
+  }
+
+  // ─────────────────────────────────────────────
+  // Render helpers
+  // ─────────────────────────────────────────────
+  function renderDrawerCandidates(host, payload, candidates) {
+    const list = host.querySelector("[data-results]");
+    const sub  = host.querySelector("[data-results-sub]");
+    if (!list || !sub) return;
+
+    list.innerHTML = "";
+
+    if (!candidates || !candidates.length) {
+      const hasRefine = !!String(payload?.refineText || "").trim();
+      sub.textContent = hasRefine
+        ? `No strong matches found for: "${payload.refineText}".`
+        : "No instant alternatives found for this item.";
+
+      const wrap = document.createElement("div");
+      wrap.className = "refina-dw-empty";
+
+      const line1 = document.createElement("div");
+      line1.textContent = "This may already be one of the best fits in this store.";
+
+      const line2 = document.createElement("div");
+      line2.style.marginTop = "6px";
+      line2.textContent =
+        "Try a different preference, or open the full assistant for deeper recommendations.";
+
+      const actions = document.createElement("div");
+      actions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;";
+
+      const btnClosest = document.createElement("button");
+      btnClosest.type = "button";
+      btnClosest.className = "refina-dw-empty-btn";
+      btnClosest.textContent = "Show closest matches";
+      btnClosest.onclick = () => {
+        try { payload.intent = "compare-3"; hydrateDrawerPeek(host, payload); } catch {}
       };
+
+      actions.appendChild(btnClosest);
+      wrap.appendChild(line1);
+      wrap.appendChild(line2);
+      wrap.appendChild(actions);
+      list.appendChild(wrap);
+      return;
     }
 
-    list.appendChild(btn);
-  });
-}
+    if (payload.refineText) {
+      sub.textContent = `Updated for: "${payload.refineText}"`;
+    } else {
+      sub.textContent =
+        candidates.length === 1
+          ? "Found 1 close match to compare."
+          : `Found ${candidates.length} close matches to compare.`;
+    }
 
-async function hydrateDrawerPeek(host, payload) {
-  const sub = host.querySelector("[data-results-sub]");
-  const list = host.querySelector("[data-results]");
-  if (!sub || !list) return;
+    candidates.forEach((p) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "refina-dw-result";
 
-  const token = uuid();
-  host.dataset.rfPeekToken = token;
+      const img = document.createElement("img");
+      img.className = "refina-dw-result-img";
+      img.alt = p.title ? String(p.title) : "Alternative product";
+      if (p.image) img.src = p.image;
 
-  const hasRefine = !!String(payload.refineText || "").trim();
-  sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
-  list.innerHTML = "";
+      const meta = document.createElement("div");
+      meta.className = "refina-dw-result-meta";
 
-  const storeId = payload.shop || payload.storeId || "";
-  if (!storeId) {
-    renderDrawerCandidates(host, payload, []);
-    return;
-  }
+      const t = document.createElement("div");
+      t.className = "refina-dw-result-title";
+      const price =
+        p.priceCents != null ? formatMoneyFromCents(p.priceCents, payload.currency) : "";
+      t.textContent = price ? `${p.title} · ${price}` : p.title;
 
-    const refineText = String(payload.refineText || "")
-    .trim()
-    .slice(0, 240);
-  payload.refineText = refineText;
+      const why = document.createElement("div");
+      why.className = "refina-dw-result-why";
+      why.textContent = p.why || "Tap to view this option.";
 
-  const qs = new URLSearchParams({
-    mode: "peek",
-    storeId,
-    productId: payload.productId || "",
-    intent: payload.intent || "",
-    priceCap: payload.priceCap || "",
-    currency: payload.currency || "",
-    q: refineText || "",
-  });
+      meta.appendChild(t);
+      meta.appendChild(why);
+      btn.appendChild(img);
+      btn.appendChild(meta);
 
-  try {
-    const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, {
-      credentials: "same-origin",
+      if (p.url) {
+        btn.onclick = () => { try { window.location.href = p.url; } catch {} };
+      }
+
+      list.appendChild(btn);
     });
-    if (!resp.ok) throw new Error("peek_failed");
-
-    const data = await resp.json();
-    if (host.dataset.rfPeekToken !== token) return;
-
-    const candidates = normalizePeekCandidates(data);
-        // Cache last candidates so “Rank these picks” can reorder instantly (no refetch)
-    host.__rfPeekCandidates = candidates;
-
-    // Nice microcopy (only after we actually have results)
-    if (candidates.length === 1) {
-      sub.textContent = payload.refineText
-        ? `Found 1 strong match for: “${payload.refineText}”.`
-        : "Found 1 strong alternative to compare.";
-    }
-
-    renderDrawerCandidates(host, payload, candidates);
-  } catch {
-    if (host.dataset.rfPeekToken !== token) return;
-    sub.textContent = "Quick alternatives are unavailable right now.";
-    renderDrawerCandidates(host, payload, []);
   }
-}
 
+  async function hydrateDrawerPeek(host, payload) {
+    const sub  = host.querySelector("[data-results-sub]");
+    const list = host.querySelector("[data-results]");
+    if (!sub || !list) return;
+
+    const token = uuid();
+    host.dataset.rfPeekToken = token;
+
+    const hasRefine = !!String(payload.refineText || "").trim();
+    sub.textContent = hasRefine ? "Updating matches…" : "Finding the best matches…";
+    list.innerHTML = "";
+
+    const storeId = payload.shop || payload.storeId || "";
+    if (!storeId) { renderDrawerCandidates(host, payload, []); return; }
+
+    const refineText = String(payload.refineText || "").trim().slice(0, 240);
+    payload.refineText = refineText;
+
+    const qs = new URLSearchParams({
+      mode: "peek",
+      storeId,
+      productId: payload.productId || "",
+      intent: payload.intent || "",
+      priceCap: payload.priceCap || "",
+      currency: payload.currency || "",
+      q: refineText || "",
+    });
+
+    try {
+      const resp = await fetch(`/apps/refina/v1/recommend?${qs.toString()}`, {
+        credentials: "same-origin",
+      });
+      if (!resp.ok) throw new Error("peek_failed");
+
+      const data = await resp.json();
+      if (host.dataset.rfPeekToken !== token) return;
+
+      const candidates = normalizePeekCandidates(data);
+      host.__rfPeekCandidates = candidates;
+      renderDrawerCandidates(host, payload, candidates);
+    } catch {
+      if (host.dataset.rfPeekToken !== token) return;
+      sub.textContent = "Quick alternatives are unavailable right now.";
+      renderDrawerCandidates(host, payload, []);
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Session storage / concierge handoff
+  // ─────────────────────────────────────────────
   function savePrefill(payload) {
     try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {}
   }
 
   function openConcierge(payload) {
-  // Save payload for concierge.js → buildIframeUrl() (which now reads ONCE and clears)
-  savePrefill(payload);
+    savePrefill(payload);
 
-  if (window.RefinaLauncher && typeof window.RefinaLauncher.open === "function") {
-    window.RefinaLauncher.open({
-      source: payload.source,
-      prefill: payload.prefill,
-      context: payload,
-    });
-    return;
-  }
+    if (window.RefinaLauncher && typeof window.RefinaLauncher.open === "function") {
+      window.RefinaLauncher.open({ source: payload.source, prefill: payload.prefill, context: payload });
+      return;
+    }
 
-  // Theme editor / admin preview must open in new tab (embedded admin blocks popups)
-  if (IN_THEME_EDITOR || IN_ADMIN) {
-    const shop =
-      payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
-    if (!shop) return;
+    if (IN_THEME_EDITOR || IN_ADMIN) {
+      const shop =
+        payload.shop || (window.Shopify && (Shopify.shop || Shopify.permanent_domain)) || "";
+      if (!shop) return;
+      const url = new URL(`https://${shop}/apps/refina`);
+      for (const [k, v] of Object.entries(payload)) {
+        if (v == null) continue;
+        if (Array.isArray(v)) url.searchParams.set(k, v.join(","));
+        else url.searchParams.set(k, String(v));
+      }
+      try { window.open(url.toString(), "_blank", "noopener"); } catch { location.href = url.toString(); }
+      return;
+    }
 
-    const url = new URL(`https://${shop}/apps/refina`);
+    const params = new URLSearchParams({ refina: "1" });
     for (const [k, v] of Object.entries(payload)) {
       if (v == null) continue;
-      if (Array.isArray(v)) url.searchParams.set(k, v.join(","));
-      else url.searchParams.set(k, String(v));
+      if (Array.isArray(v)) params.set(k, v.join(","));
+      else params.set(k, String(v));
     }
-
     try {
-      window.open(url.toString(), "_blank", "noopener");
+      history.replaceState(null, "", location.pathname + location.search + "#refina?" + params.toString());
     } catch {
-      location.href = url.toString();
+      location.hash = "#refina?" + params.toString();
     }
-    return;
+    document.dispatchEvent(new CustomEvent("refina:open", { detail: payload }));
   }
 
-  // Normal storefront flow: hash + event (concierge.js listens for it)
-  const params = new URLSearchParams({ refina: "1" });
-  for (const [k, v] of Object.entries(payload)) {
-    if (v == null) continue;
-    if (Array.isArray(v)) params.set(k, v.join(","));
-    else params.set(k, String(v));
-  }
+  // ─────────────────────────────────────────────
+  // Drawer creation
+  // ─────────────────────────────────────────────
+  function ensureDrawer(radiusPx = "16px", accentHex = null, primaryHex = null) {
+    let host = document.getElementById("refina-pdp-drawer");
+    if (host) {
+      // Update accent/primary in case a different PDP block triggered it
+      if (accentHex) host.style.setProperty("--rf-accent", accentHex);
+      if (primaryHex) {
+        host.style.setProperty("--rf-primary", primaryHex);
+        host.style.setProperty("--rf-accent", primaryHex);
+        host.style.setProperty("--rf-accent-light", hexToLightBg(primaryHex));
+      }
+      host.style.setProperty("--rf-dw-radius", radiusPx);
+      return host;
+    }
 
-  try {
-    history.replaceState(
-      null,
-      "",
-      location.pathname + location.search + "#refina?" + params.toString()
-    );
-  } catch {
-    location.hash = "#refina?" + params.toString();
-  }
-
-  document.dispatchEvent(new CustomEvent("refina:open", { detail: payload }));
-}
-
-  // Drawer creation / UX
-  function ensureDrawer(radiusPx = "16px", accentName = "violet") {
-  let host = document.getElementById("refina-pdp-drawer");
-  if (host) return host;
-
-  host = document.createElement("div");
-  host.id = "refina-pdp-drawer";
-  host.className = "refina-dw-host";
+    host = document.createElement("div");
+    host.id = "refina-pdp-drawer";
+    host.className = "refina-dw-host";
     host.innerHTML = `
       <div class="refina-dw-backdrop" data-close></div>
       <aside class="refina-dw" role="dialog" aria-modal="true" aria-labelledby="rf-dw-title" tabindex="-1">
+
         <header class="refina-dw-head">
+          <div class="refina-dw-icon" aria-hidden="true">
+            <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 2L10.5 6.5H15.5L11.5 9.2L13 14L9 11.3L5 14L6.5 9.2L2.5 6.5H7.5L9 2Z" fill="white" opacity="0.9"/>
+            </svg>
+          </div>
           <div class="refina-dw-copy">
             <h4 id="rf-dw-title" class="refina-dw-title"></h4>
             <div class="refina-dw-sub" data-sub></div>
-            <div class="refina-dw-micro"></div>
           </div>
-          <button type="button" class="refina-dw-close" data-close aria-label="Close">✕</button>
+          <button type="button" class="refina-dw-close" data-close aria-label="Close">
+            <svg viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M1 1l9 9M10 1L1 10"/>
+            </svg>
+          </button>
         </header>
 
+        <div class="refina-dw-context" data-context>
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3">
+            <circle cx="6" cy="6" r="5"/>
+            <path d="M6 4.5v2.5M6 8.2v.8"/>
+          </svg>
+          <span data-context-text></span>
+        </div>
+
         <div class="refina-dw-body">
-          <div class="refina-dw-context" data-context></div>
 
           <section class="refina-dw-results" aria-live="polite">
             <div class="refina-dw-results-head">
               <div class="refina-dw-results-title">Similar options</div>
-              <div class="refina-dw-results-sub" data-results-sub>
-                Finding the best matches…
-              </div>
+              <div class="refina-dw-results-sub" data-results-sub>Finding the best matches…</div>
             </div>
             <div class="refina-dw-results-list" data-results></div>
           </section>
 
-          <div class="refina-dw-rank-title">Rank these picks</div>
+          <div class="refina-dw-rank-title">Refine these picks</div>
           <div class="refina-dw-chips" data-chips></div>
 
-          <div class="refina-dw-deeper-title">Like to dive deeper?</div>
-          <div class="refina-dw-deeper-copy">
-            Open the full AI concierge for recommendations based on what matters to you. Ask me anything...
-          </div>
-
-          <label class="refina-dw-label" id="rf-dw-label" style="display:none;">Refine your picks</label>
+          <div class="refina-dw-deeper-title">Want something more specific?</div>
+          <label class="refina-dw-label" id="rf-dw-label">Describe what you need and we'll update the picks</label>
           <textarea
             class="refina-dw-input"
             data-input
             rows="3"
             aria-describedby="rf-dw-label"
-            placeholder="e.g. i have sensitive and sun damaged skin, what is the best face cream for me?..."
+            placeholder="e.g. sensitive skin, no fragrance, under $40…"
           ></textarea>
+
         </div>
 
         <footer class="refina-dw-foot">
           <div class="refina-dw-foot-note">
-            Want deeper help? Open the full assistant for the best picks.
+            <strong>Want a deeper recommendation?</strong>
+            Tell me what matters most to you
           </div>
-          <button type="button" class="refina-dw-continue" data-continue>Open full assistant</button>
+          <button type="button" class="refina-dw-continue" data-continue>
+            Open chat
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M2 6h8M7 3l3 3-3 3"/>
+            </svg>
+          </button>
         </footer>
+
       </aside>
-  `;
-  document.body.appendChild(host);
+    `;
 
-  // NEW: set radius + accent CSS vars (this is the only addition here)
-  host.style.setProperty("--rfina-dw-radius", radiusPx);
-  host.style.setProperty("--color-accent", resolveAccentHex(accentName));
+    document.body.appendChild(host);
 
-  return host;
-}
-
-  function openDrawerFrom(root, basePayload) {
-  const radiusPx = root?.dataset?.styleRadius || "16px";
-  const accentName = root?.dataset?.styleAccent || "violet";
-
-  // IMPORTANT: pass accentName into ensureDrawer
-  const host = ensureDrawer(radiusPx, accentName);
-
-  const aside = host.querySelector(".refina-dw");
-  const input = host.querySelector("[data-input]");
-  const chipsBox = host.querySelector("[data-chips]");
-  const titleEl = host.querySelector(".refina-dw-title");
-  const subEl = host.querySelector("[data-sub]");
-  const ctxEl = host.querySelector("[data-context]");
-  const ctaBtn = host.querySelector("[data-continue]");
-
-  basePayload.contextId = basePayload.contextId || uuid();
-
-  // Open drawer immediately (so later JS issues can't prevent it sliding in)
-  host.classList.add("is-open");
-  try { aside && aside.focus(); } catch {}
-
-  // Basic guards (avoid hard crashes if markup changes)
-  if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
-
-  titleEl.textContent =
-    (basePayload.headline && basePayload.headline.trim()) || "Tell us a bit more";
-  subEl.textContent = (basePayload.subcopy || "").trim();
-
-  ctaBtn.textContent = "Open full assistant";
-
-  // Footer note is not in the reference layout
-  const footNote = host.querySelector(".refina-dw-foot-note");
-  if (footNote) footNote.style.display = "none";
-
-  // Optional context line
-  ctxEl.textContent = basePayload.productTitle
-    ? `Using “${basePayload.productTitle}” as context`
-    : "";
-
-  // Start empty unless a chip provided a prefill
-  input.value = "";
-
-// Render drawer rank chips (NOT the PDP block chips)
-// These reorder the existing Top 3 instantly (no fetch).
-const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
-
-chipsBox.innerHTML = "";
-rankChips.forEach((label, i) => {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = "refina-dw-chip";
-  b.textContent = label;
-
-  b.addEventListener("click", () => {
-    // Map label → rank intent (label-driven, never util-*)
-    const intent = getIntentForDrawerChip(root, i, label);
-    if (intent) basePayload.intent = intent;
-
-    // Only rank if we actually have a cached shortlist
-    const existing = host.__rfPeekCandidates || [];
-    if (!existing.length) return;
-
-    const sub = host.querySelector("[data-results-sub]");
-    const ranked = rankCandidatesByIntent(existing, intent);
-    const final = applyRankWhy(ranked, intent);
-
-    try {
-      renderDrawerCandidates(host, basePayload, final);
-      if (sub) {
-        const labelTxt = getRankLabel(intent);
-        sub.textContent = labelTxt ? `Ranked by: ${labelTxt}` : "Ranked picks.";
+    host.style.setProperty("--rf-dw-radius", radiusPx);
+    if (accentHex) host.style.setProperty("--rf-accent", accentHex);
+    if (primaryHex) {
+      host.style.setProperty("--rf-primary", primaryHex);
+      // When merchant sets "neutral" accent, use their primary as accent too
+      if (!accentHex) {
+        host.style.setProperty("--rf-accent", primaryHex);
+        host.style.setProperty("--rf-accent-light", hexToLightBg(primaryHex));
       }
-    } catch {}
-  });
-
-  chipsBox.appendChild(b);
-});
-
-  // Step 4: instantly populate “Top alternatives” (safe to be empty)
-  try { hydrateDrawerPeek(host, basePayload); } catch {}
-
-  // Enter-to-refresh (Shift+Enter for a new line)
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-
-      const text = (input.value || "").trim();
-      basePayload.refineText = text;
-
-      try { hydrateDrawerPeek(host, basePayload); } catch {}
     }
-  });
 
+    return host;
+  }
+
+  // Derive a very light tint from a hex for the context strip background
+  function hexToLightBg(hex) {
+    try {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, 0.08)`;
+    } catch {
+      return "rgba(45, 74, 62, 0.08)";
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Open drawer
+  // ─────────────────────────────────────────────
+  function openDrawerFrom(root, basePayload) {
+    const radiusPx   = root?.dataset?.styleRadius || "14px";
+    const accentName = root?.dataset?.styleAccent || "neutral";
+    const accentHex  = resolveAccentHex(accentName);
+
+    // Read merchant primary from the inline CSS var set by Liquid
+    const cardEl = root.querySelector(".refina-pdp-assist__card");
+    const primaryHex = cardEl
+      ? getComputedStyle(cardEl).getPropertyValue("--rf-pdp-primary").trim() || null
+      : null;
+
+    const host = ensureDrawer(radiusPx, accentHex, primaryHex);
+
+    const aside    = host.querySelector(".refina-dw");
+    const input    = host.querySelector("[data-input]");
+    const chipsBox = host.querySelector("[data-chips]");
+    const titleEl  = host.querySelector(".refina-dw-title");
+    const subEl    = host.querySelector("[data-sub]");
+    const ctxEl    = host.querySelector("[data-context-text]");
+    const ctxWrap  = host.querySelector("[data-context]");
+    const ctaBtn   = host.querySelector("[data-continue]");
+
+    basePayload.contextId = basePayload.contextId || uuid();
+
+    host.classList.add("is-open");
+    try { aside && aside.focus(); } catch {}
+
+    if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
+
+    titleEl.textContent =
+      (basePayload.headline && basePayload.headline.trim()) || "Similar options";
+    subEl.textContent = (basePayload.subcopy || "").trim();
+
+    // Context strip
+    if (basePayload.productTitle) {
+      ctxEl.textContent = `Using "${basePayload.productTitle}" as context`;
+      ctxWrap.style.display = "";
+    } else {
+      ctxWrap.style.display = "none";
+    }
+
+    input.value = "";
+
+    // Rank chips
+    const rankChips = ["Best value", "Cheaper", "Upgrade pick"];
+    chipsBox.innerHTML = "";
+    rankChips.forEach((label, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "refina-dw-chip";
+      b.textContent = label;
+
+      b.addEventListener("click", () => {
+        chipsBox.querySelectorAll(".refina-dw-chip").forEach(c => c.classList.remove("is-active"));
+        b.classList.add("is-active");
+
+        const intent = getIntentForDrawerChip(root, i, label);
+        if (intent) basePayload.intent = intent;
+
+        const existing = host.__rfPeekCandidates || [];
+        if (!existing.length) return;
+
+        const sub = host.querySelector("[data-results-sub]");
+        const ranked = rankCandidatesByIntent(existing, intent);
+        const final  = applyRankWhy(ranked, intent);
+
+        try {
+          renderDrawerCandidates(host, basePayload, final);
+          if (sub) {
+            const labelTxt = getRankLabel(intent);
+            sub.textContent = labelTxt ? `Ranked by: ${labelTxt}` : "Ranked picks.";
+          }
+        } catch {}
+      });
+
+      chipsBox.appendChild(b);
+    });
+
+    // Initial peek fetch
+    try { hydrateDrawerPeek(host, basePayload); } catch {}
+
+    // Enter to re-fetch with custom query
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        basePayload.refineText = (input.value || "").trim();
+        try { hydrateDrawerPeek(host, basePayload); } catch {}
+      }
+    });
 
     // Close handlers
     const close = () => host.classList.remove("is-open");
-    const backdrop = host.querySelector("[data-close]");
     const onEsc = (ev) => { if (ev.key === "Escape") { close(); document.removeEventListener("keydown", onEsc); } };
-    backdrop.onclick = close;
+    host.querySelector("[data-close]").onclick = close;
     host.querySelector(".refina-dw-close").onclick = close;
     document.addEventListener("keydown", onEsc);
 
-    // Continue → Option B: Refresh live PDP details, then open concierge
+    // Continue → open full concierge
     host.querySelector("[data-continue]").addEventListener("click", () => {
       const finalPrefill = (input.value || "").trim() || basePayload.prefill;
-
       const liveVariantId = findCurrentVariantId() || basePayload.variantId;
       const ds = root.dataset || {};
       const refreshed = {
@@ -943,7 +1080,6 @@ rankChips.forEach((label, i) => {
         intent: basePayload.intent || null,
       };
 
-      // best-effort analytics
       try {
         navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
           new Blob([JSON.stringify({
@@ -962,7 +1098,6 @@ rankChips.forEach((label, i) => {
       close();
     }, { once: true });
 
-    // Analytics: drawer_open
     try {
       navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
         new Blob([JSON.stringify({
@@ -976,68 +1111,56 @@ rankChips.forEach((label, i) => {
     } catch {}
   }
 
-// ─────────────────────────────────────────────
-// Verdict + Quick-peek (PDP fast paths)
-// ─────────────────────────────────────────────
-function hydrateVerdictAndPeek(root) {
-  const verdictEl = root.querySelector(".refina-pdp-assist__verdict");
-  if (!verdictEl) return;
+  // ─────────────────────────────────────────────
+  // Verdict (disabled per original)
+  // ─────────────────────────────────────────────
+  function hydrateVerdictAndPeek(root) {
+    const verdictEl = root.querySelector(".refina-pdp-assist__verdict");
+    if (!verdictEl) return;
+    verdictEl.textContent = "";
+    verdictEl.style.display = "none";
+  }
 
-  // Disabled: remove the PDP verdict line entirely
-  verdictEl.textContent = "";
-  verdictEl.style.display = "none";
-}
-
+  // ─────────────────────────────────────────────
+  // Click delegation
+  // ─────────────────────────────────────────────
   document.addEventListener(
-  "click",
-  (ev) => {
-    const root = ev.target.closest("[data-refina-pdp-assist]");
-    if (!root) return;
+    "click",
+    (ev) => {
+      const root = ev.target.closest("[data-refina-pdp-assist]");
+      if (!root) return;
 
-    const btn = ev.target.closest(".refina-pdp-assist__button");
-    const chip = ev.target.closest(".refina-pdp-assist__chip");
-    if (!btn && !chip) return;
+      const btn  = ev.target.closest(".refina-pdp-assist__button");
+      const chip = ev.target.closest(".refina-pdp-assist__chip");
+      if (!btn && !chip) return;
 
-    const base = getPayload(root);
+      const base = getPayload(root);
 
-    // BUTTON: always open drawer with empty input
-    if (btn) {
-      base.prefill = "";
-      base.intent = null;
-    }
-
-    // CHIP: open drawer + fetch a fresh shortlist (but do NOT fill the textarea)
-    if (chip) {
-      const chipText = (chip.textContent || "").trim();
-
-      // This is the query that changes the shortlist (Top alternatives)
-      base.refineText = chipText || "";
-
-      // Intent via chip index → key (merchant can rename chip copy)
-      const intent = getIntentForPdpChip(root, chip);
-      if (intent) base.intent = intent;
-
-      // Preserve existing cheaper/price-cap behavior
-      if (intent === "alt-cheaper" && !base.priceCap) {
-        const rawCap = (root.dataset.priceCap || "").trim();
-        if (rawCap) base.priceCap = rawCap;
+      if (btn) {
+        base.prefill = "";
+        base.intent  = null;
       }
-    }
 
-    // Seed verdict/peek (best-effort, non-blocking)
-    hydrateVerdictAndPeek(root);
+      if (chip) {
+        const chipText = (chip.textContent || "").trim();
+        base.refineText = chipText || "";
+        const intent = getIntentForPdpChip(root, chip);
+        if (intent) base.intent = intent;
+        if (intent === "alt-cheaper" && !base.priceCap) {
+          const rawCap = (root.dataset.priceCap || "").trim();
+          if (rawCap) base.priceCap = rawCap;
+        }
+      }
 
-    // Open the drawer instead of launching immediately
-    openDrawerFrom(root, base);
-  },
-  { passive: true }
-);
+      hydrateVerdictAndPeek(root);
+      openDrawerFrom(root, base);
+    },
+    { passive: true }
+  );
 
-  // On load, pre-hydrate verdict (no blocking)
   document.addEventListener("DOMContentLoaded", () => {
     const root = document.querySelector("[data-refina-pdp-assist]");
     if (root) hydrateVerdictAndPeek(root);
   });
 
 })();
-
