@@ -92,8 +92,8 @@
 
 /* ── Header ── */
 .refina-dw-head {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
+  flex-direction: row;
   align-items: flex-start;
   gap: 11px;
   padding: 16px 18px 14px;
@@ -103,20 +103,21 @@
 .refina-dw-icon {
   width: 34px;
   height: 34px;
+  min-width: 34px;
   border-radius: 10px;
   background: var(--rf-accent);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin-top: 1px;
+  align-self: flex-start;
 }
 .refina-dw-icon svg {
   width: 16px;
   height: 16px;
 }
 
-.refina-dw-copy { display: grid; gap: 3px; }
+.refina-dw-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
 
 .refina-dw-title {
   font-weight: 500;
