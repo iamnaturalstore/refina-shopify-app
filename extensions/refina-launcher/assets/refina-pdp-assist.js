@@ -530,8 +530,6 @@
       prefill,
       headline: ds.headline || "",
       subcopy: ds.subcopy || "",
-      drawerHeading: ds.drawerHeading || "",
-      drawerSubheading: ds.drawerSubheading || "",
       buttonText: ds.buttonText || ""
     };
   }
@@ -1076,12 +1074,8 @@
     if (!input || !chipsBox || !titleEl || !subEl || !ctxEl || !ctaBtn) return;
 
     titleEl.textContent =
-      (basePayload.drawerHeading && basePayload.drawerHeading.trim()) ||
-      (basePayload.headline && basePayload.headline.trim()) ||
-      "Similar options";
-    subEl.textContent =
-      (basePayload.drawerSubheading && basePayload.drawerSubheading.trim()) ||
-      "";
+      (basePayload.headline && basePayload.headline.trim()) || "Similar options";
+    subEl.textContent = (basePayload.subcopy || "").trim();
 
     // Context strip
     if (basePayload.productTitle) {
