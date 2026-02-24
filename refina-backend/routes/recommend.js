@@ -344,7 +344,86 @@ function ruleScore(product = {}, constraints = {}, normQ = "") {
 
 // ─── Cache (7d TTL; version + epoch invalidation) ────────────────────────────
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const CACHE_VERSION = "concierge-v2-kb";
+const CACHE_VERSION = "concierge-v2-kb-cachecanon1";
+
+// Cache canonicalization (Phase 1, omni-category-safe)
+// Goal: collapse plain-language paraphrases without category-specific vocab lists.
+function canonicalizeCacheQuery(input) {
+  let s = String(input || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .trim();
+
+  if (!s) return "";
+
+  // very light shorthand normalization
+  s = s.replace(/\bu\b/g, "you");
+
+  // punctuation -> spaces (unicode-safe letters/numbers kept)
+  s = s.replace(/[^\p{L}\p{N}\s]/gu, " ");
+
+  // collapse spaces
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+
+  let tokens = s.split(" ").filter(Boolean);
+
+  // Generic filler words only (category-agnostic).
+  // Keep negations/comparisons/modifiers to avoid over-fuzzy collisions.
+  const STOP = new Set([
+    "a", "an", "the",
+    "i", "me", "my", "mine", "we", "our", "ours",
+    "you", "your", "yours",
+    "it", "its", "they", "them", "their", "theirs",
+    "what", "which", "who", "whom",
+    "do", "does", "did",
+    "is", "are", "am", "was", "were", "be", "been", "being",
+    "can", "could", "should", "would", "may", "might",
+    "please",
+    "have", "has", "had",
+    "like",
+    "to",
+    "for", // optional; keep/remove based on observed collisions
+    "of",
+    "and",
+    "that", "this", "these", "those",
+  ]);
+
+  const PRESERVE = new Set([
+    "not", "no", "non", "without", "with",
+    "vs", "versus",
+    "best", // keep for safer first rollout
+  ]);
+
+  tokens = tokens
+    .map((t) => {
+      // tiny generic typo cleanup (keep very small for now)
+      if (t === "cleaser") return "cleanser";
+
+      // conservative plural -> singular normalization
+      if (t.length > 4 && t.endsWith("ies")) return t.slice(0, -3) + "y";
+      if (t.length > 3 && t.endsWith("s") && !t.endsWith("ss")) return t.slice(0, -1);
+
+      return t;
+    })
+    .filter((t) => {
+      if (!t) return false;
+      if (PRESERVE.has(t)) return true;
+      return !STOP.has(t);
+    });
+
+  // Deduplicate while preserving order
+  const seen = new Set();
+  const out = [];
+  for (const t of tokens) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+
+  return out.join(" ").trim();
+}
 
 function cacheKey(storeId, concernNorm) {
   return crypto.createHash("sha1").update(`${storeId}::${concernNorm}`).digest("hex");
@@ -844,11 +923,16 @@ scoredEmb.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id
     // Cache (EARLY) — avoid paying aiGuard on hits
 const concernNorm = normConcern(concern);
 const constraints = detectConstraints(concernNorm);
-const ck = cacheKey(storeId, concernNorm);
+
+// Cache-only canonicalization (Phase 1)
+const cacheConcernCanon = canonicalizeCacheQuery(concern);
+
+const ck = cacheKey(storeId, cacheConcernCanon);
 const cached = await readCache(storeId, ck, cacheEpoch);
+
 if (cached) {
   const shaped = clampCachedPayload(cached, null);
-// IMPORTANT: don’t tier-transform again here; cached payload should already be tier-shaped
+  // IMPORTANT: don’t tier-transform again here; cached payload should already be tier-shaped
 
   return res.json({
     ...shaped,
@@ -860,6 +944,8 @@ if (cached) {
       cacheKey: ck,
       cacheEpoch,
       cacheHit: true,
+      cacheConcernNorm: concernNorm,
+      cacheConcernCanon,
       promptChars: 0,
       timings,
       capsuleCount: 0,
