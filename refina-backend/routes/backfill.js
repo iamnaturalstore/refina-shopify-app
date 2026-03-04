@@ -66,6 +66,126 @@ async function loadOfflineSession(shop) {
   return null;
 }
 
+// ───────────────────────────────────────────────────────────
+// BACKFILL HELPERS (paste into refina-backend/routes/backfill.js)
+// Place these ABOVE: export default function mountBackfillRoutes(app) { ... }
+// ───────────────────────────────────────────────────────────
+
+function computeEligibilityFromGqlProduct(p) {
+  // Admin GraphQL Product.status is typically: ACTIVE | DRAFT | ARCHIVED
+  const statusRaw = String(p?.status || "");
+  const shopifyStatus = statusRaw.toLowerCase(); // "active" | "draft" | "archived" (or "")
+
+  // publishedAt often null if unpublished
+  const published = Boolean(p?.publishedAt);
+
+  // Variants presence (baseline sellable signal)
+  const variants = Array.isArray(p?.variants?.nodes) ? p.variants.nodes : [];
+  const hasVariant = variants.length > 0;
+
+  // "availableForSale" is not always available on Admin Product, so compute baseline:
+  // active + published + hasVariant
+  const availableForSale = shopifyStatus === "active" && published && hasVariant;
+
+  // Canonical flag used everywhere downstream
+  const isActive = availableForSale;
+
+  return { shopifyStatus, published, availableForSale, isActive };
+}
+
+function productShapeFromGql(p, shop, syncAt, FieldValue) {
+  // Preserve numeric id used by existing Firestore docs
+  const numericId =
+    p?.legacyResourceId != null
+      ? String(p.legacyResourceId)
+      : String((p?.id || "").match(/\d+$/)?.[0] || "");
+
+  const imgUrl =
+    p?.featuredImage?.url ||
+    (Array.isArray(p?.images?.nodes) && p.images.nodes[0]?.url) ||
+    "";
+
+  // price: handle both Money-like { amount } and plain decimal string
+  const var0 = Array.isArray(p?.variants?.nodes) ? p.variants.nodes[0] : null;
+  let priceNum = null;
+  if (var0 && var0.price != null) {
+    if (typeof var0.price === "object" && var0.price.amount != null) {
+      priceNum = Number(var0.price.amount);
+    } else {
+      priceNum = Number(var0.price); // decimal string → number
+    }
+  }
+  const price = Number.isFinite(priceNum) ? priceNum : null;
+
+  const { shopifyStatus, published, availableForSale, isActive } =
+    computeEligibilityFromGqlProduct(p);
+
+  return {
+    id: numericId,
+    storeId: shop,
+
+    name: p?.title || "",
+    title: p?.title || "",
+    description: p?.descriptionHtml || "",
+    tags: Array.isArray(p?.tags) ? p.tags.filter(Boolean) : [],
+    productType: p?.productType || "",
+    category: p?.productType || "",
+    ingredients: [], // filled by later enrichment
+    image: imgUrl,
+    price,
+    handle: p?.handle || "",
+    link: p?.handle ? `/products/${p.handle}` : "#",
+
+    // ── NEW: lifecycle + eligibility ─────────────────────────
+    shopifyStatus,        // "active" | "draft" | "archived"
+    published,            // boolean
+    availableForSale,     // boolean
+    isActive,             // canonical recommender filter
+    lastSeenAt: syncAt,   // fixed timestamp for this run
+    discontinuedAt: null, // set when tombstoned
+    deletedInShopify: false,
+
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+async function tombstoneUnseenProducts(dbAdmin, shop, syncAt) {
+  const col = dbAdmin.collection("products").doc(shop).collection("items");
+
+  // Active products that were not "seen" in the current run
+  const snap = await col
+    .where("isActive", "==", true)
+    .where("lastSeenAt", "<", syncAt)
+    .get();
+
+  if (snap.empty) return { tombstoned: 0 };
+
+  let batch = dbAdmin.batch();
+  let opCount = 0;
+  let tombstoned = 0;
+
+  for (const doc of snap.docs) {
+    batch.update(doc.ref, {
+      isActive: false,
+      availableForSale: false,
+      discontinuedAt: syncAt,
+    });
+
+    tombstoned++;
+    opCount++;
+
+    // Firestore batch limit (500). Keep buffer.
+    if (opCount >= 450) {
+      await batch.commit();
+      batch = dbAdmin.batch();
+      opCount = 0;
+    }
+  }
+
+  if (opCount > 0) await batch.commit();
+  return { tombstoned };
+}
+
 export default function mountBackfillRoutes(app) {
   // ───────────────────────────────────────────────────────────
   // Shared admin guard

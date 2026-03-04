@@ -262,25 +262,63 @@ async function getPlan(storeId) {
   }
 }
 
+// ───────────────────────────────────────────────────────────
+// fetchProducts (paste wherever your current fetchProducts lives)
+// Replaces your current implementation.
+// ───────────────────────────────────────────────────────────
+
 // Fetch products (subcollection first; fallback to flat)
+// Returns ONLY active products when isActive exists.
 async function fetchProducts(storeId, limit = 1500) {
+  // 1) Subcollection (canonical)
   try {
-    const subSnap = await db.collection(`products/${storeId}/items`).limit(limit).get();
-    if (!subSnap.empty) {
+    const col = db.collection("products").doc(storeId).collection("items");
+
+    // Prefer strict active filter (new world)
+    const activeSnap = await col.where("isActive", "==", true).limit(limit).get();
+    if (!activeSnap.empty) {
       const out = [];
-      subSnap.forEach((d) => out.push({ id: d.id, ...d.data(), storeId }));
+      activeSnap.forEach((d) => out.push({ id: d.id, ...d.data(), storeId }));
+      return out;
+    }
+
+    // Back-compat: older shops may not have isActive populated yet
+    const legacySnap = await col.limit(limit).get();
+    if (!legacySnap.empty) {
+      const out = [];
+      legacySnap.forEach((d) => {
+        const data = d.data() || {};
+        if (data.isActive === false) return; // respect explicit tombstones
+        out.push({ id: d.id, ...data, storeId });
+      });
       return out;
     }
   } catch {}
+
+  // 2) Flat fallback
   try {
-    const flatSnap = await db.collection('products').where('storeId', '==', storeId).limit(limit).get();
+    const flat = db.collection("products").where("storeId", "==", storeId);
+
+    const activeSnap = await flat.where("isActive", "==", true).limit(limit).get();
+    if (!activeSnap.empty) {
+      const out = [];
+      activeSnap.forEach((d) => out.push({ id: d.id, ...d.data() }));
+      return out;
+    }
+
+    const legacySnap = await flat.limit(limit).get();
     const out = [];
-    flatSnap.forEach((d) => out.push({ id: d.id, ...d.data() }));
+    legacySnap.forEach((d) => {
+      const data = d.data() || {};
+      if (data.isActive === false) return;
+      out.push({ id: d.id, ...data });
+    });
     return out;
   } catch {
     return [];
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Shopify App Proxy verification (HMAC)
@@ -819,15 +857,28 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     const allProducts = await fetchProducts(storeId);
     const catalogById = new Map(allProducts.map((p) => [p.id, p]));
 
-    // Fallback (mapping or ranker)
-    const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
-    const mapping = await getDocSafe(mappingRef);
-    let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
-    if (!productIds.length) {
-      const ranked = rankProducts(allProducts, normalizedConcern, { rankMode });
-      productIds = ranked.slice(0, 8).map((p) => p.id);
-      meta.source = 'fallback';
-    }
+   // Fallback (mapping or ranker)
+const mappingRef = db.doc(`mappings/${storeId}/concernToProducts/${normalizedConcern}`);
+const mapping = await getDocSafe(mappingRef);
+
+// 1) Start with mapping IDs
+let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
+
+// 2) Prune stale/inactive IDs (mapping can be out of date)
+productIds = productIds
+  .map(String)
+  .filter((id) => catalogById.has(id));
+
+// 3) If nothing left, fall back to ranker (and prune again)
+if (!productIds.length) {
+  const ranked = rankProducts(allProducts, normalizedConcern, { rankMode });
+  productIds = ranked
+    .slice(0, 8)
+    .map((p) => String(p.id))
+    .filter((id) => catalogById.has(id));
+  meta.source = 'fallback';
+}
+  
 
     const limit = plan === 'free' ? 3 : 8;
     let used = productIds.slice(0, limit);
@@ -899,22 +950,32 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     }
 
     const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    const hydrate = used.map((id) => {
-      const p = allProducts.find((x) => x.id === id) || {};
-      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-      return {
-        id: p.id,
-        title: p.title || p.name || '',
-        name: p.title || p.name || '',
-        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-        description: p.description || '',
-        productType: p.productType || '',
-        tags: p.tags || [],
-        url: productUrl,
-        price: p.price ?? null,
-      };
-    });
+
+const hydrate = used
+  .map((id) => {
+    const p = catalogById.get(String(id));
+    if (!p) return null;
+
+    const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+    const productUrl =
+      p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+
+    return {
+      id: p.id,
+      title: p.title || p.name || '',
+      name: p.title || p.name || '',
+      image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+      description: p.description || '',
+      productType: p.productType || '',
+      tags: p.tags || [],
+      url: productUrl,
+      price: p.price ?? null,
+    };
+  })
+  .filter(Boolean);
+
+// Keep productIds aligned with hydrated products (prevents stale IDs leaking)
+used = hydrate.map((p) => p.id);
 
     let copy = shapeCopy({ products: hydrate, concern: normalizedConcern, tone, category });
     if (enriched && meta.source === 'gemini') {
@@ -939,7 +1000,7 @@ app.post('/proxy/refina/v1/recommend', requireAppProxy, rateLimitAppProxy, async
     };
 
     // --- Fallback: if no products yet, serve a few via Admin API ---
-    if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+    if (!hydrate || hydrate.length === 0) {
       try {
         const shop = String(storeId || '').toLowerCase();
         let accessToken = req.accessToken;
@@ -1094,22 +1155,40 @@ app.post('/v1/recommend', async (req, res) => {
     if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cache: 'hit' } });
 
     const allProducts = await fetchProducts(shop);
+    const catalogById = new Map(allProducts.map((p) => [String(p.id), p]));
 
     const mappingRef = db.doc(`mappings/${shop}/concernToProducts/${normalizedConcern}`);
-    const mapping = await getDocSafe(mappingRef);
-    let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
-    let source = 'mapping';
-    if (!productIds.length) {
-      const ranked = rankProducts(allProducts, normalizedConcern);
-      productIds = ranked.slice(0, 8).map((p) => p.id);
-      source = 'fallback';
-    }
+const mapping = await getDocSafe(mappingRef);
 
-    // pick the top N upfront
-    const used = productIds.slice(0, plan === 'free' ? 3 : 8);
+let productIds = Array.isArray(mapping?.productIds) ? mapping.productIds : [];
+let source = 'mapping';
 
-    // route-local meta + helpers this handler expects later
-    let meta = { source: 'mapping', cache: 'miss' };
+if (!productIds.length) {
+  const ranked = rankProducts(allProducts, normalizedConcern);
+  productIds = ranked.slice(0, 8).map((p) => String(p.id));
+  source = 'fallback';
+}
+
+// prune stale/inactive ids (applies to mapping + fallback)
+productIds = (Array.isArray(productIds) ? productIds : [])
+  .map(String)
+  .filter((id) => catalogById.has(id));
+
+// if mapping was stale, re-fallback
+if (!productIds.length) {
+  const ranked = rankProducts(allProducts, normalizedConcern);
+  productIds = ranked
+    .slice(0, 8)
+    .map((p) => String(p.id))
+    .filter((id) => catalogById.has(id));
+  source = 'fallback';
+}
+
+// pick the top N upfront
+let used = productIds.slice(0, plan === 'free' ? 3 : 8);
+
+// route-local meta + helpers this handler expects later
+let meta = { source, cache: 'miss' };
     let enriched = null; // keep defined even if unused in this v1 handler
     const disclaimer = /beauty|skin|hair|cosmetic/i.test(String(category || ''))
       ? 'Skincare guidance only — not medical advice.'
@@ -1117,22 +1196,31 @@ app.post('/v1/recommend', async (req, res) => {
 
     // hydrate product objects for the UI
     const safeDomain = String(domain || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    const hydrate = used.map((id) => {
-      const p = allProducts.find((x) => x.id === id) || {};
-      const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
-      const productUrl = p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
-      return {
-        id: p.id,
-        title: p.title || p.name || '',
-        name: p.title || p.name || '',
-        image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
-        description: p.description || '',
-        productType: p.productType || '',
-        tags: p.tags || [],
-        url: productUrl,
-        price: p.price ?? null,
-      };
-    });
+
+const hydrate = used
+  .map((id) => {
+    const p = catalogById.get(String(id));
+    if (!p) return null;
+
+    const handle = String(p.handle || '').replace(/^\/+|\/+$/g, '');
+    const productUrl =
+      p.productUrl || (safeDomain && handle ? `https://${safeDomain}/products/${handle}` : '');
+
+    return {
+      id: p.id,
+      title: p.title || p.name || '',
+      name: p.title || p.name || '',
+      image: p.image || (Array.isArray(p.images) ? p.images[0]?.src : ''),
+      description: p.description || '',
+      productType: p.productType || '',
+      tags: p.tags || [],
+      url: productUrl,
+      price: p.price ?? null,
+    };
+  })
+  .filter(Boolean);
+
+used = hydrate.map((p) => p.id);
 
     // friendly copy from what we actually send back
     const copy = shapeCopy({
@@ -1143,7 +1231,7 @@ app.post('/v1/recommend', async (req, res) => {
     });
 
     // --- Fallback: if no products, serve a few via Admin API so reviewers see results ---
-    if ((!hydrate || hydrate.length === 0) && (!used || used.length === 0)) {
+    if (!hydrate || hydrate.length === 0) {
       try {
         const offlineId = shopify.session.getOfflineId(shop);
         const storage = shopify.sessionStorage ?? shopify.config?.sessionStorage;

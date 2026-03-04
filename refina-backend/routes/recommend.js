@@ -525,6 +525,7 @@ router.get("/recommend", async (req, res) => {
 
   if (!srcSnap.exists) return res.json({ candidates: [] });
   const src = srcSnap.data() || {};
+  if (src.isActive === false) return res.json({ candidates: [] });
 
   const srcType = String(src.productType || "").trim().toLowerCase();
   const srcTypeNorm = String(src.productType_norm || srcType || "").trim().toLowerCase();
@@ -552,6 +553,7 @@ router.get("/recommend", async (req, res) => {
         .collection("products")
         .doc(storeId)
         .collection("items")
+        .where("isActive", "==", true)
         .where("productType_norm", "==", srcTypeNorm)
         .limit(120)
         .get();
@@ -565,6 +567,7 @@ router.get("/recommend", async (req, res) => {
       .collection("products")
       .doc(storeId)
       .collection("items")
+      .where("isActive", "==", true)
       .limit(120)
       .get();
   }
@@ -573,6 +576,7 @@ router.get("/recommend", async (req, res) => {
   poolSnap.forEach((d) => {
     if (d.id === productId) return;
     const p = d.data() || {};
+    if (p.isActive === false) return;
     pool.push({ __docId: d.id, ...p });
   });
 
