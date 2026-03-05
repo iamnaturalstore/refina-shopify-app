@@ -271,6 +271,10 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
         productType
         tags
         handle
+
+        status
+        publishedAt
+
         featuredImage { url }
         images(first: 1) { nodes { url } }
         variants(first: 1) {
@@ -285,6 +289,7 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
   }
 `;
 
+    const syncAt = nowTs();
 
     let after = null;
     let total = 0;
@@ -298,66 +303,25 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
       pages += 1;
 
       if (nodes.length) {
-        const batch = dbAdmin.batch();
+  const batch = dbAdmin.batch();
 
-        for (const p of nodes) {
-          // Preserve your existing Firestore shape
-          const numericId =
-            p?.legacyResourceId != null
-              ? String(p.legacyResourceId)
-              : // ultra-safe fallback: extract trailing digits from gid
-                String((p?.id || "").match(/\d+$/)?.[0] || "");
+  for (const p of nodes) {
+    const doc = productShapeFromGql(p, shop, syncAt, FieldValue);
+    const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
+    batch.set(ref, doc, { merge: true });
+  }
 
-          // image: prefer featuredImage, fall back to first image node
-          const imgUrl =
-            p?.featuredImage?.url ||
-            (Array.isArray(p?.images?.nodes) && p.images.nodes[0]?.url) ||
-            "";
-
-          // price: prefer decimal string in price, fallback to priceV2.amount
-          // price: handle both Money-like object { amount } and plain decimal string
-          const var0 = Array.isArray(p?.variants?.nodes) ? p.variants.nodes[0] : null;
-          let priceNum = null;
-          if (var0 && var0.price != null) {
-            if (typeof var0.price === "object" && var0.price.amount != null) {
-              priceNum = Number(var0.price.amount);
-            } else {
-              priceNum = Number(var0.price); // decimal string → number
-            }
-          }
-          const price = Number.isFinite(priceNum) ? priceNum : null;
-
-          const doc = {
-            id: numericId,                       // ← same as before
-            storeId: shop,
-            name: p?.title || "",
-            title: p?.title || "",
-            description: p?.descriptionHtml || "",
-            tags: Array.isArray(p?.tags) ? p.tags.filter(Boolean) : [],
-            productType: p?.productType || "",
-            category: p?.productType || "",
-            ingredients: [],                     // filled by later enrichment
-            image: imgUrl,
-            price,
-            handle: p?.handle || "",
-            link: p?.handle ? `/products/${p.handle}` : "#",
-            updatedAt: FieldValue.serverTimestamp(),
-          };
-
-          const ref = dbAdmin.doc(`products/${shop}/items/${doc.id}`);
-          batch.set(ref, doc, { merge: true });
-        }
-
-        await batch.commit();
-        total += nodes.length;
-      }
+  await batch.commit();
+  total += nodes.length;
+}
 
       if (!pageInfo?.hasNextPage) break;
       after = edges.length ? edges[edges.length - 1].cursor : null;
       if (!after) break;
     }
 
-    return res.json({ ok: true, shop, synced: total, pages });
+    const { tombstoned } = await tombstoneUnseenProducts(dbAdmin, shop, syncAt);
+return res.json({ ok: true, shop, synced: total, pages, tombstoned });
   } catch (e) {
     console.error("backfill (gql) error:", e);
     return res.status(500).json({ ok: false, error: "backfill_failed" });
