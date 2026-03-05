@@ -14,6 +14,7 @@ import { toMyshopifyDomain } from "../utils/resolveStore.js";
 import { enrichmentRouter } from "./enrichment.js";
 import { resolveAdminSession } from "../utils/shopSession.js";
 import { nowTs } from "../bff/lib/firestore.js";
+import { Timestamp } from "@google-cloud/firestore";
 
 /** Shape a minimal product doc for Firestore (subcollection). */
 function productShapeFromShopify(raw, shop) {
@@ -289,7 +290,7 @@ adminRouter.post("/backfill-products", requireAdmin, async (req, res) => {
   }
 `;
 
-    const syncAt = nowTs();
+    const syncAt = Timestamp.now();
 
     let after = null;
     let total = 0;
