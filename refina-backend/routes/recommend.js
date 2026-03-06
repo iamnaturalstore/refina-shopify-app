@@ -1090,7 +1090,21 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
     timings.scoreMs = Date.now() - tScoreStart;
 
     const maxByPlan = Math.max(3, Math.min(guard?.trim?.maxProducts ?? 12, 12));
-    const finalists = filtered.slice(0, maxByPlan).map(x => x.p);
+    let finalists = filtered.slice(0, maxByPlan).map(x => x.p);
+
+    // ✅ Filter finalists to ACTIVE products only (prevents drafts wasting Top-3 slots)
+{
+  const finalistIds = finalists.map((p) => String(p.id));
+  const finalistDocs = await loadProductsByIds(storeId, finalistIds);
+
+  const activeIdSet = new Set(
+    (Array.isArray(finalistDocs) ? finalistDocs : [])
+      .filter((p) => p && p.isActive === true)
+      .map((p) => String(p.id))
+  );
+
+  finalists = finalists.filter((p) => activeIdSet.has(String(p.id)));
+}
     const finalistsSet = new Set(finalists.map(p => String(p.id)));
     
     // Phase 2 — Convert finalists to Capsules (in-memory)
@@ -1363,6 +1377,8 @@ return res.json({
   },
 });
     }
+
+
 
     const allow = finalistsSet;
     let outIds = [
