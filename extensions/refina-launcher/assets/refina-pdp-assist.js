@@ -399,13 +399,12 @@
   border-top: 1px solid var(--rf-rule);
   background: var(--rf-bg-alt);
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 10px;
   flex-shrink: 0;
 }
 
 .refina-dw-foot-note {
-  flex: 1;
   min-width: 0;
 }
 .refina-dw-foot-note strong {
@@ -434,10 +433,11 @@
   white-space: nowrap;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  width: 100%;
   letter-spacing: 0.02em;
   transition: opacity 0.15s;
-  flex-shrink: 0;
   font-family: inherit;
 }
 .refina-dw-continue:hover { opacity: 0.84; }
@@ -538,10 +538,10 @@
 
   function resolveAccentHex(name) {
     switch ((name || "").toLowerCase()) {
-      case "forest":   return "#2D4A3E";
-      case "midnight":    return "#1E3A5F";
+      case "amber":   return "#FFC466";
+      case "teal":    return "#17E6C3";
       case "neutral": return null; // use primary colour
-      default:        return "#8B3A28"; // sienna
+      default:        return "#7A5CFF"; // violet
     }
   }
 
@@ -989,15 +989,6 @@
           <div class="refina-dw-rank-title">Refine these picks</div>
           <div class="refina-dw-chips" data-chips></div>
 
-          <div style="margin-top:18px;">
-            <textarea
-              class="refina-dw-input"
-              data-input
-              rows="3"
-              placeholder="e.g. what product is best for dark spots and sensitive skin…"
-            ></textarea>
-          </div>
-
         </div>
 
         <footer class="refina-dw-foot">
@@ -1005,6 +996,12 @@
             <strong>Want a deeper recommendation?</strong>
             <span>Tell me what matters most to you</span>
           </div>
+          <textarea
+            class="refina-dw-input"
+            data-input
+            rows="2"
+            placeholder="e.g. sensitive skin, no fragrance, under $40…"
+          ></textarea>
           <button type="button" class="refina-dw-continue" data-continue>
             Open chat
             <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
@@ -1037,7 +1034,7 @@
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
       const b = parseInt(hex.slice(5, 7), 16);
-      return `rgba(${r}, ${g}, ${b}, 0.08)`;
+      return `rgba(${r}, ${g}, ${b}, 0.10)`;
     } catch {
       return "rgba(45, 74, 62, 0.10)";
     }
