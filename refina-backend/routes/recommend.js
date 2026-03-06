@@ -1299,61 +1299,69 @@ try {
 
     if (!vr.ok) {
       const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
-      const enrichedFallback = await loadProductsByIds(storeId, fallbackIds);
-      const products = enrichedFallback.map((p) => {
-        const title = p.title || p.name || "";
-        const price = p.price != null ? p.price : undefined;
-        const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-        let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-        if (!urlCandidate && p.path) urlCandidate = p.path;
-        const url = ensureAbsolute(urlCandidate, storeId);
-        const image = pickPrimaryImage(p, storeId);
-        const description = p.description || p.body_html || "";
-        return {
-          id: p.id, title, price, ...(price_formatted ? { price_formatted } : {}),
-          image, image_url: image, url, description,
-        };
-      });
 
-            const tookMs = Date.now() - started;
+const enrichedFallbackAll = await loadProductsByIds(storeId, fallbackIds);
+// ✅ Only allow active/published products
+const enrichedFallback = (Array.isArray(enrichedFallbackAll) ? enrichedFallbackAll : [])
+  .filter((p) => p && p.isActive === true);
 
-      try {
-        console.warn("[Refina][recommend] timings", {
-          storeId,
-          tookMs,
-          ...timings,
-          llmMs,
-          candidateCount: finalists.length,
-          cacheHit: false,
-          source: "gemini-fallback",
-        });
-      } catch (_) {}
+// Keep ids aligned with returned products
+const safeFallbackIds = enrichedFallback.map((p) => String(p.id));
 
-      return res.json({
-        productIds: fallbackIds,
-        products,
-        explanation: guard?.message || "Here are the strongest matches from the catalogue while the assistant warms up.",
-        followUps: [],
-        awesome: null,
-        source: "gemini-fallback",
-        tookMs,
-        limitMessage: guard?.message || null,
-        __debug: {
-          raced,
-          llmMs,
-          budgetMs: LLM_BUDGET_MS,
-          candidateCount: finalists.length,
-          validator: "fail",
-          rawHead,
-          attempts,
-          timings,
-          cacheKey: ck,
-          cacheEpoch,
-          promptChars,
-          capsuleCount: capsulesStage1?.length ?? 0,
-          capsuleChars: capsuleCharCount(capsulesStage1),
-        },
-      });
+const products = enrichedFallback.map((p) => {
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  const description = p.description || p.body_html || "";
+  return {
+    id: p.id, title, price, ...(price_formatted ? { price_formatted } : {}),
+    image, image_url: image, url, description,
+  };
+});
+
+const tookMs = Date.now() - started;
+
+try {
+  console.warn("[Refina][recommend] timings", {
+    storeId,
+    tookMs,
+    ...timings,
+    llmMs,
+    candidateCount: finalists.length,
+    cacheHit: false,
+    source: "gemini-fallback",
+  });
+} catch (_) {}
+
+return res.json({
+  productIds: safeFallbackIds,
+  products,
+  explanation: guard?.message || "Here are the strongest matches from the catalogue while the assistant warms up.",
+  followUps: [],
+  awesome: null,
+  source: "gemini-fallback",
+  tookMs,
+  limitMessage: guard?.message || null,
+  __debug: {
+    raced,
+    llmMs,
+    budgetMs: LLM_BUDGET_MS,
+    candidateCount: finalists.length,
+    validator: "fail",
+    rawHead,
+    attempts,
+    timings,
+    cacheKey: ck,
+    cacheEpoch,
+    promptChars,
+    capsuleCount: capsulesStage1?.length ?? 0,
+    capsuleChars: capsuleCharCount(capsulesStage1),
+  },
+});
     }
 
     const allow = finalistsSet;
@@ -1365,24 +1373,31 @@ try {
 outIds = outIds.filter((id) => allow.has(id));
 if (!outIds.length) outIds = finalists.slice(0, 3).map((p) => String(p.id));
 
-        const tEnrichStart = Date.now();
-    const enrichedDocs = await loadProductsByIds(storeId, outIds);
-    timings.docEnrichMs = Date.now() - tEnrichStart;
+    const tEnrichStart = Date.now();
+const enrichedDocsAll = await loadProductsByIds(storeId, outIds);
+timings.docEnrichMs = Date.now() - tEnrichStart;
 
-    const products = enrichedDocs.map((p) => {
-      const title = p.title || p.name || "";
-      const price = p.price != null ? p.price : undefined;
-      const price_formatted = p.price_formatted || p.priceFormatted || undefined;
-      let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
-      if (!urlCandidate && p.path) urlCandidate = p.path;
-      const url = ensureAbsolute(urlCandidate, storeId);
-      const image = pickPrimaryImage(p, storeId);
-      const description = p.description || p.body_html || "";
-      return {
-        id: p.id, title, price, ...(price_formatted ? { price_formatted } : {}),
-        image, image_url: image, url, description,
-      };
-    });
+// ✅ Only allow active products
+const enrichedDocs = (Array.isArray(enrichedDocsAll) ? enrichedDocsAll : [])
+  .filter((p) => p && p.isActive === true);
+
+// Keep ids aligned with returned products
+outIds = enrichedDocs.map((p) => String(p.id));
+
+const products = enrichedDocs.map((p) => {
+  const title = p.title || p.name || "";
+  const price = p.price != null ? p.price : undefined;
+  const price_formatted = p.price_formatted || p.priceFormatted || undefined;
+  let urlCandidate = p.url || (p.handle ? `/products/${p.handle}` : "");
+  if (!urlCandidate && p.path) urlCandidate = p.path;
+  const url = ensureAbsolute(urlCandidate, storeId);
+  const image = pickPrimaryImage(p, storeId);
+  const description = p.description || p.body_html || "";
+  return {
+    id: p.id, title, price, ...(price_formatted ? { price_formatted } : {}),
+    image, image_url: image, url, description,
+  };
+});
 
     const reasonsById = {};
     if (vr.value?.primary?.id && Array.isArray(vr.value?.primary?.reasons)) {
