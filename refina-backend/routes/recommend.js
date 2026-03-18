@@ -748,7 +748,7 @@ router.get("/admin/ai-ping", async (req, res) => {
     if (need && req.header("x-probe-token") !== need) return res.status(404).end();
     const t0 = Date.now();
     const raw = await callGemini('Return {"ok": true} exactly.', {
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      model: process.env.GEMINI_MODEL || "gemini-3-flash-preview",
       maxOutputTokens: 16,
       responseSchema: PingSchema,
     });
@@ -756,7 +756,7 @@ router.get("/admin/ai-ping", async (req, res) => {
       ok: true,
       tookMs: Date.now() - t0,
       rawHead: typeof raw === "string" ? raw.slice(0, 80) : null,
-      __debug: { model: process.env.GEMINI_MODEL || "gemini-2.5-flash" },
+      __debug: { model: process.env.GEMINI_MODEL || "gemini-3-flash-preview" },
     });
   } catch (e) {
     return res.status(500).json({ ok: false, err: String(e?.message || e) });
@@ -1297,7 +1297,7 @@ try {
       try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
       const t0_llm = Date.now();
       raw = await callGemini(prompt1, {
-        model: process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL_NAME || "gemini-3-flash-preview",
         temperature: 0.3,
         topP: 0.8,
       });

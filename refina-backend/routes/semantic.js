@@ -24,7 +24,7 @@ const PingSchema = {
 router.get("/admin/ai-ping", async (req, res) => {
   const t0 = Date.now();
   try {
-    const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const model = process.env.GEMINI_MODEL || "gemini-3-flash-preview";
     const raw = await callGemini('Return {"ok": true} exactly.', {
       model,
       maxOutputTokens: 16,

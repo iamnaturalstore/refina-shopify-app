@@ -13,7 +13,7 @@ const API_KEY =
   process.env.GOOGLE_API_KEY ||
   "";
 
-const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-2.5-flash").trim();
+const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-3-flash-preview").trim();
 
 const MODEL_FALLBACKS = [
   MODEL_PRIMARY,          // prefer flash for latency
