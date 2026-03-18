@@ -119,6 +119,11 @@ export async function callGeminiStructured({
   // Prepare generationConfig (SDK expects camelCase + supports responseMimeType/Schema)
   const baseConfig = {
     responseMimeType, // <-- JSON contract enforced
+    // NEW for Gemini 3: This replaces the old thinking_budget
+  thinkingConfig: {
+    includeThoughts: false, // Prevents "thought" blocks from breaking your JSON parsing
+    thinkingLevel: "low"    // "low" or "minimal" is best for your 6-10s concierge goal
+  }
   };
   if (Number.isFinite(temperature)) baseConfig.temperature = temperature;
   if (Number.isFinite(topP)) baseConfig.topP = topP;
