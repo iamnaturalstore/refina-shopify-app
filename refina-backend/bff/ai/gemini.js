@@ -117,17 +117,33 @@ export async function callGeminiStructured({
   ).filter(Boolean);
 
   // Prepare generationConfig (SDK expects camelCase + supports responseMimeType/Schema)
+  // 1. Prepare base config
   const baseConfig = {
-    responseMimeType, // <-- JSON contract enforced
-    // NEW for Gemini 3: This replaces the old thinking_budget
-  thinkingConfig: {
-    includeThoughts: false, // Prevents "thought" blocks from breaking your JSON parsing
-    thinkingLevel: "low"    // "low" or "minimal" is best for your 6-10s concierge goal
-  }
+    responseMimeType,
   };
+
+  // 2. Gemini 3 Logic: Only apply thinkingConfig to models that support it
+  // This prevents 400 errors if the code falls back to a 1.5 or 2.5 model
+  const isGemini3 = String(model || "").includes("gemini-3");
+  
+  if (isGemini3) {
+    baseConfig.thinkingConfig = {
+      includeThoughts: false, // Keeps your JSON output clean for parsing
+      thinkingLevel: "low"    // Forces the ~3s "Concierge" speed
+    };
+  }
+
+  // 3. Map standard params
   if (Number.isFinite(temperature)) baseConfig.temperature = temperature;
   if (Number.isFinite(topP)) baseConfig.topP = topP;
-  if (Number.isFinite(maxOutputTokens)) baseConfig.maxOutputTokens = maxOutputTokens;
+  
+  // 4. Smart Max Tokens: Ensure enough room for the "Awesome" schema
+  // Gemini 3 uses a single budget for thoughts + output. 
+  // If set too low (like 1024), the JSON often gets truncated.
+  baseConfig.maxOutputTokens = Number.isFinite(maxOutputTokens) 
+    ? maxOutputTokens 
+    : (isGemini3 ? 4096 : 2048);
+
   if (responseSchema) baseConfig.responseSchema = responseSchema;
 
   const userContents = [{ role: "user", parts: [{ text: String(prompt || "") }] }];

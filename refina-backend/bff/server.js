@@ -736,25 +736,31 @@ app.post("/proxy/refina/v1/recommend", requireAppProxy, rateLimitAppProxy, async
       const genConfig = {
         temperature: plan === "premium" ? 0.7 : 0.5,
         topP: 0.9,
-        maxOutputTokens: 1024
+        maxOutputTokens: 4096
       };
 
       const tLLM = Date.now();
       const modelText = await callGemini(prompt, genConfig).catch(() => null);
       meta.llmMs = Date.now() - tLLM;
       
-      if (modelText) {
-        try {
-          const parsed = extractJson(modelText);
-          if (parsed && typeof parsed === "object") {
-            enriched = coerceToContract(parsed);
-          }
-        } catch {
-          meta.reason = "gemini_invalid_json";
-        }
-      } else {
-        meta.reason = "gemini_error";
+      // Inside your Block 2, right after extractJson:
+if (modelText) {
+  try {
+    const parsed = extractJson(modelText);
+    if (parsed && typeof parsed === "object") {
+      // 2026 Healing: Gemini 3 sometimes puts 'primary' inside 'awesome' 
+      // based on your earlier logs. Let's make sure it's top-level for the UI.
+      if (!parsed.primary && parsed.awesome?.primary) {
+         parsed.primary = parsed.awesome.primary;
+         parsed.alternatives = parsed.awesome.alternatives;
+         parsed.explanation = parsed.awesome.explanation;
       }
+      enriched = coerceToContract(parsed);
+    }
+  } catch {
+    meta.reason = "gemini_invalid_json";
+  }
+}
 
       // 4. Guarded Override Logic
       const requestedIds = Array.isArray(enriched?.productIds) ? enriched.productIds : [];
