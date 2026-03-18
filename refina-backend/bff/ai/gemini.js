@@ -17,8 +17,8 @@ const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME
 
 const MODEL_FALLBACKS = [
   MODEL_PRIMARY,          // prefer flash for latency
-  "gemini-2.5-pro",       // then pro if needed
-  "gemini-2.0-flash",
+  "gemini-2.5-flash", // Better performance/intelligence than 2.0
+  "gemini-1.5-flash", // The ultimate "reliable old truck" fallback,
 ];
 
 // Prefer a dedicated indexer model if provided; otherwise fall back to current primary
