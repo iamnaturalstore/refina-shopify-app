@@ -1785,190 +1785,88 @@ async function loadProductsForScoring(storeId, ids = []) {
       Array.isArray(arr) ? arr.slice(0, max).map((r) => cleanTrim(r, cap)) : [];
 
     // ----------------------------
-    // Plan ladder shaping
-    // ----------------------------
+// Plan ladder shaping
+// ----------------------------
+// All tiers: uniform Hero response.
+// Quality identical across Lite / Growth / Pro / Premium.
+// Volume limits enforced by guard.js only — not here.
 
-    // Premium: full Awesome + richer explanation (lead + bullet proof).
-    if (level === "premium") {
-      const expCap = 900;
+{
+  // Best explanation source: friendlyParagraph is the richest field.
+  // Falls back to payload.explanation, then a safe default.
+  const explanationBase =
+    (typeof payload?.awesome?.explanation?.friendlyParagraph === "string" &&
+    payload.awesome.explanation.friendlyParagraph.trim()
+      ? payload.awesome.explanation.friendlyParagraph.trim()
+      : typeof payload.explanation === "string" && payload.explanation.trim()
+        ? payload.explanation.trim()
+        : "Here are my top picks, chosen from your store for the best fit.");
 
-      const oneLiner =
-        payload?.awesome?.explanation?.oneLiner ||
-        "Here are my top picks from your store.";
+  // Bullet proof block — append if expertBullets exist (from Premium).
+  const bullets = Array.isArray(payload?.awesome?.explanation?.expertBullets)
+    ? payload.awesome.explanation.expertBullets
+    : [];
 
-      const bullets = Array.isArray(payload?.awesome?.explanation?.expertBullets)
-        ? payload.awesome.explanation.expertBullets
-        : [];
+  const bulletBlock = bullets.length
+    ? "Why these picks (quick proof):\n" +
+      bullets
+        .slice(0, 4)
+        .map((b) => `• ${String(b || "").trim()}`)
+        .join("\n")
+    : "";
 
-      const bulletBlock =
-        bullets.length
-          ? "Why these picks (quick proof):\n" +
-            bullets
-              .slice(0, 4)
-              .map((b) => `• ${String(b || "").trim()}`)
-              .join("\n")
-          : "";
+  // Build explanation — do NOT apply firstParagraph, needs room for bullets.
+  let explanation = explanationBase;
+  if (bulletBlock) explanation = `${explanationBase}\n\n${bulletBlock}`;
+  explanation = cleanTrim(explanation, 900);
 
-      let explanation = oneLiner;
-      if (bulletBlock) explanation = `${oneLiner}\n\n${bulletBlock}`;
+  // Awesome object: most generous reasons (Premium settings).
+  const awesome =
+    payload.awesome && typeof payload.awesome === "object"
+      ? {
+          ...payload.awesome,
+          primary: payload.awesome.primary
+            ? {
+                ...payload.awesome.primary,
+                reasons: capReasons(payload.awesome.primary.reasons, 4, 140),
+              }
+            : null,
+          alternatives: Array.isArray(payload.awesome.alternatives)
+            ? payload.awesome.alternatives.map((a) => ({
+                ...a,
+                reasons: capReasons(a?.reasons, 3, 120),
+              }))
+            : [],
+          explanation: payload.awesome.explanation &&
+            typeof payload.awesome.explanation === "object"
+            ? {
+                ...payload.awesome.explanation,
+                expertBullets: bullets
+                  .map((b) => cleanTrim(String(b || ""), 120))
+                  .filter(Boolean)
+                  .slice(0, 4),
+              }
+            : payload.awesome.explanation,
+        }
+      : payload.awesome;
 
-      explanation = cleanTrim(explanation, expCap);
-
-      const awesome =
-        payload.awesome && typeof payload.awesome === "object"
-          ? {
-              ...payload.awesome,
-              primary: payload.awesome.primary
-                ? {
-                    ...payload.awesome.primary,
-                    reasons: capReasons(payload.awesome.primary.reasons, 4, 140),
-                  }
-                : null,
-              alternatives: Array.isArray(payload.awesome.alternatives)
-                ? payload.awesome.alternatives.map((a) => ({
-                    ...a,
-                    reasons: capReasons(a?.reasons, 3, 120),
-                  }))
-                : [],
-            }
-          : payload.awesome;
-
-      return { ...payload, awesome, explanation };
-    }
-
-    // Pro: trimmed Awesome (same structure) but 1 paragraph only.
-    if (level === "pro") {
-      const expCap = 520;
-      let explanation =
-        (typeof payload?.awesome?.explanation?.friendlyParagraph === "string" &&
-        payload.awesome.explanation.friendlyParagraph.trim()
-          ? payload.awesome.explanation.friendlyParagraph.trim()
-          : typeof payload.explanation === "string" && payload.explanation.trim()
-            ? payload.explanation.trim()
-            : "Here are my top picks, chosen from your store for the best fit.");
-
-      explanation = cleanTrim(firstParagraph(explanation), expCap);
-
-      const awesome =
-        payload.awesome && typeof payload.awesome === "object"
-          ? {
-              ...payload.awesome,
-              primary: payload.awesome.primary
-                ? {
-                    ...payload.awesome.primary,
-                    reasons: capReasons(payload.awesome.primary.reasons, 3, 120),
-                  }
-                : null,
-              alternatives: Array.isArray(payload.awesome.alternatives)
-                ? payload.awesome.alternatives.map((a) => ({
-                    ...a,
-                    reasons: capReasons(a?.reasons, 2, 110),
-                  }))
-                : [],
-            }
-          : payload.awesome;
-
-      return { ...payload, awesome, explanation };
-    }
-
-    // Growth: compact mode (short explanation, fewer reasons) — KEEP awesome trimmed.
-    if (level === "growth") {
-      const maxReasonLen = 90;
-
-      let primaryReason = (
-        fromReasonsById ||
-        fromAwesomeReasons ||
-        fromCopy ||
-        "Top match for your concern."
-      ).trim();
-      primaryReason = cleanTrim(primaryReason, maxReasonLen);
-
-      const expCap = 280;
-      let explanation =
-        typeof payload.explanation === "string" && payload.explanation.trim()
-          ? payload.explanation.trim()
-          : "Here are the strongest matches for your concern.";
-      // Growth must stay compact, but NO ellipsis truncation.
-      explanation = firstParagraph(explanation);
-      if (explanation.length > expCap) {
-        explanation = explanation
-          .slice(0, expCap)
-          .trimEnd()
-          .replace(/[,:;]\s*$/, "")
-          .trimEnd();
+  // reasonsById: set explicitly so widget can use per-product reasons.
+  // Derives from awesome if not already present.
+  const reasonsById = primaryId
+    ? {
+        [primaryId]: cleanTrim(
+          fromReasonsById || fromAwesomeReasons || fromCopy ||
+          "Top match for your concern.",
+          140
+        ),
       }
+    : {};
 
-      const reasonsById = primaryId ? { [primaryId]: primaryReason } : {};
+  // copy: respect safeCopy — do NOT set copy.why.
+  // Prevents UI double-rendering (vNext Phase 3 decision).
+  // The widget uses explanation and awesome.reasons directly.
 
-      let awesome =
-        payload.awesome && typeof payload.awesome === "object" ? payload.awesome : null;
-
-      if (awesome && awesome.explanation && typeof awesome.explanation === "object") {
-        const oneLinerRaw =
-          typeof awesome.explanation.oneLiner === "string"
-            ? awesome.explanation.oneLiner
-            : explanation;
-
-        const friendlyRaw =
-          typeof awesome.explanation.friendlyParagraph === "string"
-            ? awesome.explanation.friendlyParagraph
-            : explanation;
-
-        const expertBulletsRaw = Array.isArray(awesome.explanation.expertBullets)
-          ? awesome.explanation.expertBullets
-          : [];
-
-        const expertBullets = expertBulletsRaw
-          .map((b) => cleanTrim(String(b || ""), 120))
-          .filter(Boolean)
-          .slice(0, 2);
-
-        awesome = {
-          ...awesome,
-          explanation: {
-            ...awesome.explanation,
-            oneLiner: cleanTrim(oneLinerRaw, 180),
-            friendlyParagraph: cleanTrim(friendlyRaw, 420),
-            expertBullets,
-          },
-        };
-      }
-
-      const copy = {
-        why:
-          (awesome?.explanation?.oneLiner && String(awesome.explanation.oneLiner)) ||
-          "",
-        rationale: explanation,
-        extras: "",
-      };
-
-      return { ...payload, awesome, explanation, reasonsById, copy };
-    }
-
-    // Lite: narrative-only (minimal), NO bullets, NO awesome.
-if (level === "lite") {
-  // Single short paragraph only.
-  // IMPORTANT: Do NOT use cleanTrim() here — it appends "…" and causes the exact truncation issue.
-  let explanation =
-    typeof payload.explanation === "string" && payload.explanation.trim()
-      ? payload.explanation.trim()
-      : "Here are the best matches for what you asked.";
-
-  // Keep only the first paragraph (no ellipsis, no truncation).
-  explanation = firstParagraph(explanation);
-
-  // Lite must not return any bullet-capable structures.
-  const reasonsById = {};
-
-  // Keep Lite surface predictable for the widget:
-  // copy.rationale only, no bullets.
-  const copy = {
-    why: "",
-    rationale: explanation,
-    extras: "",
-  };
-
-  return { ...payload, awesome: null, explanation, reasonsById, copy };
+  return { ...payload, awesome, explanation, reasonsById };
 }
 
     // Unknown plan: do not reshape.

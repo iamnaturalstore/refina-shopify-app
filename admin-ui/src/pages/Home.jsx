@@ -79,7 +79,6 @@ function StatCard({ label, value, change, changeUp }) {
         flex: 1, minWidth: "160px",
       }}
     >
-      {/* Gradient top accent */}
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "2px", background: GRAD, borderRadius: "12px 12px 0 0" }} />
       <div style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "#94A3B8", marginBottom: "8px" }}>
         {label}
@@ -135,15 +134,15 @@ export default function Home() {
   const navigate = useNavigate();
   const qs       = React.useMemo(getQS, []);
 
-  const [loading,   setLoading]   = React.useState(true);
-  const [err,       setErr]       = React.useState("");
-  const [plan,      setPlan]      = React.useState({ level: "free", status: "unknown" });
-  const [overview,  setOverview]  = React.useState(null);
-  const [logs,      setLogs]      = React.useState([]);
-  const [indexer,   setIndexer]   = React.useState(null);
-  const [reauthHint, setReauth]   = React.useState(false);
-  const [syncBusy, setSyncBusy]   = React.useState(false);
-  const [syncMsg,  setSyncMsg]    = React.useState("");
+  const [loading,    setLoading]   = React.useState(true);
+  const [err,        setErr]       = React.useState("");
+  const [plan,       setPlan]      = React.useState({ level: "free", status: "unknown" });
+  const [overview,   setOverview]  = React.useState(null);
+  const [logs,       setLogs]      = React.useState([]);
+  const [indexer,    setIndexer]   = React.useState(null);
+  const [reauthHint, setReauth]    = React.useState(false);
+  const [syncBusy,   setSyncBusy]  = React.useState(false);
+  const [syncMsg,    setSyncMsg]   = React.useState("");
 
   // ── initial load ────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -182,7 +181,6 @@ export default function Home() {
       }
     })();
 
-    // Re-fetch analytics when a new event is ingested
     const refresh = async () => {
       try {
         const [{ data: ov }, { data: ev }] = await Promise.all([
@@ -198,7 +196,7 @@ export default function Home() {
     return () => { on = false; window.removeEventListener("rf:analytics:ingested", refresh); };
   }, [shop]);
 
-  // ── indexer polling (stops at complete) ─────────────────────────────────
+  // ── indexer polling ──────────────────────────────────────────────────────
   React.useEffect(() => {
     if (!shop) return;
     let timer = null, cancelled = false;
@@ -221,40 +219,47 @@ export default function Home() {
   // ── derived ──────────────────────────────────────────────────────────────
   const level         = normalizeLevel(plan?.level);
   const totals        = overview?.totals || overview || {};
+
+  // interactions: source of truth from analytics
   const interactions  = Number(totals.interactions ?? totals.events ?? totals.queries ?? 0);
   const productClicks = Number(totals.productClicks ?? totals.clicks ?? 0);
   const ctr           = interactions ? ((100 * productClicks) / interactions) : 0;
 
-  const usage   = overview?.usage || {};
-  const used    = Number(usage.used ?? 0);
-  const limit   = Number(usage.limit ?? (level === "lite" ? 500 : level === "growth" ? 2000 : level === "pro" ? 5000 : level === "premium" ? 10000 : 0));
-  const usagePct = pct(used, limit);
+  // usage: prefer usage object if present, fall back to interactions count
+  const usageObj = overview?.usage || {};
+  const used     = Number(usageObj.used ?? interactions ?? 0);
 
-  const indexerPhase    = String(indexer?.phase || "").toLowerCase();
-  const kbDone          = indexerPhase === "complete";
-  const kbActive        = !!indexer && !kbDone && indexerPhase !== "error";
-  const kbTotal         = Number(indexer?.totalProducts || 0);
-  const kbProcessed     = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
-  const kbPct           = kbTotal > 0 ? pct(kbProcessed, kbTotal) : 0;
+  // Tier limits — 0 means unlimited
+  const tierLimits = { lite: 300, growth: 1000, pro: 0, premium: 0, free: 0 };
+  const limit       = Number(usageObj.limit ?? tierLimits[level] ?? 0);
+  const isUnlimited = limit === 0 && level !== "free";
+  const usagePct    = isUnlimited ? 0 : pct(used, limit);
 
-  // ── loading ──────────────────────────────────────────────────────────────
+  const indexerPhase = String(indexer?.phase || "").toLowerCase();
+  const kbDone       = indexerPhase === "complete";
+  const kbActive     = !!indexer && !kbDone && indexerPhase !== "error";
+  const kbTotal      = Number(indexer?.totalProducts || 0);
+  const kbProcessed  = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
+  const kbPct        = kbTotal > 0 ? pct(kbProcessed, kbTotal) : 0;
 
+  // ── sync handler ────────────────────────────────────────────────────────
   const startSync = React.useCallback(async () => {
-  setSyncMsg("");
-  setSyncBusy(true);
-  try {
-    const { data } = await api.post("/api/sync/start", {});
-    if (data?.queued)                    setSyncMsg("Sync started — progress will update below.");
-    else if (data?.reason === "already_running") setSyncMsg("Sync already in progress.");
-    else if (data?.reason === "cooldown")        setSyncMsg(`Cooling down. ${data?.retryAfterSec ? `Try again in ~${data.retryAfterSec}s.` : ""}`);
-    else                                         setSyncMsg("Nothing to sync right now.");
-  } catch (e) {
-    setSyncMsg(e?.message || "Sync failed.");
-  } finally {
-    setSyncBusy(false);
-  }
-}, []);
+    setSyncMsg("");
+    setSyncBusy(true);
+    try {
+      const { data } = await api.post("/api/sync/start", {});
+      if (data?.queued)                             setSyncMsg("Sync started — progress will update below.");
+      else if (data?.reason === "already_running")  setSyncMsg("Sync already in progress.");
+      else if (data?.reason === "cooldown")         setSyncMsg(`Cooling down. ${data?.retryAfterSec ? `Try again in ~${data.retryAfterSec}s.` : ""}`);
+      else                                          setSyncMsg("Nothing to sync right now.");
+    } catch (e) {
+      setSyncMsg(e?.message || "Sync failed.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }, []);
 
+  // ── loading state ────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -299,7 +304,7 @@ export default function Home() {
               title="Choose a plan to unlock AI recommendations"
               action={{ content: "View plans", onAction: () => navigate(`/billing${qs}`) }}
             >
-              <p>Refina's AI answers, analytics, and styling controls require an active plan. Free trial available on all plans.</p>
+              <p>Refina's AI answers, analytics, and styling controls require an active plan. 30-day free trial on all plans.</p>
             </Banner>
           </div>
         )}
@@ -358,26 +363,35 @@ export default function Home() {
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#64748B", marginBottom: "8px" }}>
                   <span>Used this month</span>
-                  <span style={{ fontWeight: "600", color: "#0F1829" }}>{fmt(used)} / {fmt(limit)}</span>
+                  <span style={{ fontWeight: "600", color: "#0F1829" }}>
+                    {isUnlimited ? `${fmt(used)} / ∞` : `${fmt(used)} / ${fmt(limit)}`}
+                  </span>
                 </div>
-                <div style={{ marginBottom: "8px" }}>
-                  <ProgressBar value={usagePct} tone={usagePct >= 90 ? "critical" : usagePct >= 75 ? "warning" : null} />
-                </div>
+                {!isUnlimited && (
+                  <div style={{ marginBottom: "8px" }}>
+                    <ProgressBar value={usagePct} tone={usagePct >= 90 ? "critical" : usagePct >= 75 ? "warning" : null} />
+                  </div>
+                )}
                 <div style={{ fontSize: "12px", color: "#94A3B8" }}>
-                  {fmt(limit - used)} remaining this month
+                  {isUnlimited
+                    ? "Unlimited interactions this month"
+                    : `${fmt(Math.max(0, limit - used))} remaining this month`
+                  }
                 </div>
-                {usagePct >= 75 && (
+                {!isUnlimited && usagePct >= 75 && (
                   <div style={{ marginTop: "10px" }}>
                     <button
                       onClick={() => navigate(`/billing${qs}`)}
-                      style={{ padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600", background: GRAD, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+                      style={{
+                        padding: "6px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: "600",
+                        background: GRAD, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit",
+                      }}
                     >
                       Upgrade plan
                     </button>
                   </div>
                 )}
 
-                {/* Divider */}
                 <div style={{ height: "1px", background: "#E4E7EE", margin: "14px 0" }} />
 
                 {/* KB status */}
@@ -413,29 +427,29 @@ export default function Home() {
             )}
 
             <div style={{ height: "1px", background: "#E4E7EE", margin: "14px 0" }} />
-<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product sync</span>
-  <button
-    onClick={startSync}
-    disabled={syncBusy || kbActive}
-    style={{
-      padding: "6px 12px", borderRadius: "8px",
-      fontSize: "12px", fontWeight: "600",
-      background: syncBusy || kbActive ? "#F2F4F7" : GRAD,
-      color: syncBusy || kbActive ? "#94A3B8" : "white",
-      border: "none", cursor: syncBusy || kbActive ? "not-allowed" : "pointer",
-      fontFamily: "inherit",
-      boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
-    }}
-  >
-    {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
-  </button>
-</div>
-{syncMsg && (
-  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "6px" }}>
-    {syncMsg}
-  </div>
-)}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product sync</span>
+              <button
+                onClick={startSync}
+                disabled={syncBusy || kbActive}
+                style={{
+                  padding: "6px 12px", borderRadius: "8px",
+                  fontSize: "12px", fontWeight: "600",
+                  background: syncBusy || kbActive ? "#F2F4F7" : GRAD,
+                  color: syncBusy || kbActive ? "#94A3B8" : "white",
+                  border: "none", cursor: syncBusy || kbActive ? "not-allowed" : "pointer",
+                  fontFamily: "inherit",
+                  boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
+                }}
+              >
+                {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
+              </button>
+            </div>
+            {syncMsg && (
+              <div style={{ fontSize: "12px", color: "#64748B", marginTop: "6px" }}>
+                {syncMsg}
+              </div>
+            )}
           </Panel>
 
           {/* Recent activity */}
@@ -447,17 +461,14 @@ export default function Home() {
             {logs.length > 0 ? (
               <div>
                 {logs.map((row, i) => {
-                  const query       = row?.concern || row?.query || "Customer asked…";
-                  const product     = row?.topProduct?.title || "";
-                  const when        = row?.createdAt || row?.ts || "";
-                  const isLast      = i === logs.length - 1;
+                  const query   = row?.concern || row?.query || "Customer asked…";
+                  const product = row?.topProduct?.title || "";
+                  const when    = row?.createdAt || row?.ts || "";
+                  const isLast  = i === logs.length - 1;
                   return (
                     <div
                       key={i}
-                      style={{
-                        padding: "9px 0",
-                        borderBottom: isLast ? "none" : "1px solid #F2F4F7",
-                      }}
+                      style={{ padding: "9px 0", borderBottom: isLast ? "none" : "1px solid #F2F4F7" }}
                     >
                       <div style={{ fontSize: "13px", fontWeight: "500", color: "#0F1829", marginBottom: "3px" }}>
                         {query}
@@ -499,10 +510,13 @@ export default function Home() {
             <div style={{ fontSize: "13px", color: "#64748B" }}>
               {level === "free"
                 ? "Choose a plan to unlock AI recommendations and analytics."
-                : level === "lite"    ? "Up to 500 AI queries/mo · Core AI answers · Basic analytics"
-                : level === "growth"  ? "Up to 2,000 AI queries/mo · Core AI answers + explanations · Storefront launcher"
-                : level === "pro"     ? "Up to 5,000 AI queries/mo · Richer AI answers · Unlimited products"
-                : "Up to 10,000 AI queries/mo · Advanced AI · Full styling · Priority support"}
+                : level === "lite"
+                  ? "Up to 300 shopper interactions/mo · Full AI recommendations · Core analytics"
+                  : level === "growth"
+                    ? "Up to 1,000 shopper interactions/mo · Full AI recommendations · Conversation logs"
+                    : level === "pro"
+                      ? "Unlimited shopper interactions · Full AI recommendations · Deep analytics"
+                      : "Unlimited shopper interactions · Full AI recommendations · Priority support"}
             </div>
           </div>
           <button
@@ -516,7 +530,11 @@ export default function Home() {
               boxShadow: level === "free" ? "0 2px 6px rgba(107,143,255,0.25)" : "none",
             }}
           >
-            {level === "free" ? "Choose a plan →" : level === "premium" ? "Manage billing" : "Upgrade plan"}
+            {level === "free"
+              ? "Choose a plan →"
+              : (level === "pro" || level === "premium")
+                ? "Manage billing"
+                : "Upgrade plan"}
           </button>
         </div>
 

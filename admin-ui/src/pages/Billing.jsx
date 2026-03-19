@@ -160,8 +160,8 @@ const [catalogSize, setCatalogSize] = useState(null);     // number | null
 const [catalogLoading, setCatalogLoading] = useState(false);
 const [catalogError, setCatalogError] = useState("");
 
-const LITE_CAP = 500;
-const GROWTH_CAP = 3000;
+const LITE_CAP = Infinity;
+const GROWTH_CAP = Infinity;
 
 // On mount, fetch catalog size from indexer status (same endpoint used in Setup.jsx)
 useEffect(() => {

@@ -594,7 +594,7 @@ router.post("/subscribe", async (req, res) => {
 
     const raw = String((req.body?.plan ?? req.query?.plan ?? "")).toLowerCase().trim();
     const normalized = raw.replace(/%2b/gi, "+").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-    const target = ["lite","growth","pro","premium"].includes(normalized) ? normalized : "premium";
+    const target = ["lite","growth","pro","premium"].includes(normalized) ? normalized : "pro";
 
     const existing = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(existing);
@@ -628,7 +628,7 @@ router.post("/subscribe", async (req, res) => {
   : target === "pro"
     ? {
         name: process.env.SHOPIFY_BILLING_PRO_NAME || "Pro",
-        amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "39.00"),
+        amount: String(process.env.SHOPIFY_BILLING_PRO_PRICE || "49.00"),
       }
     : {
         name: process.env.SHOPIFY_BILLING_PREMIUM_NAME || "Premium",
@@ -701,9 +701,9 @@ router.post("/upgrade", async (req, res) => {
 
     const subs = await readActiveSubscriptions(client);
     const { level: currentLevel, activeId: currentSubId } = inferPlanFromSubs(subs);
-    if (currentLevel === "premium") {
-      return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
-    }
+    if (currentLevel === "pro" || currentLevel === "premium") {
+  return res.status(409).json({ error: "ALREADY_ACTIVE", level: currentLevel });
+}
 
     const currency = await fetchShopCurrency(client);
 
