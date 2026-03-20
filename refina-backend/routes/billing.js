@@ -29,7 +29,8 @@ function normalizePlan(data) {
   const level = String(data.level || "").toLowerCase();
   const status = String(data.status || "NONE").toUpperCase();
   const billingInterval = (data.billingInterval || data.interval || "").toLowerCase();
-  return { level, status, billingInterval };
+  const usage = data.usage || {};
+  return { level, status, billingInterval, usage };
 }
 
 
