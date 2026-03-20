@@ -1290,6 +1290,9 @@ try {
   debugCapsuleChars = capsuleCharCount(capsulesStage1);
 } catch {}
 
+console.log("[usage] about to increment for:", storeId);
+try { await incrementOnInvoke(storeId, { count: 1 }); } catch (_) {}
+console.log("[usage] increment done");
 
     // Single call (gemini.js handles JSON mode/retries)
     let raw = null, rawHead = null, vr = { ok: false };
