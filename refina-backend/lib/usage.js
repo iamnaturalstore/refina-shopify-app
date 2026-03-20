@@ -5,8 +5,6 @@ import { Timestamp } from "firebase-admin/firestore";
 export async function incrementOnInvoke(storeId, { count = 1 } = {}) {
   if (!storeId) return;
 
-  console.log("[usage] CALLED for:", storeId);
-
   const planRef   = db.collection("plans").doc(storeId);
   const minuteRef = db.collection("aiUsageMinute").doc(storeId);
   const now       = Timestamp.now().toDate();
@@ -14,7 +12,6 @@ export async function incrementOnInvoke(storeId, { count = 1 } = {}) {
 
   try {
     await db.runTransaction(async (tx) => {
-  console.log("[usage] TRANSACTION STARTED");
 
   // ── ALL READS FIRST ──
   const planSnap = await tx.get(planRef);
@@ -54,8 +51,6 @@ export async function incrementOnInvoke(storeId, { count = 1 } = {}) {
     ts:    FieldValue.serverTimestamp(),
   }, { merge: true });
 });
-
-    console.log("[usage] TRANSACTION SUCCEEDED");
 
   } catch (e) {
     console.error("[usage] TRANSACTION FAILED:", e?.code, e?.message, String(e));
