@@ -14,43 +14,46 @@ export async function incrementOnInvoke(storeId, { count = 1 } = {}) {
 
   try {
     await db.runTransaction(async (tx) => {
-      console.log("[usage] TRANSACTION STARTED");
+  console.log("[usage] TRANSACTION STARTED");
 
-      const planSnap = await tx.get(planRef);
-      const plan     = planSnap.exists ? planSnap.data() : {};
-      const usage    = plan?.usage || {};
-      const current  = Number(usage.requestsThisPeriod || 0);
+  // ── ALL READS FIRST ──
+  const planSnap = await tx.get(planRef);
+  const minSnap  = await tx.get(minuteRef);
 
-      const periodStartTs  = usage.periodStart || null;
-      const periodStartMs  = periodStartTs?.toMillis ? periodStartTs.toMillis() : null;
-      const curStart       = monthStart(now);
-      const curStartMs     = curStart.getTime();
-      const monthChanged   = !periodStartMs || !sameMonth(periodStartMs, curStartMs);
-      const nextRequests   = monthChanged ? count : current + count;
+  // ── COMPUTE ──
+  const plan    = planSnap.exists ? planSnap.data() : {};
+  const usage   = plan?.usage || {};
+  const current = Number(usage.requestsThisPeriod || 0);
 
-      tx.set(planRef, {
-        usage: {
-          periodStart:          monthChanged
-                                  ? Timestamp.fromDate(curStart)
-                                  : periodStartTs || Timestamp.fromDate(curStart),
-          requestsThisPeriod:   nextRequests,
-        },
-        updatedAt: FieldValue.serverTimestamp(),
-        _source:   "bff:usage-increment",
-      }, { merge: true });
+  const periodStartTs  = usage.periodStart || null;
+  const periodStartMs  = periodStartTs?.toMillis ? periodStartTs.toMillis() : null;
+  const curStart       = monthStart(now);
+  const monthChanged   = !periodStartMs || !sameMonth(periodStartMs, curStart.getTime());
+  const nextRequests   = monthChanged ? count : current + count;
 
-      const minSnap          = await tx.get(minuteRef);
-      const curKey           = minSnap.exists ? (minSnap.data()?.key || "") : "";
-      const curCount         = minSnap.exists ? Number(minSnap.data()?.count || 0) : 0;
-      const withinSameMinute = curKey === minuteKey;
-      const nextMinuteCount  = withinSameMinute ? curCount + count : count;
+  const curKey           = minSnap.exists ? (minSnap.data()?.key || "") : "";
+  const curCount         = minSnap.exists ? Number(minSnap.data()?.count || 0) : 0;
+  const withinSameMinute = curKey === minuteKey;
+  const nextMinuteCount  = withinSameMinute ? curCount + count : count;
 
-      tx.set(minuteRef, {
-        key:   minuteKey,
-        count: nextMinuteCount,
-        ts:    FieldValue.serverTimestamp(),
-      }, { merge: true });
-    });
+  // ── ALL WRITES AFTER ──
+  tx.set(planRef, {
+    usage: {
+      periodStart:         monthChanged
+                             ? Timestamp.fromDate(curStart)
+                             : periodStartTs || Timestamp.fromDate(curStart),
+      requestsThisPeriod:  nextRequests,
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+    _source:   "bff:usage-increment",
+  }, { merge: true });
+
+  tx.set(minuteRef, {
+    key:   minuteKey,
+    count: nextMinuteCount,
+    ts:    FieldValue.serverTimestamp(),
+  }, { merge: true });
+});
 
     console.log("[usage] TRANSACTION SUCCEEDED");
 
