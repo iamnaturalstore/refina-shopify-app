@@ -3,7 +3,7 @@
 // - Monthly counter lives on plans/{storeId}.usage.requestsThisPeriod
 // - Per-minute counter lives on aiUsageMinute/{storeId} (runtime doc)
 
-import { dbAdmin as db, FieldValue } from "./firestore.js";
+import { dbAdmin as db, FieldValue } from "../bff/lib/firestore.js";
 import { Timestamp } from "firebase-admin/firestore";
 
 
