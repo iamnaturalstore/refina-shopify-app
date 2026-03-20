@@ -229,11 +229,6 @@ export default function Home() {
 
   // usage: prefer usage object if present, fall back to interactions count
   const usageObj = overview?.usage || {};
-  const used = Number(
-  rawPlan?.usage?.requestsThisPeriod ??
-  usageDoc.used ??
-  0
-);
 
   // Tier limits — 0 means unlimited
   const tierLimits = { lite: 300, growth: 1000, pro: 0, premium: 0, free: 0 };
