@@ -233,6 +233,7 @@ export default function Home() {
   // Tier limits — 0 means unlimited
   const tierLimits = { lite: 300, growth: 1000, pro: 0, premium: 0, free: 0 };
   const limit       = Number(usageObj.limit ?? tierLimits[level] ?? 0);
+  const used        = Number(rawPlan?.usage?.requestsThisPeriod ?? 0);
   const isUnlimited = limit === 0 && level !== "free";
   const usagePct    = isUnlimited ? 0 : pct(used, limit);
 
