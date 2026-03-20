@@ -208,8 +208,8 @@ OUTPUT REQUIREMENTS:
 - Ensure productIds is ordered: [primary, alt1, alt2].
 - Keep ALL text fields concise and grounded in candidate fields.
 - oneLiner is REQUIRED (1 sentence).
-- friendlyParagraph is OPTIONAL. If included, it MUST be a single short paragraph (max ~3 sentences). No blank line.
-- expertBullets are OPTIONAL. If included, provide 0–2 bullets, each max ~10 words.
+- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge explaining WHY certain ingredients, compounds, or product types address this concern — do not name specific products. Paragraph 2: start with the Top Pick product name and explain why it is #1 (grounded in candidate fields), then one sentence each for alt1 and alt2 (when/why to choose them).
+- expertBullets are OPTIONAL. If included, provide 2–3 short evidence chips, each grounded in candidate fields, each max ~12 words. Must be distinct from friendlyParagraph content.
 
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
@@ -228,7 +228,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   ],
   "explanation": {
   "oneLiner": "One sentence summary tailored to the concern (required).",
-  "friendlyParagraph": "Optional. If present: one short paragraph (max ~3 sentences) summarising why the Top Pick is #1 and when to pick each alternative.",
+  "friendlyParagraph": "REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge about WHY certain ingredients or product types address this concern — no product names here. Paragraph 2: Top Pick product name + why it is #1 (grounded in candidate fields) + one sentence each for alt1 and alt2.",
   "expertBullets": ["Optional short evidence chip (max 2)"]
 },
   "copy": { "why": "", "rationale": "", "extras": "" }
