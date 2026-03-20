@@ -201,8 +201,8 @@ function buildCopyFromAwesome(awesome, fallbackExplanation = "") {
   const friendly = awesome.explanation?.friendlyParagraph || "";
 
   const expertBullets = Array.isArray(awesome.explanation?.expertBullets)
-    ? awesome.explanation.expertBullets.join(" ")
-    : "";
+  ? awesome.explanation.expertBullets.map(b => `• ${String(b).trim()}`).join("\n")
+  : "";
 
   const why = friendly || oneLiner || "";
   const rationale = awesome.copy?.rationale || expertBullets || "";

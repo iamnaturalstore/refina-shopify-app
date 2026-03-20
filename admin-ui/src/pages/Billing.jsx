@@ -32,44 +32,48 @@ const PLAN_DETAILS = {
   lite: {
     label: "Lite",
     priceMonthly: "$9/mo",
-    priceAnnualNote: "", // No annual at launch
-    tooltip: "Lite — Core AI on a lean setup • 1 placement • up to 500 products",
-    ribbon: "Starter",
+    priceAnnualNote: "",
+    tooltip: "Refina guides your shoppers. You see the add-to-carts.",
+    ribbon: "Great Value",
     features: [
-      "For smaller stores getting started",
-      "Core AI answers (lean)",
-      "Basic analytics",
-      "Up to 500 AI queries/month",
+      "Full AI recommendations with clear reasons why",
+      "Basic analytics dashboard",
+      "30-day free trial — with full app features",
+      "300 shopper questions/month (repeat questions not counted)",
+      "Perfect for stores with up to ~15,000 monthly sessions",
     ],
   },
 
     growth: {
     label: "Growth",
     priceMonthly: "$19/mo",
-    priceAnnualNote: "", // No annual at launch
-    tooltip: "Growth — Core AI + more runway • up to 3,000 products",
+    priceAnnualNote: "",
+    tooltip: "See exactly what your shoppers are asking for.",
     ribbon: "Most popular",
     features: [
-      "For growing catalogs and steady traffic",
-      "Core AI answers + explanations",
-      "Storefront launcher + PDP + modal",
-      "Up to 2,000 AI queries/month",
+      "Full AI recommendations with clear reasons why",
+      "Advanced analytics — see every question your shoppers ask",
+      "30-day free trial — full app features",
+      "Up to 1,000 shopper questions/month (repeat questions not counted)",
+      "Designed for stores with up to ~60,000 monthly sessions",
     ],
   },
 
   pro: {
     label: "Pro",
-    priceMonthly: "$39/mo",
-    priceAnnualNote: "", // Pro annual not offered at launch
-    tooltip: "Pro — Richer answers • more placements • deeper analytics",
-    ribbon: "Great for growing stores",
+    priceMonthly: "$49/mo",
+    priceAnnualNote: "",
+    tooltip: "Refina runs all day. No limits.",
+    ribbon: "High traffic stores",
     features: [
-      "For scaling stores needing more capacity",
-      "Richer AI answers + explanations",
-      "Unlimited products",
-      "Up to 5,000 AI queries/month",
+      "Unlimited shopper questions",
+      "Full AI recommendations with clear reasons why",
+      "Advanced analytics + conversation history",
+      "30-day free trial — full app features",
+      "For stores with over ~60,000 monthly sessions",
     ],
   },
+
   premium: {
     label: "Premium",
     priceMonthly: "$79/mo",
@@ -445,14 +449,14 @@ const premiumMeta = PLAN_DETAILS.premium;
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
           <InlineStack gap="200" blockAlign="center">
-            <Text as="h3" variant="headingLg">{meta.label}</Text>
+            <Tooltip content={meta.tooltip}>
+              <Text as="h3" variant="headingLg">{meta.label}</Text>
+            </Tooltip>
             {isCurrent && <Badge tone="success">Current</Badge>}
             {!isCurrent && meta.ribbon && <Badge tone="attention">{meta.ribbon}</Badge>}
           </InlineStack>
           <BlockStack gap="050" align="end">
-            <Tooltip content={meta.tooltip}>
-              <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
-            </Tooltip>
+            <Text as="span" variant="headingLg">{meta.priceMonthly}</Text>
             {meta.priceAnnualNote && allowAnnual && (
               <Text as="span" tone="subdued" variant="bodySm">
                 {meta.priceAnnualNote}
@@ -576,6 +580,21 @@ const premiumMeta = PLAN_DETAILS.premium;
   </Text>
 )}
 
+<Box
+            background="bg-surface-secondary"
+            borderRadius="200"
+            padding="400"
+          >
+            <BlockStack gap="100">
+              <Text as="p" variant="bodyMd" fontWeight="semibold">
+                All plans start with a 30-day free trial — full features, no limits.
+              </Text>
+              <Text as="p" tone="subdued">
+                Your selected plan kicks in after 30 days. Upgrade, downgrade or cancel anytime.
+              </Text>
+            </BlockStack>
+          </Box>
+
           <InlineStack gap="400" wrap>
   {/* Lite (monthly only) */}
   <Box minWidth="320px" maxWidth="520px" width="100%">
@@ -637,16 +656,6 @@ const premiumMeta = PLAN_DETAILS.premium;
     </Tooltip>
   </Box>
 
-  {/* Premium (monthly + annual) */}
-  <Box minWidth="320px" maxWidth="520px" width="100%">
-    <PlanTile
-      id="premium"
-      meta={PLAN_DETAILS.premium}
-      current={currentLevel}
-      onChoose={subscribe}
-      allowAnnual={true}
-    />
-  </Box>
 </InlineStack>
 
 

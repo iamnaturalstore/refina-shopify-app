@@ -137,6 +137,7 @@ export default function Home() {
   const [loading,    setLoading]   = React.useState(true);
   const [err,        setErr]       = React.useState("");
   const [plan,       setPlan]      = React.useState({ level: "free", status: "unknown" });
+  const [rawPlan,    setRawPlan]   = React.useState(null);
   const [overview,   setOverview]  = React.useState(null);
   const [logs,       setLogs]      = React.useState([]);
   const [indexer,    setIndexer]   = React.useState(null);
@@ -166,6 +167,7 @@ export default function Home() {
 
         const parsed = parsePlan(planData);
         setPlan(parsed);
+        setRawPlan(planData);
         setReauth(Boolean(parsed.reauthorize));
         setOverview(overviewData || {});
 
@@ -227,7 +229,11 @@ export default function Home() {
 
   // usage: prefer usage object if present, fall back to interactions count
   const usageObj = overview?.usage || {};
-  const used     = Number(usageObj.used ?? interactions ?? 0);
+  const used = Number(
+  rawPlan?.usage?.requestsThisPeriod ??
+  usageDoc.used ??
+  0
+);
 
   // Tier limits — 0 means unlimited
   const tierLimits = { lite: 300, growth: 1000, pro: 0, premium: 0, free: 0 };
