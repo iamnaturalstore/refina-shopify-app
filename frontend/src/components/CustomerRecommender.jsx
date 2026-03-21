@@ -333,6 +333,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
             event: "recommendation_received",
             concern: q,
             productIds: products.map((p) => p.id),
+            topProductTitle: products[0]?.name || products[0]?.title || "",
             meta: {
               plan: (window.__REFINA__ && __REFINA__.plan) || "unknown",
               model: (data?.meta?.model || data?.meta?.source) || "",

@@ -83,7 +83,7 @@ function normalizeEvent(e) {
   const tsServerIso = e.tsServerIso || (typeof e.ts === "string" ? e.ts : null) || (typeof e.createdAt === "string" ? e.createdAt : null) || (typeof e.tsServer === "number" ? new Date(e.tsServer).toISOString() : null) || null;
   const type = e.type || e.eventType || "event";
   const concern = e.concern || e.query || e.question || e.note || "";
-  const productTitle = e.topProduct?.title || e.productTitle || (Array.isArray(e.products) ? (e.products[0]?.title || e.products[0]?.name) : "") || "";
+  const productTitle = e.topProduct?.title || e.productTitle || e.topProductTitle || (Array.isArray(e.products) ? (e.products[0]?.title || e.products[0]?.name) : "") || "";
   const planRaw = (e.plan || e.userPlan || e.meta?.plan || "").toString().toLowerCase();
   const plan = /premium|pro\+|pro plus/.test(planRaw) ? "premium" : /pro/.test(planRaw) ? "pro" : /free/.test(planRaw) ? "free" : planRaw || "unknown";
   const productIds = new Set();
