@@ -936,8 +936,25 @@ const cached = await readCache(storeId, ck, cacheEpoch);
 
 if (cached) {
   const shaped = clampCachedPayload(cached, null);
-  // IMPORTANT: don’t tier-transform again here; cached payload should already be tier-shaped
-
+  // Log cache hit to analytics
+  try {
+    const logRef = db.collection("conversations").doc(storeId).collection("logs").doc();
+    await logRef.set({
+      concern: concernNorm,
+      source: "cache",
+      surface: "storefront",
+      event: "recommendation_received",
+      type: "concern",
+      productIds: Array.isArray(shaped.products)
+        ? shaped.products.map(p => String(p.id || p.productId || "")).filter(Boolean)
+        : [],
+      storeId,
+      ts: new Date(),
+    });
+  } catch (e) {
+    console.warn("[recommend] cache hit log failed:", e?.message);
+  }
+  // IMPORTANT: don't tier-transform again here; cached payload should already be tier-shaped
   return res.json({
     ...shaped,
     source: "cache",
