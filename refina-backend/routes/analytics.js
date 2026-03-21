@@ -119,6 +119,7 @@ async function handleLogs(req, res) {
         id,
         concern: data.concern ?? null,
         productIds: Array.isArray(data.productIds) ? data.productIds : null,
+        topProductTitle: data.topProductTitle ?? null,
         plan: data.planLevel ?? null,
         model: (data.model ?? data.meta?.model) ?? null,
         source: data.source ?? null,    // 'gemini' | 'fallback' | 'mapping'

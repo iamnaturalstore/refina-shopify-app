@@ -91,8 +91,6 @@ async function writeLog(shop, data) {
 
 // Shared handler
 async function handleIngest(req, res, surfaceHint) {
-  console.log("[ingest] body keys:", Object.keys(req.body || {}));
-  console.log("[ingest] topProductTitle:", req.body?.topProductTitle);
   res.set("Cache-Control", "no-store");
   res.set("X-RF-Handler", "analytics-ingest-v3");
 
