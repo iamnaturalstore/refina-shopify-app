@@ -442,8 +442,8 @@ setErr(e?.message || "Failed to load analytics data.");
               <Layout.Section variant="oneThird">
                 <Card>
                   <BlockStack gap="200">
-                    <Text as="h2" variant="headingSm" tone="subdued">AI-Powered Sessions</Text>
-                    <p className={styles.metricNumber}>{aiSessions}</p>
+                    <Text as="h2" variant="headingSm" tone="subdued">Quota-Free Queries</Text>
+                    <p className={styles.metricNumber}>{Math.max(0, totals.interactions - (summary?.totals?.aiEvents ?? 0))}</p>
                   </BlockStack>
                 </Card>
               </Layout.Section>
