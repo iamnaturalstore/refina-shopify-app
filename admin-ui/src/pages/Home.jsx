@@ -224,8 +224,12 @@ export default function Home() {
 
   // interactions: source of truth from analytics
   const interactions  = Number(totals.interactions ?? totals.events ?? totals.queries ?? 0);
-  const productClicks = Number(totals.productClicks ?? totals.clicks ?? 0);
-  const ctr           = interactions ? ((100 * productClicks) / interactions) : 0;
+  const surfaceCounts  = totals.surfaceCounts || {};
+  const topSurface     = Object.entries(surfaceCounts).sort((a, b) => b[1] - a[1])[0] || null;
+  const peakHour       = totals.peakHour ?? null;
+  const peakHourLabel  = peakHour !== null
+    ? new Date(Date.UTC(2000, 0, 1, peakHour)).toLocaleTimeString([], { hour: "numeric", hour12: true })
+    : null;
 
   // usage: prefer usage object if present, fall back to interactions count
   const usageObj = overview?.usage || {};

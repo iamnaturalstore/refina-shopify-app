@@ -177,10 +177,24 @@ async function handleOverview(req, res) {
       .slice(0, limit);
 
     const series = groupByDayUTC(entries, (e) => e.ts);
+    const surfaceCounts = {};
+    const hourCounts = {};
+    for (const e of entries) {
+      if (e.surface) surfaceCounts[e.surface] = (surfaceCounts[e.surface] || 0) + 1;
+      if (e.ts) {
+        const hour = e.ts.getUTCHours();
+        hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+      }
+    }
+    const peakHour = Object.keys(hourCounts).length
+      ? Number(Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0][0])
+      : null;
     const totals = {
       events: entries.length,
       aiEvents: entries.filter((e) => e.hadAi).length,
       sessions: new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
+      surfaceCounts,
+      peakHour,
     };
 
     return res.json({

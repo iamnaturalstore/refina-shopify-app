@@ -254,7 +254,10 @@ export default function Welcome() {
         if (!on) return;
         setPlan(resolvedPlan);
         setSettings(sd?.settings || {});
-        setEmbedConfirmed(Boolean(sd?.settings?.themeEmbedConfirmed));
+        setEmbedConfirmed(
+         Boolean(sd?.settings?.themeEmbedConfirmed) ||
+          localStorage.getItem(`refina_embed_confirmed_${shop}`) === "true"
+        );
         setIndexer(id?.indexer || null);
         if (returnedFromBilling) {
           if (isActivePlan(resolvedPlan)) clearChargeId();
@@ -304,16 +307,18 @@ export default function Welcome() {
     }
   }, []);
 
-  const confirmEmbed = React.useCallback(async () => {
+ const confirmEmbed = React.useCallback(async () => {
   try {
     await api.post("/api/admin/store-settings", {
       settings: { themeEmbedConfirmed: true },
     });
-    setEmbedConfirmed(true);
   } catch (e) {
     console.warn("[Welcome] Could not save embed confirmation:", e?.message);
   }
-}, []);
+  // Always persist locally regardless of API success
+  try { localStorage.setItem(`refina_embed_confirmed_${shop}`, "true"); } catch {}
+  setEmbedConfirmed(true);
+}, [shop]);
 
   // ── derived ──────────────────────────────────────────────────────────────
   const hasActivePlan   = React.useMemo(() => isActivePlan(plan), [plan]);

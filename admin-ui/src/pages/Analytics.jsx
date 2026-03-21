@@ -238,6 +238,7 @@ export default function Analytics() {
   const [loading,     setLoading]     = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [err,         setErr]         = React.useState("");
+  const [rawPlan, setRawPlan] = React.useState(null);
   const [aggs,        setAggs]        = React.useState({
     uniqueConcerns: 0,
     uniqueProducts: 0,
@@ -247,18 +248,20 @@ export default function Analytics() {
 
   const refetchAll = React.useCallback(async (initialLimit = 100) => {
     try {
-      const [{ data: sum }, { data: ev }] = await Promise.all([
-        adminApi.getAnalyticsSummary({ days: 30 }),
-        adminApi.getAnalyticsEvents({ limit: initialLimit }),
+const [{ data: sumData }, { data: ev }, { data: planData }] = await Promise.all([
+adminApi.getAnalyticsSummary({ days: 30 }),
+adminApi.getAnalyticsEvents({ limit: initialLimit }),
+api.get("/api/billing/plan").catch(() => ({ data: null })),
       ]);
-      setSummary(normalizeSummary(sum));
-      const items = pickArray(ev).map(normalizeEvent);
-      setEvents(items);
-      const next = ev?.nextCursor ?? ev?.cursor ?? "";
-      setCursor(typeof next === "string" ? next : "");
-      setAggs(buildAggregates(items));
+setSummary(normalizeSummary(sumData));
+setRawPlan(planData);
+const items = pickArray(ev).map(normalizeEvent);
+setEvents(items);
+const next = ev?.nextCursor ?? ev?.cursor ?? "";
+setCursor(typeof next === "string" ? next : "");
+setAggs(buildAggregates(items));
     } catch (e) {
-      setErr(e?.message || "Failed to load analytics data.");
+setErr(e?.message || "Failed to load analytics data.");
     }
   }, []);
 
@@ -280,6 +283,7 @@ export default function Analytics() {
         const parsed = planData?.plan || planData || {};
         const resolvedLevel = normalizeLevel(parsed.level);
         if (on) setLevel(resolvedLevel);
+        if (on) setRawPlan(planData);
 
         // Always fetch summary for interaction count (needed for Lite basic view too)
         await refetchAll(100);
@@ -325,6 +329,9 @@ export default function Analytics() {
 
   const totals           = summary?.totals || { interactions: 0, productClicks: 0 };
   const maxConcernCount  = aggs.topConcerns.length > 0 ? aggs.topConcerns[0].count : 0;
+  const aiSessions = Number(
+  rawPlan?.plan?.usage?.requestsThisPeriod ?? 0
+);
   const recentEventsRows = events.map(e => [
     e.tsServerIso ? new Date(e.tsServerIso).toLocaleString() : "—",
     e.type || "—",
@@ -436,7 +443,7 @@ export default function Analytics() {
                 <Card>
                   <BlockStack gap="200">
                     <Text as="h2" variant="headingSm" tone="subdued">AI-Powered Sessions</Text>
-                    <p className={styles.metricNumber}>{summary?.totals?.aiSessions || 0}</p>
+                    <p className={styles.metricNumber}>{aiSessions}</p>
                   </BlockStack>
                 </Card>
               </Layout.Section>
