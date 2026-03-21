@@ -165,11 +165,7 @@ async function handleOverview(req, res) {
           source: data.source ?? null,
           surface: data.surface ?? null,
           sessionId: data.sessionId ?? null,
-          hadAi: !!(
-            data.concern ||
-            data.model ||
-            (Array.isArray(data.productIds) && data.productIds.length > 0)
-          ),
+          hadAi: data.source !== "cache",
         };
       })
       .filter((e) => e.ts && e.ts >= startOfDayUTC(from) && e.ts <= endOfDayUTC(to))
