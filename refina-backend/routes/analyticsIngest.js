@@ -57,6 +57,8 @@ function sanitizeEventBody(body = {}) {
   if (typeof body.event === "string") out.event = body.event.slice(0, 64);
   if (typeof body.uid === "string") out.uid = body.uid.slice(0, 128);
 
+  if (typeof body.topProductTitle === "string") out.topProductTitle = body.topProductTitle.slice(0, 256);
+
   if (body.meta && typeof body.meta === "object") {
     const sanitizedMeta = {};
     for (const [key, value] of Object.entries(body.meta).slice(0, 20)) {
@@ -89,6 +91,8 @@ async function writeLog(shop, data) {
 
 // Shared handler
 async function handleIngest(req, res, surfaceHint) {
+  console.log("[ingest] body keys:", Object.keys(req.body || {}));
+  console.log("[ingest] topProductTitle:", req.body?.topProductTitle);
   res.set("Cache-Control", "no-store");
   res.set("X-RF-Handler", "analytics-ingest-v3");
 
