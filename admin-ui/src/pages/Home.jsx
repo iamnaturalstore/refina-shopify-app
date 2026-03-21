@@ -327,16 +327,16 @@ export default function Home() {
             changeUp={interactions > 0}
           />
           <StatCard
-            label="Product clicks"
-            value={fmt(productClicks)}
-            change={productClicks > 0 ? "Products clicked from recommendations" : "—"}
-            changeUp={productClicks > 0}
+            label="Top surface"
+            value={topSurface ? topSurface[0] : "—"}
+            change={topSurface ? `${topSurface[1]} queries` : "No data yet"}
+            changeUp={!!topSurface}
           />
           <StatCard
-            label="Click-through rate"
-            value={`${ctr ? ctr.toFixed(1) : "0.0"}%`}
-            change={interactions > 0 ? "Recommendations → clicks" : "—"}
-            changeUp={ctr > 20}
+            label="Peak hour"
+            value={peakHourLabel ?? "—"}
+            change={peakHourLabel ? "Busiest hour (last 30 days)" : "No data yet"}
+            changeUp={!!peakHourLabel}
           />
         </div>
 
