@@ -2,6 +2,7 @@
    - Renders floating button
    - Live storefront: opens in-page modal (iframe)
    - Theme Editor/Admin: opens concierge in a new tab (no cross-origin issues)
+   - Smart Popup: optional "Need a hand?" nudge with configurable delay/frequency
 */
 (() => {
   // === Namespaced + soft guard (immune to proxy bundle's shared flag) ===
@@ -56,7 +57,7 @@
   function handleHashOnceAndClean() {
     if (!hashWantsRefina()) return;
 
-    // Stash hash payload; do NOT clear here (we’ll clear on ACK/close)
+    // Stash hash payload; do NOT clear here (we'll clear on ACK/close)
     try {
       const q = location.hash.replace(/^#refina\??/i, "");
       const params = new URLSearchParams(q);
@@ -75,7 +76,7 @@
     // Signal any initialized instance; only the primary will act
     document.dispatchEvent(new Event("refina:open"));
 
-    // Clean hash so refresh/back doesn’t re-open
+    // Clean hash so refresh/back doesn't re-open
     try { history.replaceState(null, "", location.pathname + location.search); } catch {}
   }
 
@@ -115,8 +116,8 @@
     const side = settings.side === "left" ? "left" : "right";
 
     // Behaviour & positioning
-    const triggerMethod       = (settings.triggerMethod || "launcher").toLowerCase();          // 'launcher' | 'menu'
-    const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase();  // 'horizontal' | 'vertical'
+    const triggerMethod       = (settings.triggerMethod || "launcher").toLowerCase();
+    const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase();
     const bottomOffset = Math.max(0, parseInt(settings.offset      || "24", 10));
     const leftOffset   = Math.max(0, parseInt(settings.leftOffset  || "16", 10));
     const rightOffset  = Math.max(0, parseInt(settings.rightOffset || "16", 10));
@@ -135,9 +136,6 @@
     const primaryColor = settings.primaryColor || "#111827";
     const zIndex = 2147483646;
 
-    // IMPORTANT: Do NOT bail when shopDomain is missing.
-    // Keep rendering and fall back to relative /apps/refina (proxy resolves shop).
-
     // Button-only guards; keep deeplinks working even if button hidden
     const buttonAllowed = !(
       (hideOnProduct && pageType === "product") ||
@@ -153,12 +151,10 @@
         window.__RefinaPrimary = root;
         document.addEventListener("refina:open", () => {
           if (IN_THEME_EDITOR || IN_ADMIN) {
-            // Editor/Admin: open in a new tab (no modal)
-            const url = buildIframeUrl(); // build here (one time) for editor/admin
+            const url = buildIframeUrl();
             try { window.open(url, "_blank", "noopener"); }
             catch { location.href = url; }
           } else {
-            // Storefront: open modal; iframe will call buildIframeUrl() exactly once
             openModalFromDeeplink();
           }
         });
@@ -170,7 +166,6 @@
       if (window.__REFINA_PREFILL_BRIDGE__) return;
       window.__REFINA_PREFILL_BRIDGE__ = true;
 
-      // Iframe can request latest payload (if query params were incomplete)
       document.addEventListener("refina:prefill:request", () => {
         const saved = readRefinaPrefill();
         if (saved) {
@@ -178,7 +173,6 @@
         }
       });
 
-      // Iframe ACKs when it has consumed params/event
       document.addEventListener("refina:prefill:ack", () => {
         clearRefinaPrefill();
       });
@@ -191,7 +185,6 @@
           clearRefinaPrefill();
         }
       } catch {}
-
     });
 
     // One-time styles
@@ -232,7 +225,6 @@
     // Button (if triggerMethod === 'launcher' and allowed)
     let btn = null;
 
-    // Helper inside initOne to avoid leaking globals
     const autosizeVerticalTab = (btnEl) => {
       try {
         const span = btnEl.querySelector("span"); if (!span) return;
@@ -269,16 +261,13 @@
       applyPos();
       window.addEventListener("resize", applyPos, { passive: true });
 
-      // Click: editor/admin → new tab; live storefront → modal
       btn.addEventListener("click", () => {
         if (IN_THEME_EDITOR || IN_ADMIN) {
-          // Build the URL only in editor/admin path (avoid needless errors on storefront)
           try {
             const url = buildIframeUrl();
             try { window.open(url, "_blank", "noopener"); }
             catch { location.href = url; }
           } catch (e) {
-            // Even if URL build fails, fall back to modal so merchants can still test
             openModal();
           }
         } else {
@@ -295,7 +284,6 @@
     let lastFocus = null;
 
     function buildIframeUrl() {
-      // Base URL
       let base;
       try {
         if (shopDomain && typeof shopDomain === "string" && shopDomain.indexOf(".") !== -1) {
@@ -306,15 +294,12 @@
       } catch {
         base = new URL("/apps/refina", location.origin);
       }
-      // Always include explicit shop for the app proxy / BFF resolver
       try {
         if (shopDomain) base.searchParams.set("shop", String(shopDomain));
       } catch {}
 
-      // Canonical payload from session (NON-DESTRUCTIVE read)
       const p = readRefinaPrefill();
       if (p) {
-        // Normalize source to "pdp" if present
         if (p.source && /pdp/i.test(p.source)) p.source = "pdp";
         const fields = [
           "prefill","productId","productTitle","productType",
@@ -330,7 +315,6 @@
         }
       }
 
-      // Liberal pass-through of all theme settings (baseline behavior)
       for (const key in settings) {
         if (!Object.prototype.hasOwnProperty.call(settings, key)) continue;
         const val = settings[key];
@@ -338,7 +322,6 @@
         base.searchParams.set(kebab(key), String(val));
       }
 
-      // Final source attribution (prefer payload, else launcher state)
       base.searchParams.set("source", (p && p.source) || window.__RefinaOpenSource || "launcher");
 
       try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch {}
@@ -377,7 +360,6 @@
 
       setTimeout(() => close.focus(), 0);
 
-      // Simple focus loop
       overlay.addEventListener("keydown", (e) => {
         if (e.key !== "Tab") return;
         const focusables = [close, iframe];
@@ -391,7 +373,6 @@
       if (!overlay) return;
       overlay.remove();
       overlay = null;
-      // Fallback cleanup if iframe never ACKed
       clearRefinaPrefill();
       if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
       else if (btn && typeof btn.focus === "function") btn.focus();
@@ -401,8 +382,6 @@
       window.__RefinaOpenSource = "deeplink";
       openModal();
       window.__RefinaDeeplinkPending = false;
-
-      // Belt-and-braces: clean hash now too
       try { history.replaceState(null, "", location.pathname + location.search); } catch {}
     }
 
@@ -410,11 +389,196 @@
       setTimeout(openModal, 0);
     }
 
-    // Auto-open once if deep-link arrived before init (primary only)
     if (window.__RefinaPrimary === root && window.__RefinaDeeplinkPending && !(IN_THEME_EDITOR || IN_ADMIN)) {
       openModalFromDeeplink();
     }
 
+    // ─────────────────────────────────────
+    // Smart Popup
+    // ─────────────────────────────────────
+    const popupEnabled   = String(settings.popupEnabled).toLowerCase() === "true";
+    const popupDelay     = Math.max(0, parseInt(settings.popupDelay || "5", 10)) * 1000;
+    const popupHeadline  = settings.popupHeadline  || "Need a hand choosing?";
+    const popupSubhead   = settings.popupSubheading || "I can find your perfect match in seconds — just tell me what you're looking for.";
+    const popupYesText   = settings.popupYesText   || "Yes please";
+    const popupNoText    = settings.popupNoText    || "No, I'm good thanks";
+    const popupFooter    = settings.popupFooter    || "I'm here whenever you need me — tap the button at the bottom right, or the helper on any product page.";
+    const popupFrequency = settings.popupFrequency || "session";
+
+    const POPUP_KEY = `refina_popup_dismissed_${shopDomain}`;
+
+    function popupAlreadyDismissed() {
+      try {
+        if (popupFrequency === "always") return false;
+        if (popupFrequency === "session") {
+          return !!sessionStorage.getItem(POPUP_KEY);
+        }
+        if (popupFrequency === "day") {
+          const ts = localStorage.getItem(POPUP_KEY);
+          if (!ts) return false;
+          return Date.now() - Number(ts) < 86400000; // 24h
+        }
+      } catch {}
+      return false;
+    }
+
+    function markPopupDismissed() {
+      try {
+        if (popupFrequency === "session") sessionStorage.setItem(POPUP_KEY, "1");
+        if (popupFrequency === "day") localStorage.setItem(POPUP_KEY, String(Date.now()));
+      } catch {}
+    }
+
+    function showPopup() {
+      if (!popupEnabled) return;
+      if (IN_THEME_EDITOR || IN_ADMIN) return;
+      if (popupAlreadyDismissed()) return;
+      if (overlay) return; // don't show popup if modal is already open
+
+      // Inject popup styles once
+      if (!document.getElementById("refina-popup-style")) {
+        const s = document.createElement("style");
+        s.id = "refina-popup-style";
+        s.textContent = `
+          .rf-popup-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: ${zIndex};
+            display: flex; align-items: center; justify-content: center;
+            padding: 16px;
+            animation: rfPopupFadeIn 0.25s ease;
+          }
+          .rf-popup {
+            background: #fff;
+            border-radius: 20px;
+            padding: 32px 28px 24px;
+            width: min(92vw, 420px);
+            box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+            position: relative;
+            animation: rfPopupSlideUp 0.3s cubic-bezier(0.34,1.56,0.64,1);
+            font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+          }
+          .rf-popup-close {
+            position: absolute; top: 14px; right: 16px;
+            background: none; border: none;
+            font-size: 20px; color: #94a3b8;
+            cursor: pointer; line-height: 1;
+            padding: 4px 8px; border-radius: 6px;
+            transition: color 0.15s, background 0.15s;
+          }
+          .rf-popup-close:hover { color: #334155; background: #f1f5f9; }
+          .rf-popup-icon {
+            width: 48px; height: 48px; border-radius: 14px;
+            background: ${primaryColor};
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 16px;
+            font-size: 22px;
+          }
+          .rf-popup-headline {
+            font-size: 20px; font-weight: 700;
+            color: #0f172a; margin-bottom: 8px;
+            letter-spacing: -0.3px; line-height: 1.3;
+          }
+          .rf-popup-subhead {
+            font-size: 14px; color: #64748b;
+            line-height: 1.6; margin-bottom: 24px;
+          }
+          .rf-popup-actions {
+            display: flex; flex-direction: column; gap: 10px;
+            margin-bottom: 20px;
+          }
+          .rf-popup-yes {
+            padding: 14px 20px;
+            border-radius: 12px; border: none;
+            background: ${primaryColor}; color: #fff;
+            font-size: 15px; font-weight: 600;
+            cursor: pointer; font-family: inherit;
+            transition: opacity 0.15s, transform 0.12s;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+          }
+          .rf-popup-yes:hover  { opacity: 0.9; }
+          .rf-popup-yes:active { transform: translateY(1px); }
+          .rf-popup-no {
+            padding: 12px 20px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc; color: #475569;
+            font-size: 14px; font-weight: 500;
+            cursor: pointer; font-family: inherit;
+            transition: background 0.15s, border-color 0.15s;
+          }
+          .rf-popup-no:hover { background: #f1f5f9; border-color: #cbd5e1; }
+          .rf-popup-divider {
+            height: 1px; background: #f1f5f9; margin-bottom: 16px;
+          }
+          .rf-popup-footer {
+            font-size: 12px; color: #94a3b8;
+            line-height: 1.6; text-align: center;
+          }
+          @keyframes rfPopupFadeIn {
+            from { opacity: 0; } to { opacity: 1; }
+          }
+          @keyframes rfPopupSlideUp {
+            from { opacity: 0; transform: translateY(24px) scale(0.97); }
+            to   { opacity: 1; transform: translateY(0)   scale(1); }
+          }
+          @media (max-width: 640px) {
+            .rf-popup { padding: 28px 20px 20px; }
+            .rf-popup-headline { font-size: 18px; }
+          }
+        `;
+        document.head.appendChild(s);
+      }
+
+      const popupOverlay = document.createElement("div");
+      popupOverlay.className = "rf-popup-overlay";
+
+      const popup = document.createElement("div");
+      popup.className = "rf-popup";
+      popup.setAttribute("role", "dialog");
+      popup.setAttribute("aria-modal", "true");
+      popup.setAttribute("aria-label", popupHeadline);
+
+      function closePopup(andOpen) {
+        markPopupDismissed();
+        popupOverlay.style.opacity = "0";
+        popupOverlay.style.transition = "opacity 0.2s ease";
+        setTimeout(() => {
+          popupOverlay.remove();
+          if (andOpen) {
+            window.__RefinaOpenSource = "popup";
+            openModal();
+          }
+        }, 200);
+      }
+
+      popup.innerHTML = `
+        <button class="rf-popup-close" aria-label="Close">✕</button>
+        <div class="rf-popup-icon">👋</div>
+        <div class="rf-popup-headline">${popupHeadline}</div>
+        <p class="rf-popup-subhead">${popupSubhead}</p>
+        <div class="rf-popup-actions">
+          <button class="rf-popup-yes">${popupYesText}</button>
+          <button class="rf-popup-no">${popupNoText}</button>
+        </div>
+        <div class="rf-popup-divider"></div>
+        <p class="rf-popup-footer">${popupFooter}</p>
+      `;
+
+      popup.querySelector(".rf-popup-close").addEventListener("click", () => closePopup(false));
+      popup.querySelector(".rf-popup-yes").addEventListener("click",   () => closePopup(true));
+      popup.querySelector(".rf-popup-no").addEventListener("click",    () => closePopup(false));
+      popupOverlay.addEventListener("click", (e) => { if (e.target === popupOverlay) closePopup(false); });
+
+      popupOverlay.appendChild(popup);
+      document.body.appendChild(popupOverlay);
+    }
+
+    if (popupEnabled && !IN_THEME_EDITOR && !IN_ADMIN) {
+      setTimeout(showPopup, popupDelay);
+    }
+
+    // ─────────────────────────────────────
     root.dataset.initialized = "true";
   }
 

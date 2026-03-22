@@ -27,7 +27,7 @@ Refina Theme App Embed (Launcher, production)
   {# Text controls #}
   data-launcher-text="{{ block.settings.launcher_text }}"
   data-widget-button-text="{{ block.settings.widget_button_text }}"
-  data-cta-text="{{ block.settings.cta_text }}"           {# legacy single text (fallback) #}
+  data-cta-text="{{ block.settings.cta_text }}"
 
   {# Appearance #}
   data-primary-color="{{ block.settings.primary_color }}"
@@ -46,11 +46,21 @@ Refina Theme App Embed (Launcher, production)
   data-show-badges="{{ block.settings.show_badges }}"
   data-show-prices="{{ block.settings.show_prices }}"
 
-  {# NEW: Behaviour & Positioning (passed to JS) #}
+  {# Behaviour & Positioning #}
   data-trigger-method="{{ block.settings.trigger_method }}"
   data-launcher-orientation="{{ block.settings.launcher_orientation }}"
   data-left-offset="{{ block.settings.left_offset }}"
   data-right-offset="{{ block.settings.right_offset }}"
+
+  {# Smart Popup #}
+  data-popup-enabled="{{ block.settings.popup_enabled }}"
+  data-popup-delay="{{ block.settings.popup_delay }}"
+  data-popup-headline="{{ block.settings.popup_headline }}"
+  data-popup-subheading="{{ block.settings.popup_subheading }}"
+  data-popup-yes-text="{{ block.settings.popup_yes_text }}"
+  data-popup-no-text="{{ block.settings.popup_no_text }}"
+  data-popup-footer="{{ block.settings.popup_footer }}"
+  data-popup-frequency="{{ block.settings.popup_frequency }}"
 
   {# context #}
   data-shop="{{ shop.permanent_domain }}"
@@ -64,12 +74,12 @@ Refina Theme App Embed (Launcher, production)
   "settings": [
     { "type": "header", "content": "Content" },
     { "type": "text", "id": "heading", "label": "Heading", "default": "Find the perfect routine" },
-    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Tell us your concern and we’ll match expert picks." },
+    { "type": "text", "id": "subheading", "label": "Subheading", "default": "Tell us your concern and we'll match expert picks." },
 
     { "type": "text", "id": "launcher_text", "label": "Launcher Button Text", "default": "Help Finding Products" },
     { "type": "text", "id": "widget_button_text", "label": "In-Widget Button Text", "default": "Find My Products" },
 
-    { "type": "paragraph", "content": "If left blank, both will fall back to the legacy “Launcher Button Text” field below." },
+    { "type": "paragraph", "content": "If left blank, both will fall back to the legacy Launcher Button Text field below." },
     { "type": "text", "id": "cta_text", "label": "Legacy: Single Button Text (fallback)", "default": "Ask Refina" },
 
     { "type": "header", "content": "Appearance" },
@@ -89,7 +99,6 @@ Refina Theme App Embed (Launcher, production)
     { "type": "range", "id": "grid_columns", "label": "Product Grid Columns", "min": 2, "max": 4, "step": 1, "default": 3 },
 
     { "type": "header", "content": "Behaviour & Positioning" },
-
     {
       "type": "select",
       "id": "trigger_method",
@@ -100,11 +109,9 @@ Refina Theme App Embed (Launcher, production)
         { "value": "menu", "label": "Menu link (/#refina)" }
       ]
     },
-
     { "type": "select", "id": "side", "label": "Launcher Position", "default": "right", "options": [
         { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" }
     ]},
-
     {
       "type": "select",
       "id": "launcher_orientation",
@@ -115,18 +122,71 @@ Refina Theme App Embed (Launcher, production)
         { "value": "vertical", "label": "Vertical" }
       ]
     },
-
     { "type": "number", "id": "offset", "label": "Bottom Offset (px)", "default": 24 },
     { "type": "number", "id": "left_offset", "label": "Left Offset (px)", "default": 16 },
     { "type": "number", "id": "right_offset", "label": "Right Offset (px)", "default": 16 },
-
     { "type": "checkbox", "id": "show_mobile", "label": "Show on mobile", "default": true },
     { "type": "checkbox", "id": "hide_on_product", "label": "Hide on product pages", "default": false },
     { "type": "checkbox", "id": "hide_on_cart", "label": "Hide on cart page", "default": false },
     { "type": "checkbox", "id": "open_on_load", "label": "Open on page load", "default": false },
     { "type": "checkbox", "id": "show_badges", "label": "Show product badges", "default": true },
-    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true }
+    { "type": "checkbox", "id": "show_prices", "label": "Show product prices", "default": true },
 
+    { "type": "header", "content": "Smart Popup" },
+    {
+      "type": "checkbox",
+      "id": "popup_enabled",
+      "label": "Enable popup",
+      "default": false,
+      "info": "Shows a 'Need a hand?' popup after a delay. Respects your frequency setting once dismissed."
+    },
+    {
+      "type": "number",
+      "id": "popup_delay",
+      "label": "Delay before popup (seconds)",
+      "default": 5
+    },
+    {
+      "type": "text",
+      "id": "popup_headline",
+      "label": "Popup headline",
+      "default": "Need a hand choosing?"
+    },
+    {
+      "type": "text",
+      "id": "popup_subheading",
+      "label": "Popup subheading",
+      "default": "I can find your perfect match in seconds — just tell me what you're looking for."
+    },
+    {
+      "type": "text",
+      "id": "popup_yes_text",
+      "label": "Yes button text",
+      "default": "Yes please"
+    },
+    {
+      "type": "text",
+      "id": "popup_no_text",
+      "label": "No thanks button text",
+      "default": "No, I'm good thanks"
+    },
+    {
+      "type": "text",
+      "id": "popup_footer",
+      "label": "Footer note",
+      "default": "I'm here whenever you need me — tap the button at the bottom right, or the helper on any product page."
+    },
+    {
+      "type": "select",
+      "id": "popup_frequency",
+      "label": "Show frequency",
+      "default": "session",
+      "options": [
+        { "value": "session", "label": "Once per session" },
+        { "value": "day", "label": "Once per day" },
+        { "value": "always", "label": "Every visit" }
+      ]
+    }
   ],
   "enabled_on": { "templates": ["*"] }
 }
