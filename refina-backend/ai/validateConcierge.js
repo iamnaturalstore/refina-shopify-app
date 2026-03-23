@@ -79,9 +79,6 @@ const copy = {
       const firstAlt = alternatives.length ? alternatives[0].id : "";
       primary.id = s(firstAlt);
     }
-    // ── Follow Ups ─────────────────────────────────────────────────────────────
-    const followUps = arr(obj?.followUps).map(s).filter(Boolean).slice(0, 3);
-
     const union = [s(primary.id), ...alternatives.map(a => a.id)].filter(Boolean);
     productIds = Array.from(new Set(union));
   } else {
@@ -92,6 +89,9 @@ const copy = {
 
   // Cap for downstream fetch/UX
   productIds = productIds.slice(0, 3);
+
+  // ── Follow Ups ─────────────────────────────────────────────────────────────
+  const followUps = arr(obj?.followUps).map(s).filter(Boolean).slice(0, 3);
 
   if (!productIds.length) {
     return bad("no productIds derivable from model output", {
