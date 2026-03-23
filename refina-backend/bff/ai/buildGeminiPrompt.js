@@ -228,7 +228,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   ],
   "explanation": {
   "oneLiner": "One sentence summary tailored to the concern (required).",
-  "friendlyParagraph": "REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge about WHY certain ingredients or product types address this concern — no product names here. Paragraph 2: Top Pick product name + why it is #1 (grounded in candidate fields) + one sentence each for alt1 and alt2.",
+  "- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge explaining WHY certain ingredients, compounds, or product types address this concern — do not name specific products. Maximum 50 words. Paragraph 2: start with the Top Pick product name and explain why it is #1 (grounded in candidate fields), then one sentence each for alt1 and alt2 (when/why to choose them). Maximum 80 words.",
   "expertBullets": ["Optional short evidence chip (max 2)"]
 },
   "copy": { "why": "", "rationale": "", "extras": "" }
