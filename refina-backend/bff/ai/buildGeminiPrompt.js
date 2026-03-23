@@ -182,7 +182,9 @@ OUTPUT REQUIREMENTS:
 - Ensure productIds is ordered: [primary, alt1, alt2].
 - Keep ALL text fields concise and grounded in candidate fields.
 - oneLiner is REQUIRED (1 sentence).
-- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: Provide expert insight (2-3 sentences max) explaining the science or botanical benefits — do NOT name specific products. Paragraph 2: Start with the Top Pick [Product Name] in BOLD CAPS; explain in 1 sentence why it is #1, then 1 short sentence for each alternative explaining when to choose them.
+- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. 
+  Paragraph 1 (The Solution): Lead with the Top Pick [Product Name] in BOLD CAPS. In 1-2 sentences, explain why it is the #1 choice for this concern. Follow with 1 short sentence for each alternative explaining the specific scenario they satisfy (e.g., "Choose Alt1 for budget, or Alt2 for travel").
+  Paragraph 2 (The Science): Provide 2-3 sentences of expert insight explaining WHY these types of ingredients or botanical compounds address the biological root of the concern. Do NOT name specific products in this paragraph; keep it focused on the "Expert Why."
 - expertBullets are OPTIONAL. If included, provide 2–3 short evidence chips, each grounded in candidate fields, each max ~12 words. Must be distinct from friendlyParagraph content.
 
 Rank mode: ${rankLabel}
@@ -202,7 +204,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   ],
   "explanation": {
   "oneLiner": "One sentence summary tailored to the concern (required).",
-  "friendlyParagraph": "2 paragraphs: Expert 'Why' insight (no names) + Top Pick explanation and alternatives (with names)."
+  "friendlyParagraph": "2 paragraphs: Top Pick + Alternatives explanation (lead with names), followed by Expert 'Why' science (no names)."
   "expertBullets": ["Optional short evidence chip (max 2)"]
 },
   "copy": { "why": "", "rationale": "", "extras": "" }
