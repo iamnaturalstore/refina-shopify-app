@@ -1479,11 +1479,14 @@ const safeCopy = { why: "", rationale: "", extras: "" };
       productIds: outIds,
       products,
       explanation: explanationText,
-      followUps: [],
+      // 1. FIX: Pull the questions from the AI result
+      followUps: vr.value?.followUps || [], 
       awesome: {
         primary: vr.value.primary,
         alternatives: vr.value.alternatives,
         explanation: vr.value.explanation,
+        // 2. ALSO ADD HERE (for safety/consistency)
+        followUps: vr.value?.followUps || [], 
         copy: safeCopy,
         productIds: outIds,
       },
