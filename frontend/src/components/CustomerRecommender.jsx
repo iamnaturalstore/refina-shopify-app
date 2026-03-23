@@ -233,6 +233,8 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const didAutoStartRef = useRef(false);      // auto-start once guard
   const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
 
+  const [followUps, setFollowUps] = useState([]);
+
   // ===== Staged progress label (diffs only) =====
   const [progressLabel, setProgressLabel] = useState("Thinking…");
   const progressTimers = useRef([]);
@@ -282,6 +284,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
       setCopy({ why: "", rationale: "", extras: "" });
       setReasonsById({});
       setLastQuery(q);
+      setFollowUps([]); // Clear old suggestions
 
       try {
         // --- resolve storeId from ?shop= or #root[data-shop] ---
@@ -310,6 +313,10 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
 
         // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
         const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
+
+        // --- NEW: Capture follow-up questions ---
+        const followUpsData = data?.awesome?.followUps;
+        setFollowUps(Array.isArray(followUpsData) ? followUpsData : []);
 
         setMatchedProducts(products);
         setCopy({
@@ -364,7 +371,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         setProgressLabel("Thinking…"); // <<< diff: reset for next ask
       }
     },
-    [concern]
+    [concern, startProgressCycle, stopProgressCycle, setProgressLabel]
   );
 
   // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff.
@@ -722,6 +729,34 @@ const renderRationale = (text) => {
             })}
           </div>
         </>
+      )}
+
+      {followUps.length > 0 && (
+        <div style={{ marginTop: '2rem', padding: '1rem 0', textAlign: 'center', borderTop: '1px solid #f0f0f0' }}>
+          <p style={{ fontSize: '14px', color: '#666', marginBottom: '1rem' }}>Still have questions?</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+            {followUps.map((text, idx) => (
+              <button
+                key={idx}
+                style={{
+                  background: 'white',
+                  border: '1px solid var(--rf-primary-color, #e91e63)',
+                  color: 'var(--rf-primary-color, #e91e63)',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+                onClick={() => {
+                  setConcern(text);
+                  handleRecommend(text);
+                }}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {selectedProduct && (

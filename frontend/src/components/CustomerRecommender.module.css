@@ -435,3 +435,39 @@
   box-shadow: none;
   cursor: not-allowed;
 }
+
+.followUpWrapper {
+  margin-top: 24px;
+  padding: 16px 0;
+  border-top: 1px solid #eee; /* Light separation from the grid */
+  text-align: center;
+}
+
+.followUpLabel {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 12px;
+}
+
+.followUpContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.followUpChip {
+  background: white;
+  border: 1px solid #e91e63; /* Your brand pink */
+  color: #e91e63;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.followUpChip:hover {
+  background: #fff5f8;
+  transform: translateY(-1px);
+}

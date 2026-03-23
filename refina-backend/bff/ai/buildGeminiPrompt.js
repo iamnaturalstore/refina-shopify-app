@@ -186,6 +186,8 @@ OUTPUT REQUIREMENTS:
   Paragraph 1 (The Solution): Lead with the Top Pick [Product Name] in BOLD CAPS. In 1-2 sentences, explain why it is the #1 choice for this concern. Follow with 1 short sentence for each alternative explaining the specific scenario they satisfy (e.g., "Choose Alt1 for budget, or Alt2 for travel").
   Paragraph 2 (The Science): Provide 2-3 sentences of expert insight explaining WHY these types of ingredients or botanical compounds address the biological root of the concern. Do NOT name specific products in this paragraph; keep it focused on the "Expert Why."
 - expertBullets are OPTIONAL. If included, provide 2–3 short evidence chips, each grounded in candidate fields, each max ~12 words. Must be distinct from friendlyParagraph content.
+- followUps is REQUIRED. Provide an array of exactly 3 short buttons (max 8 words). These should act as "final hurdles" for a shopper, such as: "Is this safe for sensitive skin?", "Is there a white cast?", or "How long does one jar last?".
+- If the user query is a specific question about a feature (e.g., reef-safe, white cast), you MUST answer that question directly in the very first sentence of the friendlyParagraph before providing the standard recommendation.
 
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
@@ -203,10 +205,12 @@ RESPONSE JSON SHAPE (STRICT KEYS):
     { "id": "<altId-2>", "when": "sensitive | budget | premium | lighter texture | family-size | colour/material match", "reasons": ["short, concrete reason"] }
   ],
   "explanation": {
-  "oneLiner": "One sentence summary tailored to the concern (required).",
-  "friendlyParagraph": "2 paragraphs: Top Pick + Alternatives explanation (lead with names), followed by Expert 'Why' science (no names)."
-  "expertBullets": ["Optional short evidence chip (max 2)"]
-},
+    "oneLiner": "One sentence summary tailored to the concern (required).",
+    "friendlyParagraph": "REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: Start with Top Pick [Product Name] in BOLD CAPS; explain why it is #1, then 1 sentence each for alt1 and alt2. Paragraph 2: Expert knowledge explaining WHY certain ingredients or product types address this concern (no product names here). If the user asked a specific question (e.g. reef-safe), answer it in the very first sentence of Para 1.",
+    "expertBullets": ["Optional short evidence chip (max 2, grounded in candidate fields)"]
+  },
+  "followUps": ["Exactly 3 short 'final hurdle' questions for the shopper (max 8 words each)"],
+  "productIds": ["<id-primary>", "<id-alt1>", "<id-alt2>"],
   "copy": { "why": "", "rationale": "", "extras": "" }
 }
 `.trim();

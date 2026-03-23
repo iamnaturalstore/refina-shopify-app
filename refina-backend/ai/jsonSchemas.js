@@ -98,6 +98,10 @@ export const ConciergeResponseSchema = {
         expertBullets: { type: "ARRAY", items: { type: "STRING" } },
       },
     },
+    followUps: { 
+      type: "ARRAY", 
+      items: { type: "STRING" } 
+    },
     productIds: { type: "ARRAY", items: { type: "STRING" } },
     copy: {
       type: "OBJECT",
@@ -108,5 +112,5 @@ export const ConciergeResponseSchema = {
       },
     },
   },
-  required: ["primary", "productIds"],
+  required: ["primary", "productIds", "followUps"],
 };
