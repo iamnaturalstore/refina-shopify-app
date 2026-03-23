@@ -189,6 +189,12 @@ OUTPUT REQUIREMENTS:
 - followUps is REQUIRED. Provide an array of exactly 3 short buttons (max 8 words). These should act as "final hurdles" for a shopper, such as: "Is this safe for sensitive skin?", "Is there a white cast?", or "How long does one jar last?".
 - If the user query is a specific question about a feature (e.g., reef-safe, white cast), you MUST answer that question directly in the very first sentence of the friendlyParagraph before providing the standard recommendation.
 
+CRITICAL INSTRUCTION: 
+- You MUST provide exactly 3 follow-up questions in the "followUps" array. 
+- These are MANDATORY for every response. 
+- Do not leave this array empty. 
+- Focus on user hesitation: "Safe for pregnancy?", "Is it for sensitive skin?", "How do I apply this?"
+
 Rank mode: ${rankLabel}
 Routine mode: ${routineMode ? "yes (AM/PM guidance expected where relevant)" : "no (single-pick acceptable)"}
 
