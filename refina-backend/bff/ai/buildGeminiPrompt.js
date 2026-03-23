@@ -58,52 +58,26 @@ function computeTinyFacts(p, constraints = {}, concernTokens = []) {
 }
 
 function productToCompact(p, constraints = {}, concernTokens = []) {
-  const name = p.title || p.name || "";
-  const productTypeNormalized =
-    p.productType_norm || p.productTypeNormalized || p.productType || "";
-  const usageStep = p.usageStep || p.step || "";
-  const benefits =
-    (Array.isArray(p.benefitsNormalized) && p.benefitsNormalized) ||
-    (Array.isArray(p.benefits) && p.benefits) ||
-    [];
-  const concerns =
-    (Array.isArray(p.concernsNormalized) && p.concernsNormalized) ||
-    (Array.isArray(p.concerns) && p.concerns) ||
-    [];
-  const audience = p.audience || {};
-
-  const ingNorm =
-    (Array.isArray(p.ingredientsNormalized) && p.ingredientsNormalized) ||
-    (Array.isArray(p.ingredients_norm) && p.ingredients_norm) ||
-    null;
-
-  const kwNorm =
-    (Array.isArray(p.keywordsNormalized) && p.keywordsNormalized) ||
-    (Array.isArray(p.keywords_norm) && p.keywords_norm) ||
-    null;
-
   const tinyFacts = computeTinyFacts(p, constraints, concernTokens);
+
+  // Helper to flatten arrays into compact strings
+  const formatList = (arr, max = 12) => 
+    Array.isArray(arr) ? arr.slice(0, max).join(", ") : "";
 
   return {
     id: p.id,
-    name,
-    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 150),
-    tags: Array.isArray(p.tags)
-      ? p.tags.slice(0, 12)
-      : (typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).slice(0, 12) : []),
-    keywords: (kwNorm || (Array.isArray(p.keywords) ? p.keywords : [])).slice(0, 12),
+    name: p.title || p.name || "",
+    // The "Pürblack" Buffer: 400 chars keeps the Huberman/Gold/Himalaya signals
+    descriptionShort: shorten(stripHtml(p.description || p.body_html || ""), 400),
+    // Flattened to strings to save ~1,200 tokens across 24 products
+    tags: formatList(p.tags, 15),
+    keywords: formatList(p.keywordsNormalized || p.keywords, 10),
     productType: p.productType || "",
-    productType_norm: productTypeNormalized,
-    usageStep,
-    audience,
-    // normalized faceting fields explicitly present for the model:
-    benefitsNormalized: Array.isArray(p.benefitsNormalized) ? p.benefitsNormalized.slice(0, 16) : [],
-    concernsNormalized: Array.isArray(p.concernsNormalized) ? p.concernsNormalized.slice(0, 16) : [],
-    ingredientsNormalized: Array.isArray(p.ingredientsNormalized) ? p.ingredientsNormalized.slice(0, 16) : [],
-    category: p.categoryNormalized || p.category || "",
+    productType_norm: p.productType_norm || p.productTypeNormalized || "",
+    usageStep: p.usageStep || p.step || "",
+    benefitsNormalized: formatList(p.benefitsNormalized, 10),
+    ingredientsNormalized: formatList(p.ingredientsNormalized, 15),
     price: p.price ?? p.minPrice ?? undefined,
-
-    // compact guidance for the model; these are hints, not hard rules:
     tinyFacts,
   };
 }
@@ -208,7 +182,7 @@ OUTPUT REQUIREMENTS:
 - Ensure productIds is ordered: [primary, alt1, alt2].
 - Keep ALL text fields concise and grounded in candidate fields.
 - oneLiner is REQUIRED (1 sentence).
-- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge explaining WHY certain ingredients, compounds, or product types address this concern — do not name specific products. Paragraph 2: start with the Top Pick product name and explain why it is #1 (grounded in candidate fields), then one sentence each for alt1 and alt2 (when/why to choose them).
+- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: Provide expert insight (2-3 sentences max) explaining the science or botanical benefits — do NOT name specific products. Paragraph 2: Start with the Top Pick [Product Name] in BOLD CAPS; explain in 1 sentence why it is #1, then 1 short sentence for each alternative explaining when to choose them.
 - expertBullets are OPTIONAL. If included, provide 2–3 short evidence chips, each grounded in candidate fields, each max ~12 words. Must be distinct from friendlyParagraph content.
 
 Rank mode: ${rankLabel}
@@ -228,7 +202,7 @@ RESPONSE JSON SHAPE (STRICT KEYS):
   ],
   "explanation": {
   "oneLiner": "One sentence summary tailored to the concern (required).",
-  "- friendlyParagraph is REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: expert knowledge explaining WHY certain ingredients, compounds, or product types address this concern — do not name specific products. Maximum 50 words. Paragraph 2: start with the Top Pick product name and explain why it is #1 (grounded in candidate fields), then one sentence each for alt1 and alt2 (when/why to choose them). Maximum 80 words.",
+  "friendlyParagraph": "2 paragraphs: Expert 'Why' insight (no names) + Top Pick explanation and alternatives (with names)."
   "expertBullets": ["Optional short evidence chip (max 2)"]
 },
   "copy": { "why": "", "rationale": "", "extras": "" }
