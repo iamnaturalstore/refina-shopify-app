@@ -315,7 +315,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
 
         // --- NEW: Capture follow-up questions ---
-        const followUpsData = data?.awesome?.followUps;
+        const followUpsData = data?.followUps;
         setFollowUps(Array.isArray(followUpsData) ? followUpsData : []);
 
         setMatchedProducts(products);
