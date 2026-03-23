@@ -1882,7 +1882,13 @@ async function loadProductsForScoring(storeId, ids = []) {
   // Prevents UI double-rendering (vNext Phase 3 decision).
   // The widget uses explanation and awesome.reasons directly.
 
-  return { ...payload, awesome, explanation, reasonsById };
+  return { 
+    ...payload, 
+    awesome, 
+    explanation, 
+    reasonsById, 
+    followUps: payload.followUps || [] 
+  };
 }
 
     // Unknown plan: do not reshape.
