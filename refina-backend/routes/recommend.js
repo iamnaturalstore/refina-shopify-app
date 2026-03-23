@@ -1114,15 +1114,11 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
   const finalistIds = finalists.map((p) => String(p.id));
   const finalistDocs = await loadProductsByIds(storeId, finalistIds);
 
-  // ✅ Filter finalists to ACTIVE products only — no extra Firestore read
-{
   const activeIdSet = new Set(
-    topDocs
+    (Array.isArray(finalistDocs) ? finalistDocs : [])
       .filter((p) => p && p.isActive === true)
       .map((p) => String(p.id))
   );
-  finalists = finalists.filter((p) => activeIdSet.has(String(p.id)));
-}
 
   finalists = finalists.filter((p) => activeIdSet.has(String(p.id)));
 }
@@ -1578,7 +1574,6 @@ async function loadProductsForScoring(storeId, ids = []) {
     "tags",
     "keywordsNormalized",
     "keywords",
-    "isActive",
   ];
 
   const chunk = (arr, n) => {
