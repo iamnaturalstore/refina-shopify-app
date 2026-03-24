@@ -186,7 +186,19 @@ OUTPUT REQUIREMENTS:
   Paragraph 1 (The Solution): Lead with the Top Pick [Product Name] in BOLD CAPS. In 1-2 sentences, explain why it is the #1 choice for this concern. Follow with 1 short sentence for each alternative explaining the specific scenario they satisfy (e.g., "Choose Alt1 for budget, or Alt2 for travel").
   Paragraph 2 (The Science): Provide 2-3 sentences of expert insight explaining WHY these types of ingredients or botanical compounds address the biological root of the concern. Do NOT name specific products in this paragraph; keep it focused on the "Expert Why."
 - expertBullets are OPTIONAL. If included, provide 2–3 short evidence chips, each grounded in candidate fields, each max ~12 words. Must be distinct from friendlyParagraph content.
-- followUps is REQUIRED. Provide an array of exactly 3 short buttons (max 8 words). These should act as "final hurdles" for a shopper, such as: "Is this safe for sensitive skin?", "Is there a white cast?", or "How long does one jar last?".
+- followUps is REQUIRED. Provide an array of exactly 3 objects.
+- Each followUp object must contain:
+  - "type": must be either "hero" or "compare_set"
+  - "label": short button text, max 8 words
+- Include EXACTLY:
+  - 1 hero follow-up about the primary product only
+  - 2 compare_set follow-ups about differences between the 3 selected products
+- The hero follow-up should address a likely final hesitation about the top pick only, such as suitability, texture, finish, routine fit, or usage.
+- The compare_set follow-ups should help the shopper choose between the shortlisted products only. They must stay scoped to the 3 selected products and must not reopen a broad search.
+- compare_set labels should read naturally as comparison questions, such as "Which feels lightest?", "Which suits mature skin?", or "Which is best under makeup?".
+- Avoid producing 3 questions of the same kind.
+- Avoid vague labels like "Tell me more".
+- Do not generate utility pivots such as "Show similar options", "Show cheaper options", "Show premium options", or "Best value".
 - If the user query is a specific question about a feature (e.g., reef-safe, white cast), you MUST answer that question directly in the very first sentence of the friendlyParagraph before providing the standard recommendation.
 
 Rank mode: ${rankLabel}
@@ -209,7 +221,11 @@ RESPONSE JSON SHAPE (STRICT KEYS):
     "friendlyParagraph": "REQUIRED. Exactly 2 paragraphs separated by a single blank line. Paragraph 1: Start with Top Pick [Product Name] in BOLD CAPS; explain why it is #1, then 1 sentence each for alt1 and alt2. Paragraph 2: Expert knowledge explaining WHY certain ingredients or product types address this concern (no product names here). If the user asked a specific question (e.g. reef-safe), answer it in the very first sentence of Para 1.",
     "expertBullets": ["Optional short evidence chip (max 2, grounded in candidate fields)"]
   },
-  "followUps": ["Exactly 3 short 'final hurdle' questions for the shopper (max 8 words each)"],
+  "followUps": [
+  { "type": "hero", "label": "Short hero-only shopper hurdle" },
+  { "type": "compare_set", "label": "Short comparison question across these picks" },
+  { "type": "compare_set", "label": "Second short comparison question across these picks" }
+],
   "productIds": ["<id-primary>", "<id-alt1>", "<id-alt2>"],
   "copy": { "why": "", "rationale": "", "extras": "" }
 }

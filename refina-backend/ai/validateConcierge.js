@@ -91,7 +91,18 @@ const copy = {
   productIds = productIds.slice(0, 3);
 
   // ── Follow Ups ─────────────────────────────────────────────────────────────
-  const followUps = arr(obj?.followUps).map(s).filter(Boolean).slice(0, 3);
+  const rawFollowUps = arr(obj?.followUps).slice(0, 3);
+
+const allowedFollowUpTypes = new Set(["hero", "compare_set"]);
+
+const followUps = rawFollowUps
+  .map((fu) => {
+    const type = s(fu?.type).toLowerCase();
+    const label = s(fu?.label);
+    if (!allowedFollowUpTypes.has(type) || !label) return null;
+    return { type, label };
+  })
+  .filter(Boolean);
 
   if (!productIds.length) {
     return bad("no productIds derivable from model output", {
@@ -105,6 +116,21 @@ const copy = {
   if (!primary.id) {
     return bad("no primary.id", { primary, alternatives, explanation, copy, productIds });
   }
+
+  if (followUps.length !== 3) {
+  return bad("followUps must contain exactly 3 valid items", {
+    followUps,
+  });
+}
+
+const heroCount = followUps.filter((f) => f.type === "hero").length;
+const compareCount = followUps.filter((f) => f.type === "compare_set").length;
+
+if (heroCount !== 1 || compareCount !== 2) {
+  return bad("followUps must contain exactly 1 hero and 2 compare_set items", {
+    followUps,
+  });
+}
 
   return ok({ primary, alternatives, explanation, copy, productIds, followUps });
 }
