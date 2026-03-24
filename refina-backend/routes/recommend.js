@@ -1474,19 +1474,50 @@ const explanationText = (
 // Hard-disable copy fields to avoid UI double-rendering overlapping text blocks
 const safeCopy = { why: "", rationale: "", extras: "" };
 
+// Enrich typed follow-ups with scope and append app-owned utility follow-up
+const modelFollowUps = Array.isArray(vr.value?.followUps) ? vr.value.followUps : [];
+const heroProductId = outIds[0] || "";
+const setProductIds = outIds.slice(0, 3);
+
+const enrichedFollowUps = [
+  ...modelFollowUps.map((fu) => {
+    if (fu?.type === "hero") {
+      return {
+        type: "hero",
+        label: String(fu?.label || "").trim(),
+        heroProductId,
+      };
+    }
+
+    if (fu?.type === "compare_set") {
+      return {
+        type: "compare_set",
+        label: String(fu?.label || "").trim(),
+        setProductIds,
+      };
+    }
+
+    return null;
+  }).filter(Boolean),
+  {
+    type: "utility",
+    label: "Similar options",
+    action: "show_similar",
+  },
+];
 
     const payload = {
       productIds: outIds,
       products,
       explanation: explanationText,
       // 1. FIX: Pull the questions from the AI result
-      followUps: vr.value?.followUps || [], 
+      followUps: enrichedFollowUps, 
       awesome: {
         primary: vr.value.primary,
         alternatives: vr.value.alternatives,
         explanation: vr.value.explanation,
         // 2. ALSO ADD HERE (for safety/consistency)
-        followUps: vr.value?.followUps || [], 
+        followUps: enrichedFollowUps,
         copy: safeCopy,
         productIds: outIds,
       },
