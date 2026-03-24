@@ -314,9 +314,24 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
         const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
 
-        // --- NEW: Capture follow-up questions ---
-        const followUpsData = data?.followUps;
-        setFollowUps(Array.isArray(followUpsData) ? followUpsData : []);
+        // --- NEW: Capture follow-up questions --- (temporary patch pasted below)
+        const followUpsData = Array.isArray(data?.followUps) ? data.followUps : [];
+setFollowUps(
+  followUpsData
+    .map((fu) => {
+      if (typeof fu === "string") {
+        return { type: "hero", label: fu };
+      }
+      return {
+        type: String(fu?.type || "").trim(),
+        label: String(fu?.label || "").trim(),
+        ...(fu?.heroProductId ? { heroProductId: String(fu.heroProductId) } : {}),
+        ...(Array.isArray(fu?.setProductIds) ? { setProductIds: fu.setProductIds.map(String) } : {}),
+        ...(fu?.action ? { action: String(fu.action) } : {}),
+      };
+    })
+    .filter((fu) => fu.label)
+);
 
         setMatchedProducts(products);
         setCopy({
@@ -735,26 +750,27 @@ const renderRationale = (text) => {
         <div style={{ marginTop: '2rem', padding: '1rem 0', textAlign: 'center', borderTop: '1px solid #f0f0f0' }}>
           <p style={{ fontSize: '14px', color: '#666', marginBottom: '1rem' }}>Still have questions?</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-            {followUps.map((text, idx) => (
-              <button
-                key={idx}
-                style={{
-                  background: 'white',
-                  border: '1px solid var(--rf-primary-color, #e91e63)',
-                  color: 'var(--rf-primary-color, #e91e63)',
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-                onClick={() => {
-                  setConcern(text);
-                  handleRecommend(text);
-                }}
-              >
-                {text}
-              </button>
-            ))}
+            {followUps.map((pill, idx) => (
+  <button
+    key={`${pill.type || "followup"}-${idx}-${pill.label}`}
+    style={{
+      background: 'white',
+      border: '1px solid var(--rf-primary-color, #e91e63)',
+      color: 'var(--rf-primary-color, #e91e63)',
+      padding: '8px 16px',
+      borderRadius: '20px',
+      fontSize: '13px',
+      cursor: 'pointer'
+    }}
+    onClick={() => {
+      // temporary bridge: still treat as plain query until handleFollowUp is wired
+      setConcern(pill.label);
+      handleRecommend(pill.label);
+    }}
+  >
+    {pill.label}
+  </button>
+))}
           </div>
         </div>
       )}
