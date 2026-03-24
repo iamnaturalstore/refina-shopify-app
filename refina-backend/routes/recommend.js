@@ -1503,6 +1503,7 @@ const enrichedFollowUps = [
     type: "utility",
     label: "Similar options",
     action: "show_similar",
+    heroProductId,
   },
 ];
 
