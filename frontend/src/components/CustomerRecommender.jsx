@@ -234,6 +234,8 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
 
   const [followUps, setFollowUps] = useState([]);
+  const [viewMode, setViewMode] = useState("results");
+  const [returnState, setReturnState] = useState(null);
 
   // ===== Staged progress label (diffs only) =====
   const [progressLabel, setProgressLabel] = useState("Thinking…");
@@ -272,6 +274,31 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
     return () => progressTimers.current.forEach(clearTimeout);
   }, []);
   // ===== end staged progress =====
+
+ const buildCurrentRecommendationState = () => ({
+  matchedProducts,
+  copy,
+  reasonsById,
+  followUps,
+  lastQuery,
+});
+
+async function fetchUtilityPeek({ storeId, heroProductId }) {
+  const qs = new URLSearchParams({
+    mode: "peek",
+    storeId: String(storeId || ""),
+    productId: String(heroProductId || ""),
+  });
+
+  const resp = await fetch(`${API_PREFIX}/recommend?${qs.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!resp.ok) throw new Error(`peek ${resp.status}`);
+
+  return resp.json();
+}
 
   const handleRecommend = useCallback(
     async (nextConcern) => {
@@ -314,8 +341,41 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
         // 3) Populate copy: prefer Awesome, else backend explanation (fallback)
         const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
 
-        // --- NEW: Capture follow-up questions --- (temporary patch pasted below)
+        // --- NEW: Capture follow-up questions
         const followUpsData = Array.isArray(data?.followUps) ? data.followUps : [];
+const currentHeroProductId =
+  Array.isArray(products) && products.length > 0 ? String(products[0]?.id || "") : "";
+
+setFollowUps(
+  followUpsData
+    .map((fu) => {
+      if (typeof fu === "string") {
+        return { type: "hero", label: fu };
+      }
+
+      const normalized = {
+        type: String(fu?.type || "").trim(),
+        label: String(fu?.label || "").trim(),
+        ...(fu?.heroProductId ? { heroProductId: String(fu.heroProductId) } : {}),
+        ...(Array.isArray(fu?.setProductIds)
+          ? { setProductIds: fu.setProductIds.map(String) }
+          : {}),
+        ...(fu?.action ? { action: String(fu.action) } : {}),
+      };
+
+      if (
+        normalized.type === "utility" &&
+        normalized.action === "show_similar" &&
+        !normalized.heroProductId &&
+        currentHeroProductId
+      ) {
+        normalized.heroProductId = currentHeroProductId;
+      }
+
+      return normalized;
+    })
+    .filter((fu) => fu.label)
+);
 setFollowUps(
   followUpsData
     .map((fu) => {
@@ -388,6 +448,82 @@ setFollowUps(
     },
     [concern, startProgressCycle, stopProgressCycle, setProgressLabel]
   );
+
+  const handleReturnToResults = useCallback(() => {
+  if (!returnState) return;
+
+  setMatchedProducts(Array.isArray(returnState.matchedProducts) ? returnState.matchedProducts : []);
+  setCopy(returnState.copy || { why: "", rationale: "", extras: "" });
+  setReasonsById(returnState.reasonsById || {});
+  setFollowUps(Array.isArray(returnState.followUps) ? returnState.followUps : []);
+  setLastQuery(String(returnState.lastQuery || ""));
+  setViewMode("results");
+  setReturnState(null);
+}, [returnState]);
+
+const handleFollowUp = useCallback(
+  async (pill) => {
+    if (!pill || !pill.type) return;
+
+    // Temporary bridge for hero + compare_set
+    if (pill.type === "hero" || pill.type === "compare_set") {
+      setConcern(pill.label);
+      handleRecommend(pill.label);
+      return;
+    }
+
+    // Real utility handling
+    if (pill.type === "utility" && pill.action === "show_similar") {
+      const storeId =
+        new URLSearchParams(location.search).get("shop") ||
+        document.getElementById("root")?.dataset.shop ||
+        "";
+
+      const heroProductId = String(pill.heroProductId || "");
+      if (!storeId || !heroProductId) return;
+
+      setLoading(true);
+      startProgressCycle();
+
+      try {
+        if (viewMode !== "utility") {
+          setReturnState(buildCurrentRecommendationState());
+        }
+
+        const data = await fetchUtilityPeek({ storeId, heroProductId });
+
+        const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
+        const products = normalizeProducts(candidates);
+
+        setMatchedProducts(products);
+        setCopy({
+          why: "Here are similar options to your top pick.",
+          rationale: "",
+          extras: "",
+        });
+        setReasonsById({});
+        setFollowUps([]);
+        setLastQuery("Similar options");
+        setViewMode("utility");
+      } catch (err) {
+        console.error("[followUp utility] peek failed:", err);
+      } finally {
+        setLoading(false);
+      }
+
+      return;
+    }
+  },
+  [
+    handleRecommend,
+    matchedProducts,
+    copy,
+    reasonsById,
+    followUps,
+    lastQuery,
+    viewMode,
+  ]
+);
 
   // (1) Seed concern from URL ?prefill=, initialPrompt, or sessionStorage handoff.
   useEffect(() => {
@@ -701,6 +837,26 @@ const renderRationale = (text) => {
         </div>
       )}
 
+      {viewMode === "utility" && returnState && (
+  <div style={{ marginTop: "1rem", marginBottom: "0.75rem" }}>
+    <button
+      type="button"
+      onClick={handleReturnToResults}
+      style={{
+        background: "transparent",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        fontSize: "14px",
+        fontWeight: 600,
+        color: "var(--rf-primary-color, #e91e63)",
+      }}
+    >
+      ← Return to results
+    </button>
+  </div>
+)}
+
       {matchedProducts.length > 0 && (
         <>
           <div className={styles.responseBox}>
@@ -762,11 +918,7 @@ const renderRationale = (text) => {
       fontSize: '13px',
       cursor: 'pointer'
     }}
-    onClick={() => {
-      // temporary bridge: still treat as plain query until handleFollowUp is wired
-      setConcern(pill.label);
-      handleRecommend(pill.label);
-    }}
+    onClick={() => handleFollowUp(pill)}
   >
     {pill.label}
   </button>
