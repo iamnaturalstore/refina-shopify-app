@@ -465,12 +465,100 @@ const handleFollowUp = useCallback(
   async (pill) => {
     if (!pill || !pill.type) return;
 
-    // Temporary bridge for hero + compare_set
-    if (pill.type === "hero" || pill.type === "compare_set") {
-      setConcern(pill.label);
-      handleRecommend(pill.label);
-      return;
-    }
+   if (pill.type === "hero" || pill.type === "compare_set") {
+  const storeId =
+    new URLSearchParams(location.search).get("shop") ||
+    document.getElementById("root")?.dataset.shop ||
+    "";
+
+  if (!storeId) return;
+
+  setLoading(true);
+  startProgressCycle();
+
+  try {
+    const resp = await fetch(`${API_PREFIX}/recommend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        storeId,
+        concern: pill.label,
+        followUp: {
+          type: pill.type,
+          ...(pill.type === "hero" && pill.heroProductId
+            ? { heroProductId: String(pill.heroProductId) }
+            : {}),
+          ...(pill.type === "compare_set" && Array.isArray(pill.setProductIds)
+            ? { setProductIds: pill.setProductIds.map(String) }
+            : {}),
+        },
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`recommend ${resp.status}`);
+
+    const data = await resp.json();
+
+    const products = normalizeProducts(
+      Array.isArray(data?.products) ? data.products : []
+    );
+
+    const reasonsMap = buildReasonsMapFromAwesome(data?.awesome);
+    const copyOut = buildCopyFromAwesome(data?.awesome, data?.explanation || "");
+
+    const followUpsData = Array.isArray(data?.followUps) ? data.followUps : [];
+    const currentHeroProductId =
+      Array.isArray(products) && products.length > 0 ? String(products[0]?.id || "") : "";
+
+    setFollowUps(
+      followUpsData
+        .map((fu) => {
+          if (typeof fu === "string") {
+            return { type: "hero", label: fu };
+          }
+
+          const normalized = {
+            type: String(fu?.type || "").trim(),
+            label: String(fu?.label || "").trim(),
+            ...(fu?.heroProductId ? { heroProductId: String(fu.heroProductId) } : {}),
+            ...(Array.isArray(fu?.setProductIds)
+              ? { setProductIds: fu.setProductIds.map(String) }
+              : {}),
+            ...(fu?.action ? { action: String(fu.action) } : {}),
+          };
+
+          if (
+            normalized.type === "utility" &&
+            normalized.action === "show_similar" &&
+            !normalized.heroProductId &&
+            currentHeroProductId
+          ) {
+            normalized.heroProductId = currentHeroProductId;
+          }
+
+          return normalized;
+        })
+        .filter((fu) => fu.label)
+    );
+
+    setMatchedProducts(products);
+    setCopy({
+      why: String(copyOut.why || ""),
+      rationale: String(copyOut.rationale || ""),
+      extras: String(copyOut.extras || ""),
+    });
+    setReasonsById(reasonsMap);
+    setLastQuery(String(pill.label || ""));
+    setViewMode("results");
+  } catch (err) {
+    console.error("[followUp scoped] recommend failed:", err);
+  } finally {
+    setLoading(false);
+    stopProgressCycle?.();
+  }
+
+  return;
+}
 
     // Real utility handling
     if (pill.type === "utility" && pill.action === "show_similar") {
