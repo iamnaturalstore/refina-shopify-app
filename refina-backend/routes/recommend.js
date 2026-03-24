@@ -784,10 +784,16 @@ const timings = {
 let promptChars = 0;
 
   try {
-    const { storeId, concern } = req.body || {};
-    if (!storeId || !concern) {
-      return res.status(400).json({ error: "storeId and concern are required." });
-    }
+    const { storeId, concern, followUp } = req.body || {};
+if (!storeId || !concern) {
+  return res.status(400).json({ error: "storeId and concern are required." });
+}
+
+const followUpType = String(followUp?.type || "").trim().toLowerCase();
+const followUpHeroProductId = String(followUp?.heroProductId || "").trim();
+const followUpSetProductIds = Array.isArray(followUp?.setProductIds)
+  ? followUp.setProductIds.map((id) => String(id || "").trim()).filter(Boolean)
+  : [];
 
     // Store settings
     const settingsSnap = await db.collection("storeSettings").doc(storeId).get();
@@ -1266,6 +1272,49 @@ if (wantFacts) {
 } else {
   // Explicit: skipped facts
   timings.factsMs = 0;
+}
+
+// Follow-up scope clamp (3B)
+// hero       -> lock prompt candidates to the current hero product only
+// compare_set -> lock prompt candidates to the currently displayed 3-product set only
+if (followUpType === "hero" && followUpHeroProductId) {
+  const heroId = String(followUpHeroProductId);
+
+  const heroDoc =
+    (Array.isArray(forStage1) ? forStage1 : []).find((p) => String(p?.id) === heroId) ||
+    (Array.isArray(forStage2) ? forStage2 : []).find((p) => String(p?.id) === heroId) ||
+    finalists.find((p) => String(p?.id) === heroId) ||
+    null;
+
+  if (heroDoc) {
+    forStage1 = [heroDoc];
+    forStage2 = [heroDoc];
+    needWiden = false;
+  }
+}
+
+if (followUpType === "compare_set" && followUpSetProductIds.length) {
+  const allowedSet = new Set(followUpSetProductIds.map(String));
+
+  const combinedPool = [
+    ...(Array.isArray(forStage1) ? forStage1 : []),
+    ...(Array.isArray(forStage2) ? forStage2 : []),
+    ...finalists,
+  ];
+
+  const seen = new Set();
+  const setDocs = combinedPool.filter((p) => {
+    const id = String(p?.id || "");
+    if (!id || !allowedSet.has(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  if (setDocs.length) {
+    forStage1 = setDocs;
+    forStage2 = setDocs;
+    needWiden = false;
+  }
 }
 
 // Phase 2 — Capsules-first prompt build
