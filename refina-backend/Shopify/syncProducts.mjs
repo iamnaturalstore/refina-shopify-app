@@ -1,4 +1,3 @@
-// refina/server/shopify/syncProducts.mjs
 import fetch from "node-fetch";
 import admin from "firebase-admin";
 import dotenv from "dotenv";
@@ -17,61 +16,134 @@ if (!storeEnv || !storeEnv.endsWith(".myshopify.com")) {
   throw new Error('SHOPIFY_STORE_DOMAIN must be a full "<shop>.myshopify.com" domain');
 }
 const shop = storeEnv;
+
 const token = process.env.SHOPIFY_ADMIN_API_TOKEN;
 if (!token) throw new Error("SHOPIFY_ADMIN_API_TOKEN missing");
 
+const API_VERSION = "2025-01";
+
+const PRODUCTS_QUERY = `
+  query ProductsPage($after: String) {
+    products(first: 250, after: $after, sortKey: ID) {
+      pageInfo {
+        hasNextPage
+      }
+      edges {
+        cursor
+        node {
+          id
+          legacyResourceId
+          title
+          descriptionHtml
+          productType
+          tags
+          handle
+          vendor
+          updatedAt
+          featuredImage {
+            url
+          }
+          variants(first: 1) {
+            nodes {
+              price
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+async function shopifyGraphQL(query, variables = {}) {
+  const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+    method: "POST",
+    headers: {
+      "X-Shopify-Access-Token": token,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`❌ Failed Shopify GraphQL request: ${error}`);
+  }
+
+  const payload = await response.json();
+
+  if (payload.errors) {
+    throw new Error(`❌ Shopify GraphQL errors: ${JSON.stringify(payload.errors)}`);
+  }
+
+  return payload.data;
+}
+
 const fetchAllProducts = async () => {
-  let allProducts = [];
-  let lastId = null;
+  const allProducts = [];
+  let after = null;
   let hasMore = true;
 
   while (hasMore) {
-    const url = new URL(`https://${shop}/admin/api/2024-04/products.json`);
-    url.searchParams.set("limit", "250");
-    if (lastId) url.searchParams.set("since_id", lastId);
+    const data = await shopifyGraphQL(PRODUCTS_QUERY, { after });
+    const conn = data?.products;
+    const edges = conn?.edges || [];
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "X-Shopify-Access-Token": token,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`❌ Failed to fetch products: ${error}`);
+    for (const edge of edges) {
+      allProducts.push(edge.node);
     }
 
-    const data = await response.json();
-    const products = data.products || [];
-    allProducts = allProducts.concat(products);
-    hasMore = products.length === 250;
-    lastId = hasMore ? products[products.length - 1].id : null;
+    hasMore = Boolean(conn?.pageInfo?.hasNextPage);
+    after = hasMore && edges.length ? edges[edges.length - 1].cursor : null;
   }
 
   return allProducts;
 };
 
 const saveToFirestore = async (products) => {
+  let batch = db.batch();
+  let opCount = 0;
+
   for (const product of products) {
-    const docRef = db.doc(`products/${shop}/items/${product.id}`);
+    const numericId = String(product.legacyResourceId || "").trim();
+    if (!numericId) continue;
+
+    const docRef = db.doc(`products/${shop}/items/${numericId}`);
+
+    const priceRaw = product?.variants?.nodes?.[0]?.price;
+    const price = Number.isFinite(Number(priceRaw)) ? Number(priceRaw) : null;
+
     const cleanDoc = {
-      shopifyId: product.id,
-      storeId: shop, // full domain
-      title: product.title || product.name || "",
-      name: product.title || product.name || "",
-      image: product.images?.[0]?.src || "",
-      tags: (String(product.tags || "").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)) || [],
-      description: product.body_html || "",
+      shopifyId: numericId,
+      storeId: shop,
+      title: product.title || "",
+      name: product.title || "",
+      image: product.featuredImage?.url || "",
+      tags: Array.isArray(product.tags)
+        ? product.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean)
+        : [],
+      description: product.descriptionHtml || "",
       vendor: product.vendor || "",
       handle: product.handle || "",
-      price: Number.isFinite(Number(product?.variants?.[0]?.price ?? NaN)) ? Number(product.variants[0].price) : null,
-      shopifyUpdatedAt: product.updated_at,
+      price,
+      productType: product.productType || "",
+      category: product.productType || "",
+      shopifyUpdatedAt: product.updatedAt || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
-    await docRef.set(cleanDoc, { merge: true });
+    batch.set(docRef, cleanDoc, { merge: true });
+    opCount++;
+
+    if (opCount >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      opCount = 0;
+    }
+  }
+
+  if (opCount > 0) {
+    await batch.commit();
   }
 
   console.log(`✅ Synced ${products.length} products to Firestore at products/${shop}/items/*`);
