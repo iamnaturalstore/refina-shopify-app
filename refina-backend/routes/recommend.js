@@ -794,6 +794,8 @@ const followUpHeroProductId = String(followUp?.heroProductId || "").trim();
 const followUpSetProductIds = Array.isArray(followUp?.setProductIds)
   ? followUp.setProductIds.map((id) => String(id || "").trim()).filter(Boolean)
   : [];
+    const isScopedFollowUp =
+   followUpType === "hero" || followUpType === "compare_set";
 
     // Store settings
     const settingsSnap = await db.collection("storeSettings").doc(storeId).get();
@@ -1185,12 +1187,12 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
     }
 
     const stage1Count = Math.min(8, finalists.length);
-    const needWiden =
+    let needWiden =
       constraints.flags?.sensitive || constraints.flags?.avoidEO || !!constraints.step ||
       (constraints.age && constraints.age >= 55);
 
-    const forStage1 = finalists.slice(0, stage1Count).map(compactForPrompt);
-    const forStage2Base = (needWiden ? finalists : finalists.slice(0, stage1Count)).map(compactForPrompt);
+    let forStage1 = finalists.slice(0, stage1Count).map(compactForPrompt);
+    let forStage2Base = (needWiden ? finalists : finalists.slice(0, stage1Count)).map(compactForPrompt);
 
     function estimateChars(productsArr) {
       try { return JSON.stringify(productsArr).length + String(concern).length + 512; }
@@ -1480,9 +1482,6 @@ return res.json({
     : followUpType === "hero" && followUpSetProductIds.length
       ? new Set(followUpSetProductIds.map(String))
       : finalistsSet; 
-
-      const isScopedFollowUp =
-  followUpType === "hero" || followUpType === "compare_set";
 
 let outIds = [
   vr.value?.primary?.id,
