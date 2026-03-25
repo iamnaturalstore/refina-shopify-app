@@ -1377,7 +1377,15 @@ try {
     }
 
     if (!vr.ok) {
-      const fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
+      let fallbackIds = [];
+
+if (followUpType === "hero" && followUpSetProductIds.length) {
+  fallbackIds = followUpSetProductIds.slice(0, 3);
+} else if (followUpType === "compare_set" && followUpSetProductIds.length) {
+  fallbackIds = followUpSetProductIds.slice(0, 3);
+} else {
+  fallbackIds = finalists.slice(0, 6).map((p) => String(p.id));
+}
 
 const enrichedFallbackAll = await loadProductsByIds(storeId, fallbackIds);
 // ✅ Only allow active/published products
@@ -1445,14 +1453,27 @@ return res.json({
 
 
 
-    const allow = finalistsSet;
-    let outIds = [
+    const allow =
+  followUpType === "compare_set" && followUpSetProductIds.length
+    ? new Set(followUpSetProductIds.map(String))
+    : followUpType === "hero" && followUpSetProductIds.length
+      ? new Set(followUpSetProductIds.map(String))
+      : finalistsSet;
+
+let outIds = [
   vr.value?.primary?.id,
   ...(Array.isArray(vr.value?.alternatives) ? vr.value.alternatives.map(a => a?.id) : [])
 ].filter(Boolean).map(String);
 
 outIds = outIds.filter((id) => allow.has(id));
-if (!outIds.length) outIds = finalists.slice(0, 3).map((p) => String(p.id));
+
+if (!outIds.length) {
+  if ((followUpType === "hero" || followUpType === "compare_set") && followUpSetProductIds.length) {
+    outIds = followUpSetProductIds.slice(0, 3);
+  } else {
+    outIds = finalists.slice(0, 3).map((p) => String(p.id));
+  }
+}
 
     const tEnrichStart = Date.now();
 const enrichedDocsAll = await loadProductsByIds(storeId, outIds);
