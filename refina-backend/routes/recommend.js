@@ -888,7 +888,7 @@ scoredEmb.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id
       filtered.sort((a, b) => b.finalScore - a.finalScore);
 
       const capN = Math.min(guard?.trim?.maxProducts || 12, 12);
-      const finalists = filtered.slice(0, capN).map((x) => x.p);
+      let finalists = filtered.slice(0, capN).map((x) => x.p);
       const outIds = finalists.slice(0, 6).map((p) => String(p.id));
       const enriched = await loadProductsByIds(storeId, outIds);
 
@@ -938,7 +938,7 @@ const constraints = detectConstraints(concernNorm);
 const cacheConcernCanon = canonicalizeCacheQuery(concern);
 
 const ck = cacheKey(storeId, cacheConcernCanon);
-const cached = await readCache(storeId, ck, cacheEpoch);
+const cached = isScopedFollowUp ? null : await readCache(storeId, ck, cacheEpoch);
 
 if (cached) {
   const shaped = clampCachedPayload(cached, null);
@@ -1128,7 +1128,7 @@ scored.sort((a, b) => b.sim - a.sim || String(a.id).localeCompare(String(b.id)))
 
   finalists = finalists.filter((p) => activeIdSet.has(String(p.id)));
 }
-    const finalistsSet = new Set(finalists.map(p => String(p.id)));
+    let finalistsSet = new Set(finalists.map(p => String(p.id)));
     
     // Phase 2 — Convert finalists to Capsules (in-memory)
     const capsules = (finalists || []).map(buildCapsuleFromProduct);
@@ -1275,45 +1275,66 @@ if (wantFacts) {
 }
 
 // Follow-up scope clamp (3B)
-// hero       -> lock prompt candidates to the current hero product only
-// compare_set -> lock prompt candidates to the currently displayed 3-product set only
-if (followUpType === "hero" && followUpHeroProductId) {
-  const heroId = String(followUpHeroProductId);
+// IMPORTANT: for follow-ups, do NOT try to recover the scoped set from current finalists.
+// Load the requested scoped products directly by ID so the scope remains stable across new concern text.
+if (followUpType === "hero" || followUpType === "compare_set") {
+  const scopedIds =
+    followUpType === "hero"
+      ? [
+          ...new Set(
+            [followUpHeroProductId, ...followUpSetProductIds]
+              .map((id) => String(id || "").trim())
+              .filter(Boolean)
+          ),
+        ]
+      : [
+          ...new Set(
+            followUpSetProductIds
+              .map((id) => String(id || "").trim())
+              .filter(Boolean)
+          ),
+        ];
 
-  const heroDoc =
-    (Array.isArray(forStage1) ? forStage1 : []).find((p) => String(p?.id) === heroId) ||
-    (Array.isArray(forStage2) ? forStage2 : []).find((p) => String(p?.id) === heroId) ||
-    finalists.find((p) => String(p?.id) === heroId) ||
-    null;
+  if (scopedIds.length) {
+    const scopedDocsAll = await loadProductsByIds(storeId, scopedIds);
+    const scopedDocs = (Array.isArray(scopedDocsAll) ? scopedDocsAll : [])
+      .filter((p) => p && p.isActive === true);
 
-  if (heroDoc) {
-    forStage1 = [heroDoc];
-    forStage2 = [heroDoc];
-    needWiden = false;
-  }
-}
+    const byId = new Map(scopedDocs.map((p) => [String(p.id), p]));
 
-if (followUpType === "compare_set" && followUpSetProductIds.length) {
-  const allowedSet = new Set(followUpSetProductIds.map(String));
+    if (followUpType === "hero") {
+      const heroDoc = byId.get(String(followUpHeroProductId));
+      const setDocs = followUpSetProductIds
+        .map((id) => byId.get(String(id)))
+        .filter(Boolean);
 
-  const combinedPool = [
-    ...(Array.isArray(forStage1) ? forStage1 : []),
-    ...(Array.isArray(forStage2) ? forStage2 : []),
-    ...finalists,
-  ];
+      if (heroDoc) {
+        // LLM answer scope = hero product only
+        forStage1 = [heroDoc];
+        forStage2 = [heroDoc];
+        needWiden = false;
+      }
 
-  const seen = new Set();
-  const setDocs = combinedPool.filter((p) => {
-    const id = String(p?.id || "");
-    if (!id || !allowedSet.has(id) || seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
+      // Preserve visible set for later fallbacks / output fencing
+      if (setDocs.length) {
+        finalists = setDocs;
+        finalistsSet = new Set(setDocs.map((p) => String(p.id)));
+      }
+    }
 
-  if (setDocs.length) {
-    forStage1 = setDocs;
-    forStage2 = setDocs;
-    needWiden = false;
+    if (followUpType === "compare_set") {
+      const setDocs = followUpSetProductIds
+        .map((id) => byId.get(String(id)))
+        .filter(Boolean);
+
+      if (setDocs.length) {
+        forStage1 = setDocs;
+        forStage2 = setDocs;
+        needWiden = false;
+        finalists = setDocs;
+        finalistsSet = new Set(setDocs.map((p) => String(p.id)));
+      }
+    }
   }
 }
 
@@ -1458,7 +1479,10 @@ return res.json({
     ? new Set(followUpSetProductIds.map(String))
     : followUpType === "hero" && followUpSetProductIds.length
       ? new Set(followUpSetProductIds.map(String))
-      : finalistsSet;
+      : finalistsSet; 
+
+      const isScopedFollowUp =
+  followUpType === "hero" || followUpType === "compare_set";
 
 let outIds = [
   vr.value?.primary?.id,
