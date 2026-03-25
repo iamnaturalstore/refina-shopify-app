@@ -241,29 +241,42 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [progressLabel, setProgressLabel] = useState("Thinking…");
   const progressTimers = useRef([]);
 
- const PROGRESS_PHASES = [
+ const MAIN_PROGRESS_PHASES = [
   { at: 0,      text: "Thinking" },
   { at: 600,    text: "Scanning product catalogue" },
   { at: 1_800,  text: "Shortlisting products" },
   { at: 3_800,  text: "Ranking candidates" },
   { at: 6_500,  text: "Selecting your Top 3" },
-  { at: 10_500, text: "Writing the reasons" },
+  { at: 10_500, text: "Writing reasons why" },
   { at: 14_500, text: "Finalizing recommendations" },
 ];
 
-  function startProgressCycle() {
-    progressTimers.current.forEach(clearTimeout);
-    progressTimers.current = [];
-    setProgressLabel(PROGRESS_PHASES[0].text);
+const FOLLOWUP_PROGRESS_PHASES = [
+  { at: 0,      text: "Thinking" },
+  { at: 500,    text: "Checking the product details" },
+  { at: 1_600,  text: "Reviewing the best fit" },
+  { at: 3_200,  text: "Writing the answer" },
+];
 
-    PROGRESS_PHASES.slice(1).forEach((p) => {
-      const id = setTimeout(() => setProgressLabel(p.text), p.at);
-      progressTimers.current.push(id);
-    });
+  function startProgressCycle(mode = "main") {
+  const phases =
+    mode === "followup" ? FOLLOWUP_PROGRESS_PHASES : MAIN_PROGRESS_PHASES;
 
-    const idLast = setTimeout(() => setProgressLabel("Still working… almost there"), 55_000);
-    progressTimers.current.push(idLast);
-  }
+  progressTimers.current.forEach(clearTimeout);
+  progressTimers.current = [];
+  setProgressLabel(phases[0].text);
+
+  phases.slice(1).forEach((p) => {
+    const id = setTimeout(() => setProgressLabel(p.text), p.at);
+    progressTimers.current.push(id);
+  });
+
+  const idLast = setTimeout(
+    () => setProgressLabel("Still working… almost there"),
+    55_000
+  );
+  progressTimers.current.push(idLast);
+}
 
   function stopProgressCycle() {
     progressTimers.current.forEach(clearTimeout);
@@ -306,7 +319,7 @@ async function fetchUtilityPeek({ storeId, heroProductId }) {
       if (!q) return;
 
       setLoading(true);
-      startProgressCycle(); // <<< diff: start staged progress
+      startProgressCycle("main"); // <<< diff: start staged progress
       setMatchedProducts([]);
       setCopy({ why: "", rationale: "", extras: "" });
       setReasonsById({});
@@ -346,14 +359,14 @@ async function fetchUtilityPeek({ storeId, heroProductId }) {
 const currentHeroProductId =
   Array.isArray(products) && products.length > 0 ? String(products[0]?.id || "") : "";
 
+    const visibleSetIds = products.map((p) => String(p.id)).filter(Boolean);
+
 setFollowUps(
   followUpsData
     .map((fu) => {
       if (typeof fu === "string") {
         return { type: "hero", label: fu };
       }
-
-      const visibleSetIds = products.map((p) => String(p.id)).filter(Boolean);
 
       const normalized = {
         type: String(fu?.type || "").trim(),
@@ -465,7 +478,7 @@ const handleFollowUp = useCallback(
       setSelectedProduct(null);
       setLastQuery(String(pill.label || ""));
       setLoading(true);
-      startProgressCycle();
+      startProgressCycle("followup");
 
       try {
         const resp = await fetch(`${API_PREFIX}/recommend`, {
