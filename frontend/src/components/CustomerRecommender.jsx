@@ -903,13 +903,7 @@ const renderRationale = (text) => {
         aria-busy={loading}
         aria-live="polite"
       >
-        {loading ? (
-          <>
-            {progressLabel}<span className={styles.dots} aria-hidden="true" />
-          </>
-        ) : (
-          askLabel
-        )}
+        {loading ? "Working…" : askLabel}
       </button>
 
 
