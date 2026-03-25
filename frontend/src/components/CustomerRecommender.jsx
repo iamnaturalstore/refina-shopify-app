@@ -353,25 +353,25 @@ setFollowUps(
         return { type: "hero", label: fu };
       }
 
+      const visibleSetIds = products.map((p) => String(p.id)).filter(Boolean);
+
       const normalized = {
         type: String(fu?.type || "").trim(),
         label: String(fu?.label || "").trim(),
         ...(fu?.heroProductId ? { heroProductId: String(fu.heroProductId) } : {}),
-        ...(Array.isArray(fu?.setProductIds)
+        ...(Array.isArray(fu?.setProductIds) && fu.setProductIds.length
           ? { setProductIds: fu.setProductIds.map(String) }
           : {}),
         ...(fu?.action ? { action: String(fu.action) } : {}),
       };
 
       if (
-        normalized.type === "utility" &&
-        normalized.action === "show_similar" &&
-        !normalized.heroProductId &&
-        currentHeroProductId
+        normalized.type === "hero" &&
+        normalized.heroProductId &&
+        (!Array.isArray(normalized.setProductIds) || !normalized.setProductIds.length)
       ) {
-        normalized.heroProductId = currentHeroProductId;
+        normalized.setProductIds = visibleSetIds;
       }
-
       return normalized;
     })
     .filter((fu) => fu.label)
