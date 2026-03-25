@@ -458,6 +458,12 @@ const handleFollowUp = useCallback(
 
       if (!storeId) return;
 
+      if (viewMode === "results") {
+        setReturnState(buildCurrentRecommendationState());
+    }
+
+      setSelectedProduct(null);
+      setLastQuery(String(pill.label || ""));
       setLoading(true);
       startProgressCycle();
 
@@ -534,7 +540,7 @@ const handleFollowUp = useCallback(
         });
         setReasonsById(reasonsMap);
         setLastQuery(String(pill.label || ""));
-        setViewMode("results");
+        setViewMode("followup");
       } catch (err) {
         console.error("[followUp scoped] recommend failed:", err);
       } finally {
@@ -910,7 +916,7 @@ const renderRationale = (text) => {
         </div>
       )}
 
-      {viewMode === "utility" && returnState && (
+     {(viewMode === "utility" || viewMode === "followup") && returnState && !loading && (
   <div style={{ marginTop: "1rem", marginBottom: "0.75rem" }}>
     <button
       type="button"
@@ -930,125 +936,194 @@ const renderRationale = (text) => {
   </div>
 )}
 
-      {matchedProducts.length > 0 && (
-        <>
-          <div className={styles.responseBox}>
-            <h2>Top matches</h2>
-            <p>Tap a product to see details.</p>
-          </div>
-
-          <div className={styles.grid} role="list">
-            {matchedProducts.map((product, idx) => {
-              const isTopPick = idx === 0;
-              const teaser = teaserForCard(product, reasonsById);
-
-              return (
-                <div
-                  key={product.id || product.name}
-                  className={styles.card}
-                  role="listitem"
-                  onClick={() => setSelectedProduct(product)}
-                >
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className={styles.image}
-                    onError={(e) => {
-                      e.currentTarget.src =
-                        "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
-                    }}
-                  />
-                  {isTopPick && (
-                    <div className={styles.topPickBadge} aria-label="Top pick">
-                      Top pick
-                    </div>
-                  )}
-                  <h3 className={styles.productTitle}>{product.name}</h3>
-                  <p className={styles.productDescription}>{teaser}</p>
-                  {formatPrice(product.price) && (
-                    <div className={styles.price}>{formatPrice(product.price)}</div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {followUps.length > 0 && (
-        <div style={{ marginTop: '2rem', padding: '1rem 0', textAlign: 'center', borderTop: '1px solid #f0f0f0' }}>
-          <p style={{ fontSize: '14px', color: '#666', marginBottom: '1rem' }}>Still have questions?</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-            {followUps.map((pill, idx) => (
-  <button
-    key={`${pill.type || "followup"}-${idx}-${pill.label}`}
+{loading && (
+  <div
+    className={styles.responseBox}
     style={{
-      background: 'white',
-      border: '1px solid var(--rf-primary-color, #e91e63)',
-      color: 'var(--rf-primary-color, #e91e63)',
-      padding: '8px 16px',
-      borderRadius: '20px',
-      fontSize: '13px',
-      cursor: 'pointer'
+      textAlign: "center",
+      padding: "1.5rem 1rem",
+      marginTop: "1rem",
     }}
-    onClick={() => handleFollowUp(pill)}
   >
-    {pill.label}
-  </button>
-))}
-          </div>
-        </div>
-      )}
+    <h2 style={{ marginBottom: "0.5rem" }}>Checking that for you…</h2>
 
-      {selectedProduct && (
-        <div
-          className={styles.modalOverlay}
-          onClick={() => setSelectedProduct(null)}
-        >
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2>{selectedProduct.name}</h2>
-            <div style={{ marginTop: 4, opacity: 0.7, fontSize: 13 }}>
-              Why this fits <span style={{ opacity: 0.6 }}>— “{lastQuery}”</span>
-            </div>
+    {!!lastQuery && (
+      <p
+        style={{
+          fontSize: "14px",
+          color: "#666",
+          marginBottom: "0.75rem",
+        }}
+      >
+        “{lastQuery}”
+      </p>
+    )}
+
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "10px",
+        justifyContent: "center",
+        marginBottom: "0.5rem",
+      }}
+    >
+      <div
+        style={{
+          width: "18px",
+          height: "18px",
+          border: "2px solid rgba(0,0,0,0.12)",
+          borderTopColor: "var(--rf-primary-color, #e91e63)",
+          borderRadius: "50%",
+          animation: "rfSpin 0.8s linear infinite",
+        }}
+      />
+      <span style={{ fontSize: "14px", fontWeight: 600, color: "#333" }}>
+        {progressLabel}
+      </span>
+    </div>
+
+    <p style={{ fontSize: "13px", color: "#777", margin: 0 }}>
+      Refina is reviewing your shortlisted products.
+    </p>
+  </div>
+)}
+
+{!loading && matchedProducts.length > 0 && (
+  <>
+    <div className={styles.responseBox}>
+      <h2>Top matches</h2>
+      <p>Tap a product to see details.</p>
+    </div>
+
+    <div className={styles.grid} role="list">
+      {matchedProducts.map((product, idx) => {
+        const isTopPick = idx === 0;
+        const teaser = teaserForCard(product, reasonsById);
+
+        return (
+          <div
+            key={product.id || product.name}
+            className={styles.card}
+            role="listitem"
+            onClick={() => setSelectedProduct(product)}
+          >
             <img
-              src={selectedProduct.image}
-              alt={selectedProduct.name}
+              src={product.image}
+              alt={product.name}
+              className={styles.image}
               onError={(e) => {
                 e.currentTarget.src =
                   "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
               }}
-              style={{ marginTop: 12 }}
             />
-            <div style={{ marginTop: 12, lineHeight: 1.5 }}>
-  {(() => {
-    const raw =
-      (selectedProduct && (
-        selectedProduct.description ||
-        selectedProduct.body_html ||
-        selectedProduct.bodyHtml ||
-        selectedProduct.body ||
-        ""
-      )) || "";
+            {isTopPick && (
+              <div className={styles.topPickBadge} aria-label="Top pick">
+                Top pick
+              </div>
+            )}
+            <h3 className={styles.productTitle}>{product.name}</h3>
+            <p className={styles.productDescription}>{teaser}</p>
+            {formatPrice(product.price) && (
+              <div className={styles.price}>{formatPrice(product.price)}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  </>
+)}
 
-    const safe = sanitizeCatalogHtml(raw);
-    const short = firstParagraphsOrWords(safe, 2, 200);
+{!loading && followUps.length > 0 && (
+  <div
+    style={{
+      marginTop: "2rem",
+      padding: "1rem 0",
+      textAlign: "center",
+      borderTop: "1px solid #f0f0f0",
+    }}
+  >
+    <p style={{ fontSize: "14px", color: "#666", marginBottom: "1rem" }}>
+      Still have questions?
+    </p>
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "8px",
+        justifyContent: "center",
+      }}
+    >
+      {followUps.map((pill, idx) => (
+        <button
+          key={`${pill.type || "followup"}-${idx}-${pill.label}`}
+          style={{
+            background: "white",
+            border: "1px solid var(--rf-primary-color, #e91e63)",
+            color: "var(--rf-primary-color, #e91e63)",
+            padding: "8px 16px",
+            borderRadius: "20px",
+            fontSize: "13px",
+            cursor: "pointer",
+          }}
+          onClick={() => handleFollowUp(pill)}
+        >
+          {pill.label}
+        </button>
+      ))}
+    </div>
+  </div>
+)}
 
-    if (!short || short.trim() === "") {
-      return (
-        <p>
-          {teaserFromHtml(selectedProduct?.description || "") ||
-            "A solid match for your request."}
-        </p>
-      );
-    }
-
-    return (
-      <div
-        style={{ marginBottom: 8 }}
-        dangerouslySetInnerHTML={{ __html: short }}
+{selectedProduct && !loading && (
+  <div
+    className={styles.modalOverlay}
+    onClick={() => setSelectedProduct(null)}
+  >
+    <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <h2>{selectedProduct.name}</h2>
+      <div style={{ marginTop: 4, opacity: 0.7, fontSize: 13 }}>
+        Why this fits <span style={{ opacity: 0.6 }}>— “{lastQuery}”</span>
+      </div>
+      <img
+        src={selectedProduct.image}
+        alt={selectedProduct.name}
+        onError={(e) => {
+          e.currentTarget.src =
+            "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
+        }}
+        style={{ marginTop: 12 }}
       />
-    );
-  })()}
+      <div style={{ marginTop: 12, lineHeight: 1.5 }}>
+        {(() => {
+          const raw =
+            (selectedProduct &&
+              (selectedProduct.description ||
+                selectedProduct.body_html ||
+                selectedProduct.bodyHtml ||
+                selectedProduct.body ||
+                "")) ||
+            "";
+
+          const safe = sanitizeCatalogHtml(raw);
+          const short = firstParagraphsOrWords(safe, 2, 200);
+
+          if (!short || short.trim() === "") {
+            return (
+              <p>
+                {teaserFromHtml(selectedProduct?.description || "") ||
+                  "A solid match for your request."}
+              </p>
+            );
+          }
+
+          return (
+            <div
+              style={{ marginBottom: 8 }}
+              dangerouslySetInnerHTML={{ __html: short }}
+            />
+          );
+        })()}
 
   {/* No LLM reasons or extras in the modal */}
 </div>
