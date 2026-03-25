@@ -67,6 +67,7 @@ const saveToFirestore = async (products) => {
       vendor: product.vendor || "",
       handle: product.handle || "",
       price: Number.isFinite(Number(product?.variants?.[0]?.price ?? NaN)) ? Number(product.variants[0].price) : null,
+      shopifyUpdatedAt: product.updated_at,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
 
