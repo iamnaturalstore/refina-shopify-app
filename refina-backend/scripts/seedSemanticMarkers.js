@@ -7,7 +7,7 @@
 // node refina-backend/scripts/seedSemanticMarkers.js i-am-natural-shopify-trial.myshopify.com 50 --dry-run
 
 import crypto from "crypto";
-import { dbAdmin, FieldValue } from "../firebaseAdmin.js";
+import { dbAdmin, FieldValue } from "../bff/lib/firestore.js";
 
 const SEMANTIC_SOURCE_VERSION = "product-semantics-v1";
 
