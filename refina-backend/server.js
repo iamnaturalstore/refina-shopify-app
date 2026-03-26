@@ -394,7 +394,6 @@ app.set('trust proxy', 1);
 
 // ✅ Mount webhooks FIRST (needs express.raw inside router; no json/urlencoded before this)
 app.use("/api/privacy", privacyWebhooksRoutes);
-console.log("Mounting /api/webhooks/products");
 app.use("/api/webhooks/products", productWebhooksRoutes);
 
 // Parsers & common middleware (safe after webhooks)
