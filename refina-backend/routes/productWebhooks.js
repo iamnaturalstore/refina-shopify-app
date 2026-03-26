@@ -7,6 +7,9 @@ import { getWebhookAdminClient } from "../utils/shopSession.js";
 
 const router = express.Router();
 
+// Use raw body for HMAC verification, same pattern as privacy webhooks
+const rawJson = express.raw({ type: "application/json" });
+
 const PRODUCT_GQL = `
   query ProductWebhookProduct($id: ID!) {
     product(id: $id) {
@@ -37,7 +40,12 @@ const PRODUCT_GQL = `
   }
 `;
 
-function verifyWebhookHmac(rawBody, hmacHeader, secret) {
+function verifyWebhookHmac(rawBody, hmacHeader) {
+  const secret =
+    process.env.SHOPIFY_API_SECRET ||
+    process.env.SHOPIFY_API_SECRET_KEY ||
+    "";
+
   if (!rawBody || !hmacHeader || !secret) return false;
 
   const digest = crypto
@@ -148,8 +156,6 @@ function productShapeFromGql(p, shop, syncAt, FieldValue) {
     discontinuedAt: null,
     deletedInShopify: false,
 
-    // raw was undefined in the pasted backfill block; for GraphQL product truth,
-    // updatedAt is the correct source field to mirror intent safely.
     shopifyUpdatedAt: p?.updatedAt || p?.updated_at || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
@@ -187,18 +193,14 @@ router.get("/", (_req, res) => {
   res.status(200).send("product webhooks route alive");
 });
 
-router.post("/", async (req, res) => {
+router.post("/", rawJson, async (req, res) => {
   const rawBody = req.body?.toString?.("utf8") || "";
-  const secret =
-    process.env.SHOPIFY_API_SECRET ||
-    process.env.SHOPIFY_API_SECRET_KEY ||
-    process.env.SHOPIFY_SECRET;
 
   const hmac =
     req.get("x-shopify-hmac-sha256") ||
     req.get("X-Shopify-Hmac-Sha256");
 
-  if (!verifyWebhookHmac(rawBody, hmac, secret)) {
+  if (!verifyWebhookHmac(rawBody, hmac)) {
     return res.status(401).send("Invalid webhook signature");
   }
 
@@ -257,18 +259,18 @@ router.post("/", async (req, res) => {
       }
 
       await productDocRef(shop, numericId).set(
-  {
-    id: String(numericId),
-    storeId: shop,
-    deletedInShopify: true,
-    isActive: false,
-    availableForSale: false,
-    shopifyStatus: "deleted",
-    discontinuedAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-  },
-  { merge: true }
-);
+        {
+          id: String(numericId),
+          storeId: shop,
+          deletedInShopify: true,
+          isActive: false,
+          availableForSale: false,
+          shopifyStatus: "deleted",
+          discontinuedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
 
       return res.status(200).send("OK");
     }
