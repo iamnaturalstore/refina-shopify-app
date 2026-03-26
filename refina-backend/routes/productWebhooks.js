@@ -181,6 +181,12 @@ function productDocRef(shop, productId) {
   return db.collection("products").doc(shop).collection("items").doc(String(productId));
 }
 
+console.log("productWebhooks.js loaded");
+
+router.get("/", (_req, res) => {
+  res.status(200).send("product webhooks route alive");
+});
+
 router.post("/", async (req, res) => {
   const rawBody = req.body?.toString?.("utf8") || "";
   const secret =
