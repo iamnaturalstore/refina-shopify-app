@@ -26,6 +26,18 @@ api_version = "2024-10"
   uri = "/webhooks/shop/redact"
   compliance_topics = ["shop/redact"]
 
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/products"
+  topics = ["products/create"]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/products"
+  topics = ["products/update"]
+
+  [[webhooks.subscriptions]]
+  uri = "/api/webhooks/products"
+  topics = ["products/delete"]
+
 [access_scopes]
 scopes = "read_products"
 

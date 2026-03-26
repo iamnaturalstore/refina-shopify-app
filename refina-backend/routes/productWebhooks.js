@@ -150,7 +150,7 @@ function productShapeFromGql(p, shop, syncAt, FieldValue) {
 
     // raw was undefined in the pasted backfill block; for GraphQL product truth,
     // updatedAt is the correct source field to mirror intent safely.
-    shopifyUpdatedAt: p?.updatedAt || null,
+    shopifyUpdatedAt: p?.updatedAt || p?.updated_at || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
 }
@@ -251,17 +251,18 @@ router.post("/", async (req, res) => {
       }
 
       await productDocRef(shop, numericId).set(
-        {
-          id: String(numericId),
-          storeId: shop,
-          deletedInShopify: true,
-          isActive: false,
-          availableForSale: false,
-          discontinuedAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+  {
+    id: String(numericId),
+    storeId: shop,
+    deletedInShopify: true,
+    isActive: false,
+    availableForSale: false,
+    shopifyStatus: "deleted",
+    discontinuedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  },
+  { merge: true }
+);
 
       return res.status(200).send("OK");
     }
