@@ -64,12 +64,18 @@ function normalizeSemanticTags(tags, cap = 64) {
 function buildSemanticSnapshot(product) {
   return {
     _v: SEMANTIC_SOURCE_VERSION,
-    title: normalizeSemanticText(product.title || product.name || "", 300),
-    description: normalizeSemanticText(product.description || "", 8000),
-    tags: normalizeSemanticTags(product.tags, 64),
-    productType: normalizeSemanticText(product.productType || "", 120),
-    category: normalizeSemanticText(product.category || "", 120),
-    handle: normalizeSemanticText(product.handle || "", 160),
+    title: normalizeSemanticText(product?.title || product?.name || "", 300),
+    description: normalizeSemanticText(
+      product?.description || product?.body_html || "",
+      8000
+    ),
+    tags: normalizeSemanticTags(product?.tags, 64),
+    productType: normalizeSemanticText(
+      product?.productType || product?.product_type || "",
+      120
+    ),
+    category: normalizeSemanticText(product?.category || "", 120),
+    handle: normalizeSemanticText(product?.handle || "", 160),
   };
 }
 
@@ -112,9 +118,9 @@ async function main() {
     const productId = doc.id;
 
     const kbLastEnrichedAt = p.kbLastEnrichedAt || null;
-    const alreadySeeded =
-      String(p.semanticHash || "").trim() &&
-      String(p.indexedFromSemanticHash || "").trim();
+    //const alreadySeeded =
+    //  String(p.semanticHash || "").trim() &&
+    //  String(p.indexedFromSemanticHash || "").trim();
 
     // Only seed products that have historical enrichment evidence.
     if (!kbLastEnrichedAt) {
@@ -123,10 +129,10 @@ async function main() {
     }
 
     // Keep this conservative: don't overwrite already seeded records.
-    if (alreadySeeded) {
-      skippedAlreadySeeded++;
-      continue;
-    }
+    //if (alreadySeeded) {
+    //  skippedAlreadySeeded++;
+    //  continue;
+    //}
 
     eligible++;
 
