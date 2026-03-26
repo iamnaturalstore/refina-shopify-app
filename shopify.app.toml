@@ -27,15 +27,15 @@ api_version = "2024-10"
   compliance_topics = ["shop/redact"]
 
   [[webhooks.subscriptions]]
-  uri = "/api/webhooks/products"
+  uri = "https://refina-app.onrender.com/api/webhooks/products"
   topics = ["products/create"]
 
   [[webhooks.subscriptions]]
-  uri = "/api/webhooks/products"
+  uri = "https://refina-app.onrender.com/api/webhooks/products"
   topics = ["products/update"]
 
   [[webhooks.subscriptions]]
-  uri = "/api/webhooks/products"
+  uri = "https://refina-app.onrender.com/api/webhooks/products"
   topics = ["products/delete"]
 
 [access_scopes]
