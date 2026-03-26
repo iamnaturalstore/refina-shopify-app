@@ -39,6 +39,7 @@ function productShapeFromShopify(raw, shop) {
     price: Number.isFinite(price) ? price : null,
     handle: raw.handle || "",
     link: raw.handle ? `/products/${raw.handle}` : "#",
+    shopifyUpdatedAt: raw.updated_at || raw.updatedAt || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
 }
@@ -146,6 +147,7 @@ function productShapeFromGql(p, shop, syncAt, FieldValue) {
     discontinuedAt: null, // set when tombstoned
     deletedInShopify: false,
 
+    shopifyUpdatedAt: p?.updatedAt || p?.updated_at || null,
     updatedAt: FieldValue.serverTimestamp(),
   };
 }

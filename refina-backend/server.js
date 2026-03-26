@@ -40,6 +40,8 @@ import { fetchFallbackProducts } from './routes/catalog-fallback.js';
 // Product Indexing on Install
 import mountBackfillRoutes from './routes/backfill.js';
 
+import productWebhooksRoutes from "./routes/productWebhooks.js";
+
 // ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
@@ -390,8 +392,9 @@ function rateLimitAppProxy(req, res, next) {
 const app = express();
 app.set('trust proxy', 1);
 
-// ✅ Mount privacy/webhooks FIRST (needs express.raw inside router; no json/urlencoded before this)
+// ✅ Mount webhooks FIRST (needs express.raw inside router; no json/urlencoded before this)
 app.use("/api/privacy", privacyWebhooksRoutes);
+app.use("/api/webhooks/products", productWebhooksRoutes);
 
 // Parsers & common middleware (safe after webhooks)
 app.use(express.json({ limit: '1mb' }));
