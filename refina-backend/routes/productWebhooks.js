@@ -153,6 +153,7 @@ function productShapeFromGql(p, shop, syncAt, FieldValue) {
     availableForSale,
     isActive,
     lastSeenAt: syncAt,
+    lastWebhookAt: syncAt,
     discontinuedAt: null,
     deletedInShopify: false,
 
@@ -187,6 +188,27 @@ function productDocRef(shop, productId) {
   return db.collection("products").doc(shop).collection("items").doc(String(productId));
 }
 
+function buildDeletedProductPatch(shop, numericId, FieldValue) {
+  return {
+    id: String(numericId),
+    storeId: shop,
+    deletedInShopify: true,
+    published: false,
+    isActive: false,
+    availableForSale: false,
+    shopifyStatus: "deleted",
+    discontinuedAt: FieldValue.serverTimestamp(),
+    lastWebhookAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+function buildWebhookTouchPatch(FieldValue) {
+  return {
+    lastWebhookAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
 router.post("/", rawJson, async (req, res) => {
   const rawBody = req.body?.toString?.("utf8") || "";
 
@@ -222,16 +244,7 @@ router.post("/", rawJson, async (req, res) => {
       // Product may have been deleted/hidden between webhook emit and fetch.
       if (!product) {
         await productDocRef(shop, numericId).set(
-          {
-            id: String(numericId),
-            storeId: shop,
-            deletedInShopify: true,
-            isActive: false,
-            availableForSale: false,
-            shopifyStatus: "deleted",
-            discontinuedAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-          },
+          buildDeletedProductPatch(shop, numericId, FieldValue),
           { merge: true }
         );
 
@@ -241,7 +254,13 @@ router.post("/", rawJson, async (req, res) => {
       const syncAt = FieldValue.serverTimestamp();
       const doc = productShapeFromGql(product, shop, syncAt, FieldValue);
 
-      await productDocRef(shop, numericId).set(doc, { merge: true });
+        await productDocRef(shop, numericId).set(
+        {
+          ...doc,
+          ...buildWebhookTouchPatch(FieldValue),
+        },
+        { merge: true }
+      );
 
       return res.status(200).send("OK");
     }
@@ -252,19 +271,10 @@ router.post("/", rawJson, async (req, res) => {
         return res.status(400).send("Missing product id");
       }
 
-      await productDocRef(shop, numericId).set(
-        {
-          id: String(numericId),
-          storeId: shop,
-          deletedInShopify: true,
-          isActive: false,
-          availableForSale: false,
-          shopifyStatus: "deleted",
-          discontinuedAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+        await productDocRef(shop, numericId).set(
+          buildDeletedProductPatch(shop, numericId, FieldValue),
+          { merge: true }
+        );
 
       return res.status(200).send("OK");
     }

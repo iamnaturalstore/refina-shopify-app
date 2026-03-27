@@ -168,12 +168,15 @@ async function tombstoneUnseenProducts(dbAdmin, shop, syncAt) {
   let tombstoned = 0;
 
   for (const doc of snap.docs) {
-    batch.update(doc.ref, {
+      batch.update(doc.ref, {
+      deletedInShopify: false,      // explicitly not "deleted at source"
+      published: false,
       isActive: false,
       availableForSale: false,
+      shopifyStatus: "tombstoned",
       discontinuedAt: syncAt,
+      updatedAt: FieldValue.serverTimestamp(),
     });
-
     tombstoned++;
     opCount++;
 
