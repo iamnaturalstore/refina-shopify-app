@@ -5,7 +5,7 @@
 //   bootstrap: node workers/indexer.mjs bootstrap --store <storeId> [--limit 5000] [--commit] [--verbose]
 //   index:     node workers/indexer.mjs index --store <storeId> --product <productId> [--commit]
 
-import { db, nowTs } from "../bff/lib/firestore.js";
+import { db, nowTs, FieldValue } from "../bff/lib/firestore.js";
 import { callGeminiIndex as callGemini } from "../bff/ai/gemini.js";
 import { buildExtractEntitiesPrompt } from "../ai/prompts/extractEntities.js";
 import { validateExtractionOutput } from "../ai/jsonSchemas.js";
@@ -99,7 +99,7 @@ const GENCFG = {
   temperature: Number(process.env.REFINA_INDEXER_TEMP ?? 0.2),
   topP: Number(process.env.REFINA_INDEXER_TOPP ?? 0.8),
   maxOutputTokens: Number(process.env.REFINA_INDEXER_MAXTOK_OUT || 8192),
-  model: process.env.REFINA_INDEXER_MODEL || "gemini-1.5-flash-001",
+  model: process.env.REFINA_INDEXER_MODEL || "gemini-2.5-flash",
 };
 const LLM_TIMEOUT_MS = Number(process.env.REFINA_INDEXER_TIMEOUT_MS || 30000);
 const BATCH_SIZE = 400;
@@ -534,11 +534,14 @@ async function writeStatus({ force = false, finish = false, error = "" } = {}) {
   if (phase === "preparing" && statusState.lastWrite === 0) {
     base.startedAt = nowTs();
   }
-  if (finish || error) {
+    if (finish || error) {
     base.finishedAt = nowTs();
   }
+
   if (error) {
     base.error = String(error).slice(0, 300);
+  } else if (finish || phase === "complete") {
+    base.error = FieldValue.delete();
   }
   // soft debug fields, harmless in prod
   try { base.workerPid = Number(process.pid); } catch {}
