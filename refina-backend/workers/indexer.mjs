@@ -146,6 +146,90 @@ function capsuleHashForEmbedding(text) {
   return createHash("sha256").update(String(text || ""), "utf8").digest("hex");
 }
 
+// add just below capsuleHashForEmbedding(...)
+const SEMANTIC_SOURCE_VERSION = "product-semantics-v1";
+
+function normalizeSemanticText(v, cap = 4000) {
+  return stripHtml(String(v || ""))
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, cap);
+}
+
+function normalizeSemanticTags(tags, cap = 64) {
+  const arr = Array.isArray(tags)
+    ? tags
+    : typeof tags === "string"
+      ? tags.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+
+  return Array.from(
+    new Set(
+      arr
+        .map((t) => String(t || "").trim().toLowerCase())
+        .filter(Boolean)
+    )
+  )
+    .sort()
+    .slice(0, cap);
+}
+
+function buildSemanticSnapshot(product) {
+  return {
+    _v: SEMANTIC_SOURCE_VERSION,
+    title: normalizeSemanticText(product?.title || product?.name || "", 300),
+    description: normalizeSemanticText(product?.description || product?.body_html || "", 8000),
+    tags: normalizeSemanticTags(product?.tags, 64),
+    productType: normalizeSemanticText(product?.productType || product?.product_type || "", 120),
+    category: normalizeSemanticText(product?.category || "", 120),
+    handle: normalizeSemanticText(product?.handle || "", 160),
+  };
+}
+
+function buildSemanticMeta(product) {
+  const semanticSnapshot = buildSemanticSnapshot(product);
+  const semanticHash = createHash("sha256")
+    .update(JSON.stringify(semanticSnapshot), "utf8")
+    .digest("hex");
+
+  return {
+    semanticSnapshot,
+    semanticHash,
+    semanticSourceVersion: SEMANTIC_SOURCE_VERSION,
+  };
+}
+
+function shouldIndexProduct(product, semanticHash) {
+  const indexedFromSemanticHash = String(product?.indexedFromSemanticHash || "").trim();
+  if (!semanticHash) return true;
+  if (!indexedFromSemanticHash) return true;
+  return indexedFromSemanticHash !== String(semanticHash);
+}
+
+async function upsertProductSemanticState({
+  storeId,
+  productId,
+  semanticMeta,
+  indexed = false,
+  shopifyUpdatedAt = null,
+}) {
+  const ref = db.doc(`products/${storeId}/items/${productId}`);
+
+  const patch = {
+    semanticHash: semanticMeta?.semanticHash || "",
+    semanticSourceVersion: semanticMeta?.semanticSourceVersion || SEMANTIC_SOURCE_VERSION,
+    lastSemanticSyncAt: nowTs(),
+  };
+
+  if (indexed) {
+    patch.indexedFromSemanticHash = semanticMeta?.semanticHash || "";
+    patch.lastIndexedAt = nowTs();
+    patch.indexedFromShopifyUpdatedAt = shopifyUpdatedAt || null;
+  }
+
+  await ref.set(patch, { merge: true });
+}
+
 function stableStr(v, cap) {
 const s = String(v || "").trim();
 return cap && s.length > cap ? s.slice(0, cap) : s;
@@ -311,10 +395,16 @@ async function fetchProductsFromFirestore(storeId, limit = 5000) {
       tags: d.tags || [],
       productType: d.productType || d.product_type || "",
       productType_norm: d.productType_norm || d.productTypeNormalized || "",
+      category: d.category || "",
       specs: d.specs || d.metafields || {},
       usageStep: d.usageStep || d.step || "",
       image: d.image || d.images?.[0]?.src || "",
       handle: d.handle || d.url || "",
+      shopifyUpdatedAt: d.shopifyUpdatedAt || null,
+      semanticHash: d.semanticHash || "",
+      semanticSourceVersion: d.semanticSourceVersion || "",
+      indexedFromSemanticHash: d.indexedFromSemanticHash || "",
+      lastIndexedAt: d.lastIndexedAt || null,
     });
   });
   return out;
@@ -548,10 +638,9 @@ async function upsertProductNormalizedFields({ storeId, productId, kb }) {
   );
 }
 
-async function upsertKbProduct({ storeId, product, extraction }) {
+async function upsertKbProduct({ storeId, product, extraction, semanticMeta = null }) {
   const kb = deriveKbFromExtraction(product, extraction);
 
-  // Write KB doc (unchanged)
   const ref = db.doc(`kb/${storeId}/products/${product.id}`);
   await ref.set(
     {
@@ -563,12 +652,21 @@ async function upsertKbProduct({ storeId, product, extraction }) {
     { merge: true }
   );
 
-  // NEW: ensure product doc carries normalized fields immediately
   await upsertProductNormalizedFields({
     storeId,
     productId: product.id,
     kb,
   });
+
+  if (semanticMeta?.semanticHash) {
+    await upsertProductSemanticState({
+      storeId,
+      productId: product.id,
+      semanticMeta,
+      indexed: true,
+      shopifyUpdatedAt: product?.shopifyUpdatedAt || null,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -769,6 +867,12 @@ function pLimit(n) {
   try {
     if (MODE === "bootstrap") {
       const products = await fetchProductsFromFirestore(STORE, LIMIT);
+      if (VERBOSE) {
+  console.log(
+    "[bootstrap sample ids]",
+    products.map((p) => String(p.id))
+  );
+}
       if (!products.length) {
         console.log(JSON.stringify({ ok: true, commit: COMMIT, processed: 0, reason: "no_products" }, null, 2));
         return;
@@ -786,49 +890,86 @@ function pLimit(n) {
       await writeStatus({ force: true }); // visible flip from preparing → indexing
       const reasonCounts = {};
       const failedSamples = [];
-      const tasks = products.map((p) => limit(async () => {
-        const r = await extractForProduct({ storeId: STORE, product: p });
-        llmMsSum += r.ms || 0;
-        if (!r.ok) {
-          failures++;
-          reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1;
-          if (failedSamples.length < 10) {
-            failedSamples.push({
-              id: p.id,
-              reason: r.reason,
-              raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined,
-            });
-          }
-          if (COMMIT) {
-            const base = baselineExtractFromText(productToPromptInput(p));
-            if (base.entities.length || base.specs.length) {
-              await upsertEntitiesAndLinks({
-                storeId: STORE,
-                productId: p.id,
-                extraction: { product: { id: String(p.id) }, ...base },
-                product: p,
-              });
-              await upsertKbProduct({ storeId: STORE, product: p, extraction: base });
-              processed++; wrote++;
-              // progress: one more embedded/link write completed
-              await bumpDone(1);
-            } else {
-              processed++;
-            }
-          } else {
-            processed++;
-          }
-          return;
-        }
+  const tasks = products.map((p) => limit(async () => {
+  const semanticMeta = buildSemanticMeta(p);
+  const needsIndex = shouldIndexProduct(p, semanticMeta.semanticHash);
+
+  if (COMMIT) {
+    await upsertProductSemanticState({
+      storeId: STORE,
+      productId: p.id,
+      semanticMeta,
+      indexed: false,
+      shopifyUpdatedAt: p?.shopifyUpdatedAt || null,
+    });
+  }
+
+  if (!needsIndex) {
+    processed++;
+    await bumpDone(1);
+    return;
+  }
+
+  const r = await extractForProduct({ storeId: STORE, product: p });
+  llmMsSum += r.ms || 0;
+
+  if (!r.ok) {
+    failures++;
+    reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1;
+    if (failedSamples.length < 10) {
+      failedSamples.push({
+        id: p.id,
+        reason: r.reason,
+        raw: r.raw ? String(r.raw).replace(/\s+/g, " ").slice(0, 120) : undefined,
+      });
+    }
+
+    if (COMMIT) {
+      const base = baselineExtractFromText(productToPromptInput(p));
+      if (base.entities.length || base.specs.length) {
+        await upsertEntitiesAndLinks({
+          storeId: STORE,
+          productId: p.id,
+          extraction: { product: { id: String(p.id) }, ...base },
+          product: p,
+        });
+        await upsertKbProduct({
+          storeId: STORE,
+          product: p,
+          extraction: base,
+          semanticMeta,
+        });
         processed++;
-        if (COMMIT) {
-          await upsertEntitiesAndLinks({ storeId: STORE, productId: p.id, extraction: r.value, product: p });
-          await upsertKbProduct({ storeId: STORE, product: p, extraction: r.value });
-          // progress: one more embedded/link write completed
-          await bumpDone(1);
-          wrote++;
-        }
-      }));
+        wrote++;
+        await bumpDone(1);
+      } else {
+        processed++;
+        await bumpDone(1);
+      }
+    } else {
+      processed++;
+    }
+    return;
+  }
+
+  processed++;
+  if (COMMIT) {
+    await upsertEntitiesAndLinks({
+      storeId: STORE,
+      productId: p.id,
+      extraction: r.value,
+      product: p,
+    });
+    await upsertKbProduct({
+      storeId: STORE,
+      product: p,
+      extraction: r.value,
+      semanticMeta,
+    });
+    await bumpDone(1);
+    wrote++;
+  }
+}));
       await Promise.all(tasks);
       const ms = Date.now() - t0;
       // Ensure we mark completion with 100% if we reached total
@@ -850,44 +991,112 @@ function pLimit(n) {
       if (!pid) throw new Error("product id required for index mode");
       const doc = await db.doc(`products/${STORE}/items/${pid}`).get();
       if (!doc.exists) throw new Error(`product not found: ${pid}`);
+
       const product = { id: doc.id, ...doc.data() };
-      // ── Progress for single-product index ───────────────────
-      setStatusShop(STORE);
-      setStatusTotal(1);
-      setStatusDone(0);
-      setStatusPhase("preparing");
-      await writeStatus({ force: true });
-      setStatusPhase("indexing");
-      await writeStatus({ force: true });
-      const r = await extractForProduct({ storeId: STORE, product });
-      if (!r.ok) {
-        const base = baselineExtractFromText(productToPromptInput(product));
-        if (COMMIT && (base.entities.length || base.specs.length)) {
-          await upsertEntitiesAndLinks({
-            storeId: STORE,
-            productId: product.id,
-            extraction: { product: { id: String(product.id) }, ...base },
-            product,
-          });
-          await upsertKbProduct({ storeId: STORE, product, extraction: base });
-          await bumpDone(1);
-          await writeStatus({ finish: true, force: true });
-          console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms || 0, fallback: true, reason: r.reason }, null, 2));
-          process.exit(0);
-        }
-        // Keep KB in sync even when not committing entity/link writes
-        await upsertKbProduct({ storeId: STORE, product, extraction: base });
-        console.log(JSON.stringify({ ok: false, mode: MODE, reason: r.reason, errors: r.errors || [], llmMs: r.ms }, null, 2));
-        await writeStatus({ force: true, error: r.reason || "index_failed" });
-        process.exit(2);
-      }
-      if (COMMIT) {
-        await upsertEntitiesAndLinks({ storeId: STORE, productId: product.id, extraction: r.value, product });
-        await upsertKbProduct({ storeId: STORE, product, extraction: r.value });
-        await bumpDone(1);
-        await writeStatus({ finish: true, force: true });
-      }
-      console.log(JSON.stringify({ ok: true, mode: MODE, commit: COMMIT, productId: product.id, llmMs: r.ms }, null, 2));
+      const semanticMeta = buildSemanticMeta(product);
+      const needsIndex = shouldIndexProduct(product, semanticMeta.semanticHash);
+
+// ── Progress for single-product index ───────────────────
+setStatusShop(STORE);
+setStatusTotal(1);
+setStatusDone(0);
+setStatusPhase("preparing");
+await writeStatus({ force: true });
+
+if (COMMIT) {
+  await upsertProductSemanticState({
+    storeId: STORE,
+    productId: product.id,
+    semanticMeta,
+    indexed: false,
+    shopifyUpdatedAt: product?.shopifyUpdatedAt || null,
+  });
+}
+
+if (!needsIndex) {
+  await bumpDone(1);
+  await writeStatus({ finish: true, force: true });
+  console.log(JSON.stringify({
+    ok: true,
+    mode: MODE,
+    commit: COMMIT,
+    productId: product.id,
+    skipped: true,
+    reason: "semantic_unchanged",
+  }, null, 2));
+  return;
+}
+
+setStatusPhase("indexing");
+await writeStatus({ force: true });
+
+const r = await extractForProduct({ storeId: STORE, product });
+
+if (!r.ok) {
+  const base = baselineExtractFromText(productToPromptInput(product));
+
+  if (COMMIT && (base.entities.length || base.specs.length)) {
+    await upsertEntitiesAndLinks({
+      storeId: STORE,
+      productId: product.id,
+      extraction: { product: { id: String(product.id) }, ...base },
+      product,
+    });
+    await upsertKbProduct({
+      storeId: STORE,
+      product,
+      extraction: base,
+      semanticMeta,
+    });
+    await bumpDone(1);
+    await writeStatus({ finish: true, force: true });
+    console.log(JSON.stringify({
+      ok: true,
+      mode: MODE,
+      commit: COMMIT,
+      productId: product.id,
+      llmMs: r.ms || 0,
+      fallback: true,
+      reason: r.reason,
+    }, null, 2));
+    process.exit(0);
+  }
+
+  console.log(JSON.stringify({
+    ok: false,
+    mode: MODE,
+    reason: r.reason,
+    errors: r.errors || [],
+    llmMs: r.ms,
+  }, null, 2));
+  await writeStatus({ force: true, error: r.reason || "index_failed" });
+  process.exit(2);
+}
+
+if (COMMIT) {
+  await upsertEntitiesAndLinks({
+    storeId: STORE,
+    productId: product.id,
+    extraction: r.value,
+    product,
+  });
+  await upsertKbProduct({
+    storeId: STORE,
+    product,
+    extraction: r.value,
+    semanticMeta,
+  });
+  await bumpDone(1);
+  await writeStatus({ finish: true, force: true });
+}
+
+console.log(JSON.stringify({
+  ok: true,
+  mode: MODE,
+  commit: COMMIT,
+  productId: product.id,
+  llmMs: r.ms,
+}, null, 2));
     } else {
       throw new Error(`unknown mode: ${MODE}`);
     }
