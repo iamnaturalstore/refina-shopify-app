@@ -493,7 +493,7 @@ export default function Home() {
                   boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
                 }}
               >
-                {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
+                {syncBusy ? "Starting…" : kbActive ? "Building knowledge…" : "Refresh knowledge"}
               </button>
             </div>
             {syncMsg && (
