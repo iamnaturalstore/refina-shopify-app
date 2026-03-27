@@ -580,18 +580,22 @@ app.post("/api/knowledge/refresh", express.json(), async (req, res) => {
     const enrichUrl = `${scheme}://${host}/api/admin/enrichment/run`;
 
     fetch(enrichUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "",
-      },
-      body: JSON.stringify({
-        storeId: shop,
-        rebuildMissingOnly: false,  // full re-enrich, not just gaps
-        recomputeMappings: true,
-      }),
-      keepalive: true,
-    }).catch(() => {});
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "",
+  },
+  body: JSON.stringify({
+    storeId: shop,
+    rebuildMissingOnly: false,  // full re-enrich, not just gaps
+    recomputeMappings: true,
+  }),
+  keepalive: true,
+}).then((r) => {
+  console.log(`[knowledge/refresh] enrichment response: ${r.status}`);
+}).catch((e) => {
+  console.error("[knowledge/refresh] enrichment fetch failed:", e?.message);
+});
 
     return res.status(202).json({ ok: true, queued: true, shop, status: "enriching" });
 
