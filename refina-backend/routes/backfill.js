@@ -441,114 +441,145 @@ return res.json({ ok: true, shop, synced: total, pages, tombstoned });
     }
   });
 
-    // ───────────────────────────────────────────────────────────
-  // READ-ONLY: /api/indexer/status?shop=<full-domain>&fresh=1
-  // Returns normalized shape for the Admin UI progress panel.
-  // Auth: none (read-only progress).
   // ───────────────────────────────────────────────────────────
-  app.get("/api/indexer/status", async (req, res) => {
-    res.set("Cache-Control", "no-store");
-    try {
-      const rawShop = String(req.query.shop || "").toLowerCase().trim();
-      const shop = toMyshopifyDomain(rawShop);
-      if (!shop) {
-        return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
-      }
-
-      // Read top-level Firestore doc: indexerStatus/<shop>
-      const ref = dbAdmin.doc(`indexerStatus/${shop}`);
-      const snap = await ref.get();
-      if (!snap.exists) {
-        return res.json({ ok: true, shop, indexer: null });
-      }
-
-      const d = snap.data() || {};
-      // Normalize to what the UI expects
-      const updatedAtIso =
-        d.updatedAt?.toDate?.() ? d.updatedAt.toDate().toISOString() : (d.updatedAt || null);
-
-      const indexer = {
-        phase: String(d.phase || "preparing"),
-        // prefer embedded/imported if you later split them; for now mirror done→both
-        totalProducts: Number(d.total || 0),
-        importedCount: Number((d.imported ?? d.done) || 0),
-        embeddedCount: Number((d.embedded ?? d.done) || 0),
-        pct: Number(d.pct || 0),
-        updatedAt: updatedAtIso,
-      };
-
-      return res.json({ ok: true, shop, indexer });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: "status_read_failed" });
+// READ-ONLY: /api/indexer/status?shop=<full-domain>&fresh=1
+// Returns normalized shape for the Admin UI progress panel.
+// Auth: none (read-only progress).
+// ───────────────────────────────────────────────────────────
+app.get("/api/indexer/status", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const rawShop = String(req.query.shop || "").toLowerCase().trim();
+    const shop = toMyshopifyDomain(rawShop);
+    if (!shop) {
+      return res.status(400).json({ ok: false, error: "missing_or_invalid_shop" });
     }
-  });
+
+    const ref = dbAdmin.doc(`indexerStatus/${shop}`);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      return res.json({ ok: true, shop, indexer: null });
+    }
+
+    const d = snap.data() || {};
+
+    const updatedAtIso =
+      d.updatedAt?.toDate?.() ? d.updatedAt.toDate().toISOString() : (d.updatedAt || null);
+
+    const finishedAtIso =
+      d.finishedAt?.toDate?.() ? d.finishedAt.toDate().toISOString() : (d.finishedAt || null);
+
+    const phase = String(d.phase || "preparing");
+    const done = Number(d.done || 0);
+    const total = Number(d.total || 0);
+    const error = d.error ? String(d.error) : null;
+
+    let statusLabel = "Preparing knowledge";
+    if (phase === "queued") statusLabel = "Queued";
+    else if (phase === "preparing") statusLabel = "Preparing knowledge";
+    else if (phase === "scanning") statusLabel = "Scanning catalogue";
+    else if (phase === "indexing") statusLabel = "Updating product knowledge";
+    else if (phase === "enriching") statusLabel = "Enriching product knowledge";
+    else if (phase === "complete") statusLabel = total > 0 ? "Up to date" : "Complete";
+    else if (phase === "error") statusLabel = "Needs attention";
+
+    const indexer = {
+      phase,
+      totalProducts: total,
+      importedCount: Number((d.imported ?? done) || 0),
+      embeddedCount: Number((d.embedded ?? done) || 0),
+      done,
+      pct: Number(d.pct || 0),
+      updatedAt: updatedAtIso,
+      finishedAt: finishedAtIso,
+      error,
+      isTerminal: phase === "complete" || phase === "error",
+      statusLabel,
+    };
+
+    return res.json({ ok: true, shop, indexer });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "status_read_failed" });
+  }
+});
 
 
   app.use("/api/backfill", queueRouter);
 
 // ───────────────────────────────────────────────────────────
-  // NEW: Session-based starter for embedded Admin
-  // POST /api/sync/start
-  // - derives shop from OFFLINE (changed from previously incorrect ONLINE session call)
-  // - enforces single-active & cooldown using indexerStatus/<shop>
-  // - internally calls existing /api/backfill/queue?shop=...
-  // Response: { ok, queued, reason?, shop }
-  // ───────────────────────────────────────────────────────────
-  app.post("/api/sync/start", express.json(), async (req, res) => {
-    res.set("Cache-Control", "no-store");
+// Session-based starter for embedded Admin
+// POST /api/sync/start
+// Truthful control-plane semantics:
+// - guard active/cooldown
+// - call existing queue endpoint
+// - if queue response is ugly, verify whether work was actually picked up
+// Response: { ok, queued, reason?, shop, status? }
+// ───────────────────────────────────────────────────────────
+app.post("/api/sync/start", express.json(), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const rawShop = String(req.query.shop || "").toLowerCase().trim();
+    const shop = toMyshopifyDomain(rawShop);
+    if (!shop) {
+      return res.status(401).json({ ok: false, error: "no_shop_context" });
+    }
+
+    const offline = await loadOfflineSession(shop);
+    if (!offline?.accessToken) {
+      return res.status(401).json({ ok: false, error: "no_offline_session", shop });
+    }
+
+    const statusRef = dbAdmin.doc(`indexerStatus/${shop}`);
+    const snap = await statusRef.get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    const phase = String(d.phase || "");
+    const now = Date.now();
+
+    const updatedMs =
+      typeof d.updatedAt?.toMillis === "function"
+        ? d.updatedAt.toMillis()
+        : typeof d.updatedAt === "number"
+        ? d.updatedAt
+        : 0;
+
+    const finishedMs =
+      typeof d.finishedAt?.toMillis === "function"
+        ? d.finishedAt.toMillis()
+        : typeof d.finishedAt === "number"
+        ? d.finishedAt
+        : 0;
+
+    const TERMINAL = new Set(["complete", "error"]);
+    const ACTIVE_WINDOW_MS = 90_000;
+    const isActive = !TERMINAL.has(phase) && updatedMs && now - updatedMs < ACTIVE_WINDOW_MS;
+
+    if (isActive) {
+      return res.json({ ok: true, queued: false, reason: "already_running", shop, status: "running" });
+    }
+
+    const COOLDOWN_MS = 10 * 60 * 1000;
+    const inCooldown = finishedMs && now - finishedMs < COOLDOWN_MS;
+
+    if (inCooldown) {
+      return res.json({
+        ok: true,
+        queued: false,
+        reason: "cooldown",
+        shop,
+        status: "cooldown",
+        retryAfterSec: Math.max(0, Math.ceil((COOLDOWN_MS - (now - finishedMs)) / 1000)),
+      });
+    }
+
+    const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+    const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
+    const url = `${scheme}://${host}/api/backfill/queue?shop=${encodeURIComponent(shop)}`;
+
+    let queueResp;
+    let queueBody = "";
+
     try {
-      // 1) Resolve shop from query (?shop=) — no ONLINE dependency
-      const rawShop = String(req.query.shop || "").toLowerCase().trim();
-      const shop = toMyshopifyDomain(rawShop);
-      if (!shop) {
-        return res.status(401).json({ ok: false, error: "no_shop_context" });
-      }
-
-      // 1.5) OFFLINE token preflight (importer relies on this)
-      const offline = await loadOfflineSession(shop);
-      if (!offline?.accessToken) {
-        return res.status(401).json({ ok: false, error: "no_offline_session", shop });
-      }
-
-      // 2) Read current indexer status for guards
-      const statusRef = dbAdmin.doc(`indexerStatus/${shop}`);
-      const snap = await statusRef.get();
-      const d = snap.exists ? (snap.data() || {}) : {};
-      const phase = String(d.phase || "");
-      const now = Date.now();
-      const updatedMs =
-        typeof d.updatedAt?.toMillis === "function"
-          ? d.updatedAt.toMillis()
-          : typeof d.updatedAt === "number"
-          ? d.updatedAt
-          : 0;
-      const finishedMs =
-        typeof d.finishedAt?.toMillis === "function"
-          ? d.finishedAt.toMillis()
-          : typeof d.finishedAt === "number"
-          ? d.finishedAt
-          : 0;
-
-      // Guard A: already running (phase not terminal & recently updated)
-      const TERMINAL = new Set(["complete", "error"]);
-      const ACTIVE_WINDOW_MS = 90_000; // 90s
-      const isActive = !TERMINAL.has(phase) && updatedMs && now - updatedMs < ACTIVE_WINDOW_MS;
-      if (isActive) {
-        return res.json({ ok: true, queued: false, reason: "already_running", shop });
-      }
-
-      // Guard B: cooldown after finish/fail
-      const COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
-      const inCooldown = finishedMs && now - finishedMs < COOLDOWN_MS;
-      if (inCooldown) {
-        return res.json({ ok: true, queued: false, reason: "cooldown", shop, retryAfterSec: Math.max(0, Math.ceil((COOLDOWN_MS - (now - finishedMs)) / 1000)) });
-      }
-
-      // 3) Internal call to existing queue endpoint (admin-secret server-to-server)
-      const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
-      const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
-      const url = `${scheme}://${host}/api/backfill/queue?shop=${encodeURIComponent(shop)}`;
-      const r = await fetch(url, {
+      queueResp = await fetch(url, {
         method: "POST",
         headers: {
           "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "",
@@ -556,21 +587,56 @@ return res.json({ ok: true, shop, synced: total, pages, tombstoned });
         },
         keepalive: true,
       });
-      if (!r.ok) {
-        const body = await r.text().catch(() => "");
-        return res.status(502).json({ ok: false, error: `queue_failed_${r.status}`, detail: body.slice(0, 300) });
-      }
+      queueBody = await queueResp.text().catch(() => "");
+    } catch (e) {
+      queueResp = null;
+      queueBody = e?.message || "queue_fetch_failed";
+    }
 
-      // 4) Optionally mark "queued at" for troubleshootability
+    if (queueResp?.ok) {
       try {
         await statusRef.set({ phase: "queued", updatedAt: nowTs() }, { merge: true });
       } catch {}
-
-      return res.status(202).json({ ok: true, queued: true, shop });
-    } catch (e) {
-      const msg = e?.message || "sync_start_failed";
-      const code = e?.status || 500;
-      return res.status(code).json({ ok: false, error: msg });
+      return res.status(202).json({ ok: true, queued: true, shop, status: "queued" });
     }
-  });
+
+    // Soft-reconcile: queue path may have completed/picked up work even if caller saw a bad response.
+    try {
+      const verifySnap = await statusRef.get();
+      const vd = verifySnap.exists ? (verifySnap.data() || {}) : {};
+      const vPhase = String(vd.phase || "");
+      const vUpdatedMs =
+        typeof vd.updatedAt?.toMillis === "function"
+          ? vd.updatedAt.toMillis()
+          : typeof vd.updatedAt === "number"
+          ? vd.updatedAt
+          : 0;
+
+      const pickedUpPhases = new Set(["queued", "preparing", "scanning", "indexing", "enriching", "complete"]);
+      const pickedUp = pickedUpPhases.has(vPhase) && vUpdatedMs && now - vUpdatedMs < 2 * 60 * 1000;
+
+      if (pickedUp) {
+        return res.status(202).json({
+          ok: true,
+          queued: true,
+          shop,
+          status: "accepted_via_status",
+          note: "queue_response_unreliable_but_work_detected",
+        });
+      }
+    } catch {}
+
+    const queueStatus = queueResp?.status || 0;
+    return res.status(502).json({
+      ok: false,
+      error: `queue_failed_${queueStatus || "unknown"}`,
+      detail: String(queueBody || "").slice(0, 300),
+      shop,
+    });
+  } catch (e) {
+    const msg = e?.message || "sync_start_failed";
+    const code = e?.status || 500;
+    return res.status(code).json({ ok: false, error: msg });
+  }
+});
  }
