@@ -208,24 +208,6 @@ async function embedText(text) {
     return [];
   }
 }
-function productLifecycleState(p = {}) {
-  if (!p || typeof p !== "object") return "missing";
-
-  const status = String(p.shopifyStatus || "").trim().toLowerCase();
-
-  if (p.deletedInShopify === true || status === "deleted") return "deleted";
-  if (status === "tombstoned") return "tombstoned";
-  if (p.isActive === true) return "active";
-  if (status === "draft") return "draft";
-  if (status === "archived") return "archived";
-  if (p.isActive === false) return "inactive";
-
-  return "unknown";
-}
-
-function isServeEligibleProduct(p = {}) {
-  return productLifecycleState(p) === "active";
-}
 
 async function loadEmbeddings(storeId, cacheEpoch) {
   // First try in-memory cache (per process, super fast)
@@ -267,20 +249,19 @@ async function loadEmbeddings(storeId, cacheEpoch) {
   }
 }
 
-async function loadProductsByIds(storeId, ids, { onlyServeEligible = true } = {}) {
+async function loadProductsByIds(storeId, ids) {
+  // Batch read via getAll to avoid 1-by-1 round trips.
   const uniq = Array.from(new Set(ids.map(String)));
   if (!uniq.length) return [];
 
   const col = db.collection("products").doc(storeId).collection("items");
-  const refs = uniq.map((id) => col.doc(id));
+  const refs = uniq.map(id => col.doc(id));
 
+  // Single network call for all refs (Admin SDK).
   const snaps = await db.getAll(...refs);
-
-  const docs = snaps
-    .filter((s) => s.exists)
-    .map((s) => ({ id: s.id, ...s.data() }));
-
-  return onlyServeEligible ? docs.filter(isServeEligibleProduct) : docs;
+  return snaps
+    .filter(s => s.exists)
+    .map(s => ({ id: s.id, ...s.data() }));
 }
 
 
@@ -1737,10 +1718,7 @@ async function loadProductsForScoring(storeId, ids = []) {
       // eslint-disable-next-line no-await-in-loop
       const snaps = await db.getAll(...batch, { fieldMask });
       for (const s of snaps) {
-      if (s.exists) {
-          const doc = { id: s.id, ...s.data() };
-          if (isServeEligibleProduct(doc)) out.push(doc);
-        }
+        if (s.exists) out.push({ id: s.id, ...s.data() });
       }
     }
     return out;
@@ -1750,10 +1728,7 @@ async function loadProductsForScoring(storeId, ids = []) {
       // eslint-disable-next-line no-await-in-loop
       const snaps = await db.getAll(...batch);
       for (const s of snaps) {
-      if (s.exists) {
-          const doc = { id: s.id, ...s.data() };
-          if (isServeEligibleProduct(doc)) fallback.push(doc);
-        }
+        if (s.exists) fallback.push({ id: s.id, ...s.data() });
       }
     }
     return fallback;
