@@ -881,7 +881,11 @@ function indexResult({
   wrote = false,
 }) {
   return {
-    ok: status !== "failed",
+    ok:
+      status === "indexed" ||
+      status === "indexed_fallback" ||
+      status === "skipped_semantic_unchanged" ||
+      status === "skipped_deleted_or_tombstoned",
     mode: "index",
     status,
     storeId,
