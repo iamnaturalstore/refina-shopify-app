@@ -858,6 +858,206 @@ function pLimit(n) {
   return (fn) => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); next(); });
 }
 
+function isDeletedOrTombstonedProduct(product) {
+  if (!product || typeof product !== "object") return false;
+
+  if (product.deletedInShopify === true) return true;
+
+  const status = String(product.shopifyStatus || "").trim().toLowerCase();
+  if (status === "deleted") return true;
+
+  return false;
+}
+
+function indexResult({
+  status,
+  storeId,
+  productId = "",
+  commit = false,
+  llmMs = 0,
+  reason = "",
+  errors = [],
+  fallback = false,
+  wrote = false,
+}) {
+  return {
+    ok: status !== "failed",
+    mode: "index",
+    status,
+    storeId,
+    productId: productId ? String(productId) : "",
+    commit: !!commit,
+    wrote: !!wrote,
+    fallback: !!fallback,
+    llmMs: Number(llmMs || 0),
+    ...(reason ? { reason: String(reason) } : {}),
+    ...(Array.isArray(errors) && errors.length ? { errors } : {}),
+  };
+}
+
+function exitCodeForIndexResult(result) {
+  switch (result?.status) {
+    case "indexed":
+    case "indexed_fallback":
+    case "skipped_semantic_unchanged":
+    case "skipped_deleted_or_tombstoned":
+      return 0;
+    case "not_found":
+      return 2;
+    case "failed":
+    default:
+      return 1;
+  }
+}
+
+async function runSingleProductIndex({
+  storeId,
+  productId,
+  commit,
+}) {
+  const pid = String(productId || "").trim();
+  if (!pid) {
+    return indexResult({
+      status: "failed",
+      storeId,
+      productId: "",
+      commit,
+      reason: "product_id_required",
+    });
+  }
+
+  setStatusShop(storeId);
+  setStatusTotal(1);
+  setStatusDone(0);
+  setStatusPhase("preparing");
+  await writeStatus({ force: true });
+
+  const doc = await db.doc(`products/${storeId}/items/${pid}`).get();
+  if (!doc.exists) {
+    await writeStatus({ force: true, error: "product_not_found" });
+    return indexResult({
+      status: "not_found",
+      storeId,
+      productId: pid,
+      commit,
+      reason: "product_not_found",
+    });
+  }
+
+  const product = { id: doc.id, ...doc.data() };
+
+  if (isDeletedOrTombstonedProduct(product)) {
+    await bumpDone(1);
+    await writeStatus({ finish: true, force: true });
+    return indexResult({
+      status: "skipped_deleted_or_tombstoned",
+      storeId,
+      productId: product.id,
+      commit,
+      reason: "deleted_or_tombstoned",
+    });
+  }
+
+  const semanticMeta = buildSemanticMeta(product);
+  const needsIndex = shouldIndexProduct(product, semanticMeta.semanticHash);
+
+  if (commit) {
+    await upsertProductSemanticState({
+      storeId,
+      productId: product.id,
+      semanticMeta,
+      indexed: false,
+      shopifyUpdatedAt: product?.shopifyUpdatedAt || null,
+    });
+  }
+
+  if (!needsIndex) {
+    await bumpDone(1);
+    await writeStatus({ finish: true, force: true });
+    return indexResult({
+      status: "skipped_semantic_unchanged",
+      storeId,
+      productId: product.id,
+      commit,
+      reason: "semantic_unchanged",
+    });
+  }
+
+  setStatusPhase("indexing");
+  await writeStatus({ force: true });
+
+  const r = await extractForProduct({ storeId, product });
+
+  if (!r.ok) {
+    const base = baselineExtractFromText(productToPromptInput(product));
+
+    if (commit && (base.entities.length || base.specs.length)) {
+      await upsertEntitiesAndLinks({
+        storeId,
+        productId: product.id,
+        extraction: { product: { id: String(product.id) }, ...base },
+        product,
+      });
+      await upsertKbProduct({
+        storeId,
+        product,
+        extraction: base,
+        semanticMeta,
+      });
+      await bumpDone(1);
+      await writeStatus({ finish: true, force: true });
+
+      return indexResult({
+        status: "indexed_fallback",
+        storeId,
+        productId: product.id,
+        commit,
+        llmMs: r.ms || 0,
+        reason: r.reason || "fallback_indexed",
+        fallback: true,
+        wrote: true,
+      });
+    }
+
+    await writeStatus({ force: true, error: r.reason || "index_failed" });
+    return indexResult({
+      status: "failed",
+      storeId,
+      productId: product.id,
+      commit,
+      llmMs: r.ms || 0,
+      reason: r.reason || "index_failed",
+      errors: Array.isArray(r.errors) ? r.errors : [],
+    });
+  }
+
+  if (commit) {
+    await upsertEntitiesAndLinks({
+      storeId,
+      productId: product.id,
+      extraction: r.value,
+      product,
+    });
+    await upsertKbProduct({
+      storeId,
+      product,
+      extraction: r.value,
+      semanticMeta,
+    });
+  }
+
+  await bumpDone(1);
+  await writeStatus({ finish: true, force: true });
+
+  return indexResult({
+    status: "indexed",
+    storeId,
+    productId: product.id,
+    commit,
+    llmMs: r.ms || 0,
+    wrote: !!commit,
+  });
+}
 // ─────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────
@@ -867,12 +1067,7 @@ function pLimit(n) {
   try {
     if (MODE === "bootstrap") {
       const products = await fetchProductsFromFirestore(STORE, LIMIT);
-      if (VERBOSE) {
-  console.log(
-    "[bootstrap sample ids]",
-    products.map((p) => String(p.id))
-  );
-}
+      
       if (!products.length) {
         console.log(JSON.stringify({ ok: true, commit: COMMIT, processed: 0, reason: "no_products" }, null, 2));
         return;
@@ -986,117 +1181,35 @@ function pLimit(n) {
       if (COMMIT && wrote > 0) {
         await triggerEnrichment(STORE);
       }
-    } else if (MODE === "index") {
+        } else if (MODE === "index") {
       const pid = ARGS.product || ARGS.p;
-      if (!pid) throw new Error("product id required for index mode");
-      const doc = await db.doc(`products/${STORE}/items/${pid}`).get();
-      if (!doc.exists) throw new Error(`product not found: ${pid}`);
+      const result = await runSingleProductIndex({
+        storeId: STORE,
+        productId: pid,
+        commit: COMMIT,
+      });
 
-      const product = { id: doc.id, ...doc.data() };
-      const semanticMeta = buildSemanticMeta(product);
-      const needsIndex = shouldIndexProduct(product, semanticMeta.semanticHash);
+      const out = {
+        ok: result.ok,
+        mode: result.mode,
+        status: result.status,
+        storeId: result.storeId,
+        productId: result.productId,
+        commit: result.commit,
+        wrote: result.wrote,
+        fallback: result.fallback,
+        llmMs: result.llmMs,
+        ...(result.reason ? { reason: result.reason } : {}),
+        ...(result.errors?.length ? { errors: result.errors } : {}),
+      };
 
-// ── Progress for single-product index ───────────────────
-setStatusShop(STORE);
-setStatusTotal(1);
-setStatusDone(0);
-setStatusPhase("preparing");
-await writeStatus({ force: true });
+      if (result.ok) {
+        console.log(JSON.stringify(out, null, 2));
+      } else {
+        console.error(JSON.stringify(out, null, 2));
+      }
 
-if (COMMIT) {
-  await upsertProductSemanticState({
-    storeId: STORE,
-    productId: product.id,
-    semanticMeta,
-    indexed: false,
-    shopifyUpdatedAt: product?.shopifyUpdatedAt || null,
-  });
-}
-
-if (!needsIndex) {
-  await bumpDone(1);
-  await writeStatus({ finish: true, force: true });
-  console.log(JSON.stringify({
-    ok: true,
-    mode: MODE,
-    commit: COMMIT,
-    productId: product.id,
-    skipped: true,
-    reason: "semantic_unchanged",
-  }, null, 2));
-  return;
-}
-
-setStatusPhase("indexing");
-await writeStatus({ force: true });
-
-const r = await extractForProduct({ storeId: STORE, product });
-
-if (!r.ok) {
-  const base = baselineExtractFromText(productToPromptInput(product));
-
-  if (COMMIT && (base.entities.length || base.specs.length)) {
-    await upsertEntitiesAndLinks({
-      storeId: STORE,
-      productId: product.id,
-      extraction: { product: { id: String(product.id) }, ...base },
-      product,
-    });
-    await upsertKbProduct({
-      storeId: STORE,
-      product,
-      extraction: base,
-      semanticMeta,
-    });
-    await bumpDone(1);
-    await writeStatus({ finish: true, force: true });
-    console.log(JSON.stringify({
-      ok: true,
-      mode: MODE,
-      commit: COMMIT,
-      productId: product.id,
-      llmMs: r.ms || 0,
-      fallback: true,
-      reason: r.reason,
-    }, null, 2));
-    process.exit(0);
-  }
-
-  console.log(JSON.stringify({
-    ok: false,
-    mode: MODE,
-    reason: r.reason,
-    errors: r.errors || [],
-    llmMs: r.ms,
-  }, null, 2));
-  await writeStatus({ force: true, error: r.reason || "index_failed" });
-  process.exit(2);
-}
-
-if (COMMIT) {
-  await upsertEntitiesAndLinks({
-    storeId: STORE,
-    productId: product.id,
-    extraction: r.value,
-    product,
-  });
-  await upsertKbProduct({
-    storeId: STORE,
-    product,
-    extraction: r.value,
-    semanticMeta,
-  });
-  await bumpDone(1);
-  await writeStatus({ finish: true, force: true });
-}
-
-console.log(JSON.stringify({
-  ok: true,
-  mode: MODE,
-  commit: COMMIT,
-  productId: product.id,
-  llmMs: r.ms,
-}, null, 2));
+      process.exit(exitCodeForIndexResult(result));
     } else {
       throw new Error(`unknown mode: ${MODE}`);
     }
