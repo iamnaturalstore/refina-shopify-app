@@ -401,79 +401,34 @@ export default function Home() {
                 <div style={{ height: "1px", background: "#E4E7EE", margin: "14px 0" }} />
 
                 {/* KB status */}
-<div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
-  <div
-    style={{
-      width: "8px",
-      height: "8px",
-      borderRadius: "50%",
-      background: kbError ? "#DC2626" : kbDone ? "#059669" : kbActive ? "#FBBF24" : "#94A3B8",
-      boxShadow: kbError
-        ? "0 0 0 3px rgba(220,38,38,0.15)"
-        : kbDone
-        ? "0 0 0 3px rgba(5,150,105,0.15)"
-        : kbActive
-        ? "0 0 0 3px rgba(251,191,36,0.15)"
-        : "none",
-      flexShrink: 0,
-    }}
-  />
-  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product knowledge</span>
-  <span style={{ marginLeft: "auto", fontSize: "12px", color: "#94A3B8" }}>
-    {kbTotal > 0 ? `${fmt(kbTotal)} products` : kbStatusLabel || indexerPhase || "—"}
-  </span>
-</div>
-
-{kbActive && (
-  <div style={{ marginTop: "6px" }}>
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: "12px",
-        color: "#64748B",
-        marginBottom: "5px",
-      }}
-    >
-      <span>{kbStatusLabel || "Scanning catalogue…"}</span>
-      <span>{kbTotal > 0 ? `${fmt(kbProcessed)} / ${fmt(kbTotal)}` : `${Math.round(kbPct)}%`}</span>
-    </div>
-    <ProgressBar value={kbPct} />
-  </div>
-)}
-
-{kbDone && !kbError && (
-  <div style={{ fontSize: "12px", color: "#64748B", marginTop: "6px", lineHeight: 1.45 }}>
-    Your catalogue is connected. Everyday product changes sync automatically.
-    {indexer?.updatedAt ? (
-      <>
-        <div style={{ color: "#94A3B8", marginTop: "4px" }}>
-          Last knowledge refresh: {new Date(indexer.updatedAt).toLocaleString()}
-        </div>
-      </>
-    ) : null}
-  </div>
-)}
-
-{kbError && (
-  <div
-    style={{
-      fontSize: "12px",
-      color: "#991B1B",
-      background: "#FEF2F2",
-      border: "1px solid #FECACA",
-      borderRadius: "8px",
-      padding: "8px 10px",
-      marginTop: "8px",
-      lineHeight: 1.45,
-    }}
-  >
-    Product knowledge needs attention.
-    {indexer?.error ? (
-      <div style={{ marginTop: "2px", color: "#B91C1C" }}>{String(indexer.error)}</div>
-    ) : null}
-  </div>
-)}
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
+                  <div style={{
+                    width: "8px", height: "8px", borderRadius: "50%",
+                    background: kbDone ? "#059669" : kbActive ? "#FBBF24" : "#94A3B8",
+                    boxShadow: kbDone
+                      ? "0 0 0 3px rgba(5,150,105,0.15)"
+                      : kbActive ? "0 0 0 3px rgba(251,191,36,0.15)" : "none",
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product knowledge</span>
+                  <span style={{ marginLeft: "auto", fontSize: "12px", color: "#94A3B8" }}>
+                    {kbTotal > 0 ? `${fmt(kbTotal)} products` : indexerPhase || "—"}
+                  </span>
+                </div>
+                {kbActive && (
+                  <div style={{ marginTop: "6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#64748B", marginBottom: "5px" }}>
+                      <span>Scanning catalogue…</span>
+                      <span>{kbTotal > 0 ? `${fmt(kbProcessed)} / ${fmt(kbTotal)}` : `${Math.round(kbPct)}%`}</span>
+                    </div>
+                    <ProgressBar value={kbPct} />
+                  </div>
+                )}
+                {kbDone && indexer?.updatedAt && (
+                  <div style={{ fontSize: "12px", color: "#94A3B8", marginTop: "4px" }}>
+                    Last sync: {new Date(indexer.updatedAt).toLocaleString()}
+                  </div>
+                )}
               </>
             )}
 
@@ -493,7 +448,7 @@ export default function Home() {
                   boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
                 }}
               >
-                {syncBusy ? "Starting…" : kbActive ? "Building knowledge…" : "Refresh knowledge"}
+                {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
               </button>
             </div>
             {syncMsg && (
