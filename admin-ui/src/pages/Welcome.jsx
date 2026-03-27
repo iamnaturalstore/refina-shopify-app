@@ -475,25 +475,29 @@ export default function Welcome() {
             )}
           </StepCard>
 
-          {/* Step 2: Knowledge build */}
           <StepCard
-            number="2"
-            title="Product knowledge build"
-            badge={hasKnowledge ? "Complete" : knowledgeActive ? "In progress" : "Auto-starts"}
-            badgeVariant={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "auto"}
-            state={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "pending"}
-            desc={
-              hasKnowledge
-                ? `All ${fmt(kbTotal)} products scanned and indexed — Refina knows your catalogue.`
-                : knowledgeActive
-                ? "Refina is scanning your catalogue. You can continue setup — this finishes on its own."
-                : "Refina automatically scans and indexes your catalogue after plan activation."
-            }
-          >
-            {knowledgeActive && (
-              <InlineProgress label="Scanning catalogue…" current={kbDone} total={kbTotal} />
-            )}
-          </StepCard>
+  number="2"
+  title="Product knowledge build"
+  badge={hasKnowledge ? "Complete" : knowledgeActive ? "In progress" : "Ready"}
+  badgeVariant={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "auto"}
+  state={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "pending"}
+  desc={
+    hasKnowledge
+      ? `All ${fmt(kbTotal)} products scanned and indexed — Refina knows your catalogue.`
+      : knowledgeActive
+      ? "Refina is scanning your catalogue. You can continue setup — this finishes on its own."
+      : "Build Refina's understanding of your catalogue so it can answer product questions accurately."
+  }
+>
+  {knowledgeActive && (
+    <InlineProgress label="Scanning catalogue…" current={kbDone} total={kbTotal} />
+  )}
+  {!hasKnowledge && !knowledgeActive && (
+    <Button variant="primary" onClick={startSync} loading={syncBusy}>
+      Start building knowledge
+    </Button>
+  )}
+</StepCard>
 
           {/* Step 3: Theme embed */}
           <StepCard

@@ -265,6 +265,22 @@ export default function Home() {
     }
   }, []);
 
+  const startKnowledgeRefresh = React.useCallback(async () => {
+  setSyncMsg("");
+  setSyncBusy(true);
+  try {
+    const { data } = await api.post("/api/knowledge/refresh", {});
+    if (data?.queued)                            setSyncMsg("Knowledge refresh started — this runs in the background.");
+    else if (data?.reason === "already_running") setSyncMsg("Already running — check back shortly.");
+    else if (data?.reason === "cooldown")        setSyncMsg(`Cooling down. ${data?.retryAfterSec ? `Try again in ~${data.retryAfterSec}s.` : ""}`);
+    else                                         setSyncMsg("Nothing to refresh right now.");
+  } catch (e) {
+    setSyncMsg(e?.message || "Refresh failed.");
+  } finally {
+    setSyncBusy(false);
+  }
+}, []);
+
   // ── loading state ────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -448,7 +464,7 @@ export default function Home() {
                   boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
                 }}
               >
-                {syncBusy ? "Starting…" : kbActive ? "Sync in progress…" : "Sync products"}
+                  {syncBusy ? "Starting…" : kbActive ? "Building knowledge…" : "Refresh knowledge"}
               </button>
             </div>
             {syncMsg && (

@@ -506,6 +506,102 @@ app.get("/api/indexer/status", async (req, res) => {
 
   app.use("/api/backfill", queueRouter);
 
+  // ───────────────────────────────────────────────────────────
+// Knowledge refresh — enrichment only, no import/index
+// POST /api/knowledge/refresh
+// For merchants post-bootstrap — refreshes AI enrichment only.
+// Reuses same active/cooldown guards as sync/start.
+// Response: { ok, queued, reason?, shop, status? }
+// ───────────────────────────────────────────────────────────
+app.post("/api/knowledge/refresh", express.json(), async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const rawShop = String(req.query.shop || "").toLowerCase().trim();
+    const shop = toMyshopifyDomain(rawShop);
+    if (!shop) {
+      return res.status(401).json({ ok: false, error: "no_shop_context" });
+    }
+
+    const offline = await loadOfflineSession(shop);
+    if (!offline?.accessToken) {
+      return res.status(401).json({ ok: false, error: "no_offline_session", shop });
+    }
+
+    const statusRef = dbAdmin.doc(`indexerStatus/${shop}`);
+    const snap = await statusRef.get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    const phase = String(d.phase || "");
+    const now = Date.now();
+
+    const updatedMs =
+      typeof d.updatedAt?.toMillis === "function"
+        ? d.updatedAt.toMillis()
+        : typeof d.updatedAt === "number"
+        ? d.updatedAt
+        : 0;
+
+    const finishedMs =
+      typeof d.finishedAt?.toMillis === "function"
+        ? d.finishedAt.toMillis()
+        : typeof d.finishedAt === "number"
+        ? d.finishedAt
+        : 0;
+
+    const TERMINAL = new Set(["complete", "error"]);
+    const ACTIVE_WINDOW_MS = 90_000;
+    const isActive = !TERMINAL.has(phase) && updatedMs && now - updatedMs < ACTIVE_WINDOW_MS;
+
+    if (isActive) {
+      return res.json({ ok: true, queued: false, reason: "already_running", shop, status: "running" });
+    }
+
+    const COOLDOWN_MS = 10 * 60 * 1000;
+    const inCooldown = finishedMs && now - finishedMs < COOLDOWN_MS;
+
+    if (inCooldown) {
+      return res.json({
+        ok: true,
+        queued: false,
+        reason: "cooldown",
+        shop,
+        status: "cooldown",
+        retryAfterSec: Math.max(0, Math.ceil((COOLDOWN_MS - (now - finishedMs)) / 1000)),
+      });
+    }
+
+    // Mark as enriching so UI can react
+    try {
+      await statusRef.set({ phase: "enriching", updatedAt: nowTs() }, { merge: true });
+    } catch {}
+
+    // Fire-and-forget enrichment only — no import, no indexer
+    const scheme = (req.headers["x-forwarded-proto"] || req.protocol || "https").toString();
+    const host = (req.headers["x-forwarded-host"] || req.get("host") || "").toString();
+    const enrichUrl = `${scheme}://${host}/api/admin/enrichment/run`;
+
+    fetch(enrichUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-secret": process.env.ADMIN_SHARED_SECRET || "",
+      },
+      body: JSON.stringify({
+        storeId: shop,
+        rebuildMissingOnly: false,  // full re-enrich, not just gaps
+        recomputeMappings: true,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+
+    return res.status(202).json({ ok: true, queued: true, shop, status: "enriching" });
+
+  } catch (e) {
+    const msg = e?.message || "knowledge_refresh_failed";
+    const code = e?.status || 500;
+    return res.status(code).json({ ok: false, error: msg });
+  }
+});
+
 // ───────────────────────────────────────────────────────────
 // Session-based starter for embedded Admin
 // POST /api/sync/start
