@@ -506,7 +506,7 @@ const startSync = React.useCallback(async () => {
               hasKnowledge
                 ? `All ${fmt(kbTotal)} products analysed and enriched — Refina understands your catalogue.`
                 : knowledgeActive
-                ? "Refina is analysing and researching for your catalogue. This takes around 10 seconds per product — grab a coffee. ☕"
+                ? "Refina is analysing and researching for your catalogue. This takes around 10 seconds per product — this is where the magic happens. ✨"
                 : "Refina will scan and enrich your entire catalogue, building deep intelligence unique to your store. Allow around 10 seconds per product."
             }
           >
