@@ -51,7 +51,7 @@ export default function Settings() {
 
   // --- Form Fields ---
   const [brandName, setBrandName] = React.useState("");
-  const [category, setCategory] = React.useState("generic");
+  const [category, setCategory] = React.useState("");
   const [tone, setTone] = React.useState("expert");
 
   // Track initial snapshot to determine "dirty"
@@ -72,7 +72,7 @@ export default function Settings() {
     const s = json?.settings && typeof json.settings === "object" ? json.settings : json || {};
     return {
       brandName: s.brandName || "",
-      category: normalize(s.category || "generic"), // persist & compare lowercase
+      category: normalize(s.category || ""),
       tone: s.tone || "expert",
     };
   };
@@ -189,6 +189,7 @@ export default function Settings() {
                 <Select
                   label="Primary product category"
                   options={[
+                    { label: "Select your store category", value: "" },
                     { label: "General E-commerce", value: "generic" },
                     { label: "Beauty & Skincare", value: "beauty" },
                     { label: "Fashion & Apparel", value: "fashion" },
