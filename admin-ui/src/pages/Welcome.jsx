@@ -6,7 +6,7 @@
 // Always accessible via AppNav "Get Started" tab.
 
 import React from "react";
-import { Banner, Spinner } from "@shopify/polaris";
+import { Banner, Spinner, Button } from "@shopify/polaris";
 import { useNavigate } from "react-router-dom";
 import { api, getShop } from "../api/client";
 import AppNav from "../components/AppNav";
