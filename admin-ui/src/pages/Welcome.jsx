@@ -331,7 +331,7 @@ export default function Welcome() {
   settings?.refinaEnabled     ||
   embedConfirmed
 );
-  const hasCategory     = Boolean(settings?.category);
+  const hasCategory = Boolean(settings?.category) && settings.category !== "generic";
 
   const steps     = [hasActivePlan, hasKnowledge, hasThemeEmbed, hasCategory];
   const doneCount = steps.filter(Boolean).length;
