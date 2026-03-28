@@ -296,12 +296,35 @@ const FOLLOWUP_PROGRESS_PHASES = [
   lastQuery,
 });
 
-async function fetchUtilityPeek({ storeId, heroProductId }) {
+async function fetchUtilityPeek({
+  storeId,
+  heroProductId,
+  q = "",
+  intent = "similar",
+  currency = "",
+  priceCap = "",
+}) {
   const qs = new URLSearchParams({
     mode: "peek",
     storeId: String(storeId || ""),
     productId: String(heroProductId || ""),
   });
+
+  if (String(q || "").trim()) {
+    qs.set("q", String(q).trim());
+  }
+
+  if (String(intent || "").trim()) {
+    qs.set("intent", String(intent).trim());
+  }
+
+  if (String(currency || "").trim()) {
+    qs.set("currency", String(currency).trim());
+  }
+
+  if (priceCap !== "" && priceCap != null) {
+    qs.set("priceCap", String(priceCap));
+  }
 
   const resp = await fetch(`${API_PREFIX}/recommend?${qs.toString()}`, {
     method: "GET",
@@ -582,7 +605,12 @@ const handleFollowUp = useCallback(
           setReturnState(buildCurrentRecommendationState());
         }
 
-        const data = await fetchUtilityPeek({ storeId, heroProductId });
+        const data = await fetchUtilityPeek({
+          storeId,
+          heroProductId,
+          q: String(lastQuery || concern || "").trim(),
+          intent: "similar",
+        });
 
         const candidates = Array.isArray(data?.candidates) ? data.candidates : [];
         const products = normalizeProducts(candidates);
@@ -614,6 +642,7 @@ const handleFollowUp = useCallback(
     followUps,
     lastQuery,
     viewMode,
+    concern,
   ]
 );
 
