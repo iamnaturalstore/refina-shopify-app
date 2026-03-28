@@ -507,7 +507,7 @@ const startSync = React.useCallback(async () => {
                 ? `All ${fmt(kbTotal)} products analysed and enriched — Refina understands your catalogue.`
                 : knowledgeActive
                 ? "Refina is analysing and researching for your catalogue. This takes around 10 seconds per product — grab a coffee. ☕"
-                : "Refina will scan and enrich your entire catalogue, building deep intelligence about benefits, use cases and ingredients. Allow around 10 seconds per product."
+                : "Refina will scan and enrich your entire catalogue, building deep intelligence unique to your store. Allow around 10 seconds per product."
             }
           >
             {knowledgeActive && (
@@ -515,7 +515,7 @@ const startSync = React.useCallback(async () => {
             )}
             {!hasKnowledge && !knowledgeActive && (
               <Button variant="primary" onClick={startSync} loading={syncBusy}>
-                Start scan & enrich catalogue
+                Start building intelligence
               </Button>
             )}
           </StepCard>
