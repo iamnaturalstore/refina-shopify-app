@@ -273,7 +273,7 @@
   max-width: 560px;
   width: min(92%, 560px);
   text-align: center;
-  height: 96dvh;
+  height: auto;
   max-height: 96dvh;
   overflow-y: auto;
   overflow-x: hidden;

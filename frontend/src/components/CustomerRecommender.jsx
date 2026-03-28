@@ -892,7 +892,7 @@ const renderRationale = (text) => {
         value={concern}
         onChange={(e) => setConcern(e.target.value)}
         onKeyDown={onTextKeyDown}
-        placeholder="Type your concern… (Enter to Ask, Shift+Enter for new line)"
+        placeholder="What are you looking for?"
       />
 
       <button
