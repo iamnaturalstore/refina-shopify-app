@@ -475,29 +475,30 @@ export default function Welcome() {
             )}
           </StepCard>
 
+          {/* Step 2: Knowledge */}
           <StepCard
-  number="2"
-  title="Product knowledge build"
-  badge={hasKnowledge ? "Complete" : knowledgeActive ? "In progress" : "Ready"}
-  badgeVariant={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "auto"}
-  state={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "pending"}
-  desc={
-    hasKnowledge
-      ? `All ${fmt(kbTotal)} products scanned and indexed — Refina knows your catalogue.`
-      : knowledgeActive
-      ? "Refina is scanning your catalogue. You can continue setup — this finishes on its own."
-      : "Build Refina's understanding of your catalogue so it can answer product questions accurately."
-  }
->
-  {knowledgeActive && (
-    <InlineProgress label="Scanning catalogue…" current={kbDone} total={kbTotal} />
-  )}
-  {!hasKnowledge && !knowledgeActive && (
-    <Button variant="primary" onClick={startSync} loading={syncBusy}>
-      Start building knowledge
-    </Button>
-  )}
-</StepCard>
+            number="2"
+            title="Catalogue intelligence build"
+            badge={hasKnowledge ? "Complete" : knowledgeActive ? "Building…" : "Ready"}
+            badgeVariant={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "auto"}
+            state={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "pending"}
+            desc={
+              hasKnowledge
+                ? `All ${fmt(kbTotal)} products analysed and enriched — Refina understands your catalogue.`
+                : knowledgeActive
+                ? "Refina is analysing and researching for your catalogue. This takes around 10 seconds per product — grab a coffee. ☕"
+                : "Refina will scan and enrich your entire catalogue, building deep intelligence about benefits, use cases and ingredients. Allow around 10 seconds per product."
+            }
+          >
+            {knowledgeActive && (
+              <InlineProgress label="Scanning & enriching…" current={kbDone} total={kbTotal} />
+            )}
+            {!hasKnowledge && !knowledgeActive && (
+              <Button variant="primary" onClick={startSync} loading={syncBusy}>
+                Scan & enrich catalogue
+              </Button>
+            )}
+          </StepCard>
 
           {/* Step 3: Theme embed */}
           <StepCard

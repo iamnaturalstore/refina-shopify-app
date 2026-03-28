@@ -426,7 +426,7 @@ export default function Home() {
                       : kbActive ? "0 0 0 3px rgba(251,191,36,0.15)" : "none",
                     flexShrink: 0,
                   }} />
-                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product knowledge</span>
+                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Catalogue intelligence</span>
                   <span style={{ marginLeft: "auto", fontSize: "12px", color: "#94A3B8" }}>
                     {kbTotal > 0 ? `${fmt(kbTotal)} products` : indexerPhase || "—"}
                   </span>
@@ -442,7 +442,7 @@ export default function Home() {
                 )}
                 {kbDone && indexer?.updatedAt && (
                   <div style={{ fontSize: "12px", color: "#94A3B8", marginTop: "4px" }}>
-                    Last sync: {new Date(indexer.updatedAt).toLocaleString()}
+                    Last enriched: {new Date(indexer.updatedAt).toLocaleString()}
                   </div>
                 )}
               </>
@@ -450,7 +450,7 @@ export default function Home() {
 
             <div style={{ height: "1px", background: "#E4E7EE", margin: "14px 0" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product sync</span>
+              <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Enrichment</span>
               <button
                 onClick={startKnowledgeRefresh}
                 disabled={syncBusy || kbActive}
