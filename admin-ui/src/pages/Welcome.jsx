@@ -407,9 +407,9 @@ export default function Welcome() {
                 All steps complete · {planLabel(plan?.level)} plan · {fmt(kbTotal)} products indexed
               </div>
             </div>
-            <button style={btnPrimary} onClick={() => navigate(`/dashboard${qs}`)}>
+            <Button style={btnPrimary} onClick={() => navigate(`/dashboard${qs}`)}>
               Go to Dashboard →
-            </button>
+            </Button>
           </div>
         )}
 
@@ -468,9 +468,9 @@ export default function Welcome() {
           >
             {!hasActivePlan && (
               <div style={{ display: "flex", gap: "8px" }}>
-                <button style={btnPrimary} onClick={() => navigate(`/billing${qs}`)}>
+                <Button style={btnPrimary} onClick={() => navigate(`/billing${qs}`)}>
                   Choose a plan →
-                </button>
+                </Button>
               </div>
             )}
           </StepCard>
@@ -524,20 +524,20 @@ export default function Welcome() {
       >
         Open Theme Editor ↗
       </a>
-      <button style={btnSecondary} onClick={() => navigate("/settings" + qs)}>
+      <Button style={btnSecondary} onClick={() => navigate("/settings" + qs)}>
         Setup guide
-      </button>
+      </Button>
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", background: "#F7F8FA", border: "1px solid #E4E7EE", borderRadius: "8px" }}>
       <span style={{ fontSize: "13px", color: "#64748B", flex: 1 }}>
         Once you've toggled Refina on and clicked Save in the Theme Editor:
       </span>
-      <button
+      <Button
         style={{ display: "inline-flex", alignItems: "center", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#059669", boxShadow: "none", fontFamily: "inherit" }}
         onClick={confirmEmbed}
       >
         ✓ I've enabled it
-      </button>
+      </Button>
     </div>
   </div>
 )}
@@ -557,12 +557,12 @@ export default function Welcome() {
             }
           >
             <div style={{ display: "flex", gap: "8px" }}>
-              <button
+              <Button
                 style={hasCategory ? btnSecondary : btnPrimary}
                 onClick={() => navigate(`/settings${qs}`)}
               >
                 {hasCategory ? "Edit in Settings" : "Set category in Settings →"}
-              </button>
+              </Button>
             </div>
           </StepCard>
 
@@ -580,12 +580,12 @@ export default function Welcome() {
           </span>
           <div style={{ display: "flex", gap: "8px" }}>
             {[["Analytics", "/analytics"], ["Settings", "/settings"], ["Billing", "/billing"]].map(([label, path]) => (
-              <button key={path} style={btnGhost} onClick={() => navigate(`${path}${qs}`)}>
+              <Button key={path} style={btnGhost} onClick={() => navigate(`${path}${qs}`)}>
                 {label}
-              </button>
+              </Button>
             ))}
             {allDone && (
-              <button style={btnGhost} onClick={() => navigate(`/dashboard${qs}`)}>Dashboard</button>
+              <Button style={btnGhost} onClick={() => navigate(`/dashboard${qs}`)}>Dashboard</Button>
             )}
           </div>
         </div>
