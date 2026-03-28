@@ -452,7 +452,7 @@ export default function Home() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Product sync</span>
               <button
-                onClick={startSync}
+                onClick={startKnowledgeRefresh}
                 disabled={syncBusy || kbActive}
                 style={{
                   padding: "6px 12px", borderRadius: "8px",
