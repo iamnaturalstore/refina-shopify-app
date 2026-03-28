@@ -341,6 +341,26 @@ export default function Welcome() {
   const kbTotal = Number(indexer?.totalProducts || 0);
   const kbDone  = Number(indexer?.embeddedCount || indexer?.importedCount || 0);
 
+  // ── sync ────────────────────────────────────────────────────────────────
+const [syncBusy, setSyncBusy] = React.useState(false);
+const [syncMsg,  setSyncMsg]  = React.useState("");
+
+const startSync = React.useCallback(async () => {
+  setSyncMsg("");
+  setSyncBusy(true);
+  try {
+    const { data } = await api.post("/api/sync/start", {});
+    if (data?.queued)                            setSyncMsg("Sync started — progress will update below.");
+    else if (data?.reason === "already_running") setSyncMsg("Sync already in progress.");
+    else if (data?.reason === "cooldown")        setSyncMsg(`Cooling down. ${data?.retryAfterSec ? `Try again in ~${data.retryAfterSec}s.` : ""}`);
+    else                                         setSyncMsg("Nothing to sync right now.");
+  } catch (e) {
+    setSyncMsg(e?.message || "Sync failed.");
+  } finally {
+    setSyncBusy(false);
+  }
+}, []);
+
   // ── loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
@@ -407,9 +427,9 @@ export default function Welcome() {
                 All steps complete · {planLabel(plan?.level)} plan · {fmt(kbTotal)} products indexed
               </div>
             </div>
-            <Button style={btnPrimary} onClick={() => navigate(`/dashboard${qs}`)}>
+            <button style={btnPrimary} onClick={() => navigate(`/dashboard${qs}`)}>
               Go to Dashboard →
-            </Button>
+            </button>
           </div>
         )}
 
@@ -468,9 +488,9 @@ export default function Welcome() {
           >
             {!hasActivePlan && (
               <div style={{ display: "flex", gap: "8px" }}>
-                <Button style={btnPrimary} onClick={() => navigate(`/billing${qs}`)}>
+                <button style={btnPrimary} onClick={() => navigate(`/billing${qs}`)}>
                   Choose a plan →
-                </Button>
+                </button>
               </div>
             )}
           </StepCard>
@@ -495,7 +515,7 @@ export default function Welcome() {
             )}
             {!hasKnowledge && !knowledgeActive && (
               <Button variant="primary" onClick={startSync} loading={syncBusy}>
-                Scan & enrich catalogue
+                Start scan & enrich catalogue
               </Button>
             )}
           </StepCard>
@@ -524,20 +544,20 @@ export default function Welcome() {
       >
         Open Theme Editor ↗
       </a>
-      <Button style={btnSecondary} onClick={() => navigate("/settings" + qs)}>
+      <button style={btnSecondary} onClick={() => navigate("/settings" + qs)}>
         Setup guide
-      </Button>
+      </button>
     </div>
     <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", background: "#F7F8FA", border: "1px solid #E4E7EE", borderRadius: "8px" }}>
       <span style={{ fontSize: "13px", color: "#64748B", flex: 1 }}>
         Once you've toggled Refina on and clicked Save in the Theme Editor:
       </span>
-      <Button
+      <button
         style={{ display: "inline-flex", alignItems: "center", padding: "8px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: "600", cursor: "pointer", border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#059669", boxShadow: "none", fontFamily: "inherit" }}
         onClick={confirmEmbed}
       >
         ✓ I've enabled it
-      </Button>
+      </button>
     </div>
   </div>
 )}
@@ -557,12 +577,12 @@ export default function Welcome() {
             }
           >
             <div style={{ display: "flex", gap: "8px" }}>
-              <Button
+              <button
                 style={hasCategory ? btnSecondary : btnPrimary}
                 onClick={() => navigate(`/settings${qs}`)}
               >
                 {hasCategory ? "Edit in Settings" : "Set category in Settings →"}
-              </Button>
+              </button>
             </div>
           </StepCard>
 
@@ -580,12 +600,12 @@ export default function Welcome() {
           </span>
           <div style={{ display: "flex", gap: "8px" }}>
             {[["Analytics", "/analytics"], ["Settings", "/settings"], ["Billing", "/billing"]].map(([label, path]) => (
-              <Button key={path} style={btnGhost} onClick={() => navigate(`${path}${qs}`)}>
+              <button key={path} style={btnGhost} onClick={() => navigate(`${path}${qs}`)}>
                 {label}
-              </Button>
+              </button>
             ))}
             {allDone && (
-              <Button style={btnGhost} onClick={() => navigate(`/dashboard${qs}`)}>Dashboard</Button>
+              <button style={btnGhost} onClick={() => navigate(`/dashboard${qs}`)}>Dashboard</button>
             )}
           </div>
         </div>
