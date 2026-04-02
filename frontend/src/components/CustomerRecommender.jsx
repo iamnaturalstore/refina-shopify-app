@@ -421,6 +421,12 @@ setFollowUps(
         });
         setReasonsById(reasonsMap);
 
+        // In CustomerRecommender.jsx, BEFORE the analytics fetch:
+if (data?.cacheHit) {
+  // Skip analytics - server already logged it
+  return;
+}
+
         // Analytics (best-effort)
         try {
           // Resolve storeId again the same way as for /recommend
@@ -446,6 +452,7 @@ setFollowUps(
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(analyticsPayload),
+            keepalive: true,
           });
         } catch (analyticsError) {
           console.warn("[Recommender] Analytics reporting failed:", analyticsError);
