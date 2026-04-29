@@ -165,7 +165,34 @@ function productShapeFromGql(p, shop, syncAt, FieldValue) {
 async function fetchProductByNumericId(shop, numericId) {
   if (!shop || !numericId) return null;
 
-  const admin = await getWebhookAdminClient(shop);
+  let admin;
+  try {
+    admin = await getWebhookAdminClient(shop);
+  } catch (err) {
+    const message = err?.message || String(err);
+
+    console.warn("[product-webhook] skipping product fetch; no webhook admin client", {
+      shop,
+      numericId,
+      message,
+    });
+
+    return { __refinaSkip: true, reason: "missing_admin_client", message };
+  }
+
+  if (!admin || typeof admin.query !== "function") {
+    console.warn("[product-webhook] skipping product fetch; invalid webhook admin client", {
+      shop,
+      numericId,
+    });
+
+    return {
+      __refinaSkip: true,
+      reason: "invalid_admin_client",
+      message: "Webhook admin client unavailable or invalid",
+    };
+  }
+
   const gid = `gid://shopify/Product/${numericId}`;
 
   const resp = await admin.query({
@@ -241,6 +268,25 @@ router.post("/", rawJson, async (req, res) => {
 
       const product = await fetchProductByNumericId(shop, numericId);
 
+            // Store may be installed/partially onboarded without a usable offline session yet.
+      // Do not fail webhook delivery in that state; Shopify will otherwise retry and log 500s.
+      if (product?.__refinaSkip) {
+        console.warn("[product-webhook] acknowledged without product sync", {
+          topic,
+          shop,
+          numericId,
+          reason: product.reason,
+          message: product.message,
+        });
+
+        await productDocRef(shop, numericId).set(
+          buildWebhookTouchPatch(FieldValue),
+          { merge: true }
+        );
+
+        return res.status(200).send("OK");
+      }
+
       // Product may have been deleted/hidden between webhook emit and fetch.
       if (!product) {
         await productDocRef(shop, numericId).set(
@@ -255,11 +301,11 @@ router.post("/", rawJson, async (req, res) => {
       const doc = productShapeFromGql(product, shop, syncAt, FieldValue);
 
         await productDocRef(shop, numericId).set(
-        {
-          ...doc,
-          ...buildWebhookTouchPatch(FieldValue),
-        },
-        { merge: true }
+          {
+            ...doc,
+            ...buildWebhookTouchPatch(FieldValue),
+          },
+          { merge: true }
       );
 
       return res.status(200).send("OK");
