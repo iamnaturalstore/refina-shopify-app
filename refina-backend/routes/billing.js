@@ -314,7 +314,15 @@ async function fetchShopCurrency(client) {
   return (data?.shop?.currencyCode || "USD").toString().toUpperCase();
 }
 
-async function createSubscription(client, { name, amount, currency, returnUrl, test = false, interval = "EVERY_30_DAYS" }) {
+async function createSubscription(client, {
+  name,
+  amount,
+  currency,
+  returnUrl,
+  test = false,
+  interval = "EVERY_30_DAYS",
+  trialDaysOverride = null,
+}) {
   let mutation = `
     mutation AppSubscribe(
       $name: String!,
@@ -346,9 +354,55 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
       }
     }
   `;
+
   if (String(interval).toUpperCase() === "ANNUAL") {
     mutation = mutation.replace("interval: EVERY_30_DAYS", "interval: ANNUAL");
   }
+
+  const shopFromReturnUrl = (() => {
+    try {
+      return new URL(String(returnUrl)).searchParams.get("shop");
+    } catch {
+      return null;
+    }
+  })();
+
+  const isDemoTrialShop =
+    process.env.DEMO_TRIAL_SHOPS &&
+    new RegExp(
+      `(?:^|,)\s*(?:${String(process.env.DEMO_TRIAL_SHOPS)
+        .split(",")
+        .map((s) => s.trim().toLowerCase().replace(/\./g, "\\."))
+        .filter(Boolean)
+        .join("|")})\s*(?:,|$)`,
+      "i"
+    ).test(String(shopFromReturnUrl || "").toLowerCase());
+
+  const isFriendlyTrialShop =
+    process.env.FRIENDLY_TRIAL_SHOPS &&
+    new RegExp(
+      `(?:^|,)\s*(?:${String(process.env.FRIENDLY_TRIAL_SHOPS)
+        .split(",")
+        .map((s) => s.trim().toLowerCase().replace(/\./g, "\\."))
+        .filter(Boolean)
+        .join("|")})\s*(?:,|$)`,
+      "i"
+    ).test(String(shopFromReturnUrl || "").toLowerCase());
+
+  const defaultTrialDays = Number(
+    isDemoTrialShop
+      ? process.env.DEMO_TRIAL_DAYS || 365
+      : isFriendlyTrialShop
+        ? process.env.FRIENDLY_TRIAL_DAYS || 90
+        : process.env.SHOPIFY_BILLING_TRIAL_DAYS ||
+          process.env.BILLING_TRIAL_DAYS ||
+          30
+  );
+
+  const resolvedTrialDays =
+    trialDaysOverride === 0 || trialDaysOverride
+      ? Number(trialDaysOverride)
+      : defaultTrialDays;
 
   const variables = {
     name,
@@ -356,40 +410,7 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
     test: !!test,
     amount: typeof amount === "number" ? amount : Number(amount),
     currency,
-    trialDays: Number(
-  // 1) Demo stores → 365 days
-  (process.env.DEMO_TRIAL_SHOPS &&
-    new RegExp(
-      `(?:[?&]shop=)(?:${String(process.env.DEMO_TRIAL_SHOPS)
-        .split(",")
-        .map(s => s.trim().toLowerCase().replace(/\./g, "\\."))
-        .filter(Boolean)
-        .join("|")})`,
-      "i"
-    ).test(String(returnUrl))
-  )
-    ? (process.env.DEMO_TRIAL_DAYS || 365)
-    : (
-        // 2) Friendly pilot stores → 90 days
-        (process.env.FRIENDLY_TRIAL_SHOPS &&
-          new RegExp(
-            `(?:[?&]shop=)(?:${String(process.env.FRIENDLY_TRIAL_SHOPS)
-              .split(",")
-              .map(s => s.trim().toLowerCase().replace(/\./g, "\\."))
-              .filter(Boolean)
-              .join("|")})`,
-            "i"
-          ).test(String(returnUrl))
-        )
-          ? (process.env.FRIENDLY_TRIAL_DAYS || 90)
-          : (
-              // 3) Everyone else → default trial
-              process.env.SHOPIFY_BILLING_TRIAL_DAYS ||
-              process.env.BILLING_TRIAL_DAYS ||
-              30
-            )
-      )
-),
+    trialDays: Number.isFinite(resolvedTrialDays) ? resolvedTrialDays : 0,
     replacementBehavior: process.env.BILLING_REPLACEMENT_BEHAVIOR || null,
   };
 
@@ -399,15 +420,18 @@ async function createSubscription(client, { name, amount, currency, returnUrl, t
       amount: variables.amount,
       currency: variables.currency,
       returnUrl: variables.returnUrl,
-      shop: (() => { try { return new URL(String(variables.returnUrl)).searchParams.get("shop"); } catch { return null; } })(),
+      shop: shopFromReturnUrl,
       test: variables.test,
       trialDays: variables.trialDays,
+      trialDaysOverride,
+      defaultTrialDays,
       replacementBehavior: variables.replacementBehavior,
     });
   }
 
   const data = await gql(client, mutation, variables);
   const payload = data?.appSubscriptionCreate || {};
+
   return {
     confirmationUrl: payload?.confirmationUrl || null,
     userErrors: payload?.userErrors || [],
@@ -519,6 +543,32 @@ router.get("/activated", async (req, res) => {
 
     await writePlan(shop, level, status, billingInterval);
 
+    if (
+      String(status || "").toUpperCase() === "ACTIVE" &&
+      String(level || "").toLowerCase() !== "free"
+    ) {
+      const billingRef = dbAdmin.collection("billing").doc(shop);
+      const billingSnap = await billingRef.get();
+      const billingState = billingSnap.exists ? billingSnap.data() : null;
+
+      const alreadyUsedTrial = Boolean(billingState?.trialUsed);
+
+      await billingRef.set(
+        {
+          trialUsed: true,
+          ...(alreadyUsedTrial
+            ? {}
+            : {
+                trialStartedAt: FieldValue.serverTimestamp(),
+              }),
+          lastActivatedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          _source: "billing:activated",
+        },
+        { merge: true }
+      );
+    }
+
     const hostParam = String(req.query.host || "") || computeHostFromShop(shop);
     const storeSlug = String(shop).replace(/\.myshopify\.com$/i, "");
     const appHandle = process.env.SHOPIFY_APP_HANDLE || "refina";
@@ -586,6 +636,15 @@ router.post("/sync", async (req, res) => {
   }
 });
 
+async function getTrialDaysOverrideForShop(shop) {
+  if (!shop) return null;
+
+  const snap = await dbAdmin.collection("billing").doc(shop).get();
+  const billingState = snap.exists ? snap.data() : null;
+
+  return billingState?.trialUsed ? 0 : null;
+}
+
 /** POST /api/billing/subscribe → { confirmationUrl } (supports pro|premium) */
 router.post("/subscribe", async (req, res) => {
   try {
@@ -641,6 +700,8 @@ router.post("/subscribe", async (req, res) => {
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
       process.env.NODE_ENV !== "production";
 
+    const trialDaysOverride = await getTrialDaysOverrideForShop(shop);
+
     let confirmationUrl = null;
     let userErrors = [];
     try {
@@ -650,6 +711,7 @@ router.post("/subscribe", async (req, res) => {
         currency,
         returnUrl,
         test: testFlag,
+        trialDaysOverride,
       }));
     } catch (e) {
       console.error("POST /api/billing/subscribe createSubscription error", e?.response?.errors || e?.errors || e);
@@ -673,6 +735,7 @@ router.post("/subscribe", async (req, res) => {
             currency,
             returnUrl,
             test: testFlag,
+            trialDaysOverride,
           });
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }
@@ -738,6 +801,8 @@ router.post("/upgrade", async (req, res) => {
         .some((k) => String(process.env[k] || "").toLowerCase() === "true") ||
       process.env.NODE_ENV !== "production";
 
+    const trialDaysOverride = await getTrialDaysOverrideForShop(shop);
+
     let confirmationUrl = null;
     let userErrors = [];
     try {
@@ -748,6 +813,7 @@ router.post("/upgrade", async (req, res) => {
         returnUrl,
         test: testFlag,
         interval: intervalEnum,
+        trialDaysOverride,
       }));
     } catch (e) {
       if (isUnauthorized(e)) return sendReauth(res, req);
@@ -773,6 +839,7 @@ router.post("/upgrade", async (req, res) => {
             returnUrl,
             test: testFlag,
             interval: intervalEnum,
+            trialDaysOverride,
           });
           if (retry.confirmationUrl) return res.json({ confirmationUrl: retry.confirmationUrl });
         }
