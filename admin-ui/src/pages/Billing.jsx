@@ -560,7 +560,7 @@ const premiumMeta = PLAN_DETAILS.premium;
           <Text as="p" tone="subdued">
             {isPaid
               ? "Your billing status is active. You can change, downgrade, or cancel anytime."
-              : "Choose a plan to start your 30-day free trial. After approving a charge, click “Refresh” or wait a moment for confirmation."}
+              : "Choose a plan. After approving a charge, click “Refresh” or wait a moment for confirmation."}
           </Text>
         </BlockStack>
 
@@ -593,7 +593,7 @@ const premiumMeta = PLAN_DETAILS.premium;
             padding="400"
           >
             <BlockStack gap="100">
-              <Text as="p" variant="bodyMd" fontWeight="semibold">
+              <Text as="p" variant="headingSm" fontWeight="semibold">
                 All plans start with a 30-day free trial — full features, no limits.
               </Text>
               <Text as="p" tone="subdued">
