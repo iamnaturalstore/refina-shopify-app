@@ -7,8 +7,12 @@ import { getWebhookAdminClient } from "../utils/shopSession.js";
 
 const router = express.Router();
 
-// Use raw body for HMAC verification, same pattern as privacy webhooks
-const rawJson = express.raw({ type: "application/json" });
+// Use raw body for HMAC verification, same pattern as privacy webhooks.
+// Shopify product payloads can exceed the default ~100kb body-parser limit.
+const rawJson = express.raw({
+  type: "application/json",
+  limit: "2mb",
+});
 
 const PRODUCT_GQL = `
   query ProductWebhookProduct($id: ID!) {
