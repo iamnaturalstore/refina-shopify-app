@@ -593,8 +593,17 @@ const premiumMeta = PLAN_DETAILS.premium;
             padding="400"
           >
             <BlockStack gap="100">
-              <Text as="h3" variant="headingSm" fontWeight="semibold">
-                All plans start with a 30-day free trial — full features, no limits.
+              <Text as="p" fontWeight="semibold">
+                <span
+                style={{
+                    fontSize: "16px",
+                    lineHeight: "22px",
+                    fontWeight: 700,
+                    color: "#0F1829",
+                  }}
+                >
+                  All Plans start with a 30-day free trial — full features, no limits.
+                </span>
               </Text>
               <Text as="p" tone="subdued">
                 Your selected plan kicks in after 30 days. Upgrade, downgrade or cancel anytime.
