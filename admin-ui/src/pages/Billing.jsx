@@ -538,31 +538,38 @@ const premiumMeta = PLAN_DETAILS.premium;
           <InlineStack align="space-between" blockAlign="center">
             <Text as="h2" variant="headingMd">Billing</Text>
             <Tooltip content={currentMeta?.tooltip || ""}>
-  <Badge tone={isPaid ? "success" : "subdued"}>
-    {currentLabel || "—"}
-    {isPaid && currentInterval && <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>}
-    {currentStatus && <>&nbsp;{currentStatus}</>}
-  </Badge>
-</Tooltip>
+        <Badge tone={isPaid ? "success" : "subdued"}>
+        {isPaid ? currentLabel : "None"}
+        {isPaid && currentInterval && (
+          <> · {currentInterval === "annual" ? "Annual" : "Monthly"}</>
+        )}
+        {isPaid && currentStatus && <>&nbsp;{currentStatus}</>}
+      </Badge>
+      </Tooltip>
 
           </InlineStack>
 
           <InlineStack align="space-between" blockAlign="center">
-            <BlockStack gap="100">
-              <Text as="p" variant="bodyMd" fontWeight="semibold">
-                {`You’re on the ${currentLabel || "Free"} plan`}
-              </Text>
-              <Text as="p" tone="subdued">
-                After approving a charge, click “Sync from Shopify” or wait a moment for confirmation.
-              </Text>
-            </BlockStack>
-            <InlineStack gap="200">
-              <Button onClick={loadPlan} disabled={busy}>Refresh</Button>
-              <Button variant="primary" onClick={syncFromShopify} loading={busy}>
-                Sync from Shopify
-              </Button>
-            </InlineStack>
-          </InlineStack>
+        <BlockStack gap="100">
+          <Text as="p" variant="bodyMd" fontWeight="semibold">
+            {isPaid
+              ? `You’re on the ${currentLabel} plan`
+              : "You haven’t selected a plan yet"}
+          </Text>
+
+          <Text as="p" tone="subdued">
+            {isPaid
+              ? "Your billing status is active. You can change, downgrade, or cancel anytime."
+              : "Choose a plan to start your 30-day free trial. After approving a charge, click “Refresh” or wait a moment for confirmation."}
+          </Text>
+        </BlockStack>
+
+        <InlineStack gap="200">
+          <Button onClick={loadPlan} disabled={busy}>
+            Refresh
+          </Button>
+        </InlineStack>
+      </InlineStack>
 
           {/* Catalog-size precheck (non-blocking) */}
 {catalogLoading ? (

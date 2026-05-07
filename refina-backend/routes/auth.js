@@ -167,10 +167,10 @@ router.get("/toplevel", (req, res) => {
     (returnTo ? `&return_to=${encodeURIComponent(returnTo)}` : "");
 
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Redirecting…</title></head>
+<html><head><meta charset="utf-8"><title>Loading…</title></head>
 <body>
 <script>window.top.location.href=${JSON.stringify(backToAuth)};</script>
-<p>Redirecting…</p>
+<p>Loading…</p>
 </body></html>`;
   return res.status(200).send(html);
 });
