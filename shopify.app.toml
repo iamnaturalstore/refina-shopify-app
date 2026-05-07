@@ -14,17 +14,17 @@ dev_store_url = "refina-demo.myshopify.com"
 [webhooks]
 api_version = "2024-10"
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/customers/data_request"
-  compliance_topics = ["customers/data_request"]
+[[webhooks.subscriptions]]
+uri = "/api/privacy/customers/data_request"
+compliance_topics = ["customers/data_request"]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/customers/redact"
-  compliance_topics = ["customers/redact"]
+[[webhooks.subscriptions]]
+uri = "/api/privacy/customers/redact"
+compliance_topics = ["customers/redact"]
 
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/shop/redact"
-  compliance_topics = ["shop/redact"]
+[[webhooks.subscriptions]]
+uri = "/api/privacy/shop/redact"
+compliance_topics = ["shop/redact"]
 
   [[webhooks.subscriptions]]
   uri = "https://refina-app.onrender.com/api/webhooks/products"
