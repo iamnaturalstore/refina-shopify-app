@@ -593,7 +593,7 @@ const premiumMeta = PLAN_DETAILS.premium;
             padding="400"
           >
             <BlockStack gap="100">
-              <Text as="p" variant="headingSm" fontWeight="semibold">
+              <Text as="h4" variant="headingSm" fontWeight="semibold">
                 All plans start with a 30-day free trial — full features, no limits.
               </Text>
               <Text as="p" tone="subdued">
