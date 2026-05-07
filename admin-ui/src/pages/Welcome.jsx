@@ -499,25 +499,49 @@ const startSync = React.useCallback(async () => {
           <StepCard
             number="2"
             title="Catalogue intelligence build"
-            badge={hasKnowledge ? "Complete" : knowledgeActive ? "Building…" : "Ready"}
-            badgeVariant={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "auto"}
+            badge={
+              hasKnowledge
+                ? "Complete"
+                : knowledgeActive
+                ? "Building…"
+                : hasActivePlan
+                ? "Ready"
+                : "Locked"
+            }
+            badgeVariant={
+              hasKnowledge
+                ? "complete"
+                : knowledgeActive
+                ? "inProgress"
+                : hasActivePlan
+                ? "auto"
+                : "required"
+            }
             state={hasKnowledge ? "complete" : knowledgeActive ? "inProgress" : "pending"}
             desc={
               hasKnowledge
                 ? `All ${fmt(kbTotal)} products analysed and enriched — Refina understands your catalogue.`
                 : knowledgeActive
                 ? "Refina is analysing and researching for your catalogue. This takes around 10 seconds per product — this is where the magic happens. ✨"
-                : "Refina will scan and enrich your entire catalogue, building deep intelligence unique to your store. Allow around 10 seconds per product."
+                : hasActivePlan
+                ? "Refina will scan and enrich your entire catalogue, building deep intelligence unique to your store. Allow around 10 seconds per product."
+                : "Choose a plan before building catalogue intelligence."
             }
           >
             {knowledgeActive && (
               <InlineProgress label="Scanning & enriching…" current={kbDone} total={kbTotal} />
             )}
+
             {!hasKnowledge && !knowledgeActive && (
-              <Button variant="primary" onClick={startSync} loading={syncBusy}>
-                Start building intelligence
+              <Button
+                variant="primary"
+                onClick={startSync}
+                loading={syncBusy}
+                disabled={!hasActivePlan || syncBusy}
+              >
+                {hasActivePlan ? "Start building intelligence" : "Choose a plan first"}
               </Button>
-            )}
+           )}
           </StepCard>
 
           {/* Step 3: Theme embed */}

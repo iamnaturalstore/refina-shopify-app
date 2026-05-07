@@ -220,6 +220,10 @@ export default function Home() {
 
   // ── derived ──────────────────────────────────────────────────────────────
   const level         = normalizeLevel(plan?.level);
+  const hasActivePlan =
+    ["lite", "growth", "pro", "premium"].includes(level) &&
+    ["active", "trialing", "current"].includes(String(plan?.status || "").toLowerCase());
+
   const totals        = overview?.totals || overview || {};
 
   // interactions: source of truth from analytics
@@ -266,6 +270,11 @@ export default function Home() {
   }, []);
 
   const startKnowledgeRefresh = React.useCallback(async () => {
+  if (!hasActivePlan) {
+    setSyncMsg("Choose a plan before refreshing catalogue intelligence.");
+    return;
+  }
+
   setSyncMsg("");
   setSyncBusy(true);
   try {
@@ -279,7 +288,7 @@ export default function Home() {
   } finally {
     setSyncBusy(false);
   }
-}, []);
+}, [hasActivePlan]);
 
   // ── loading state ────────────────────────────────────────────────────────
   if (loading) {
@@ -453,18 +462,25 @@ export default function Home() {
               <span style={{ fontSize: "13px", fontWeight: "600", color: "#0F1829" }}>Enrichment</span>
               <button
                 onClick={startKnowledgeRefresh}
-                disabled={syncBusy || kbActive}
+                disabled={!hasActivePlan || syncBusy || kbActive}
                 style={{
                   padding: "6px 12px", borderRadius: "8px",
                   fontSize: "12px", fontWeight: "600",
-                  background: syncBusy || kbActive ? "#F2F4F7" : GRAD,
-                  color: syncBusy || kbActive ? "#94A3B8" : "white",
-                  border: "none", cursor: syncBusy || kbActive ? "not-allowed" : "pointer",
+                  background: !hasActivePlan || syncBusy || kbActive ? "#F2F4F7" : GRAD,
+                  color: !hasActivePlan || syncBusy || kbActive ? "#94A3B8" : "white",
+                  border: "none",
+                  cursor: !hasActivePlan || syncBusy || kbActive ? "not-allowed" : "pointer",
                   fontFamily: "inherit",
-                  boxShadow: syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
+                  boxShadow: !hasActivePlan || syncBusy || kbActive ? "none" : "0 2px 6px rgba(107,143,255,0.25)",
                 }}
               >
-                  {syncBusy ? "Starting…" : kbActive ? "Building knowledge…" : "Refresh knowledge"}
+                {!hasActivePlan
+                  ? "Choose a plan first"
+                  : syncBusy
+                  ? "Starting…"
+                  : kbActive
+                  ? "Building knowledge…"
+                  : "Refresh knowledge"}
               </button>
             </div>
             {syncMsg && (
