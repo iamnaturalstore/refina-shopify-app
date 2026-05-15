@@ -727,3 +727,74 @@
   background: var(--rf-widget-bg, #ffffff) !important;
   color: var(--rf-color-text, #111827) !important;
 }
+
+/* === Theme Appearance restraint pass: keep surfaces neutral === */
+
+/* Keep the large widget shell customisable, but don't tint every inner card. */
+.response,
+.responseBox,
+.card,
+.modal {
+  background: #f8fafc !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-color: rgba(15, 18, 34, 0.08) !important;
+}
+
+/* Results should read like clean content, not a brand-colour panel. */
+.response,
+.responseBox {
+  border-left: 4px solid rgba(15, 18, 34, 0.10) !important;
+}
+
+.responseBox h2,
+.response h2 {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+.responseBox p,
+.response p,
+.responseBox li,
+.response li {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* Keep product detail popup neutral/premium. */
+.modal {
+  background: #ffffff !important;
+}
+
+.modalSubtitle,
+.productDescription,
+.teaser,
+.followUpLabel {
+  color: #677089 !important;
+}
+
+/* Restore neutral follow-up/product chips instead of strong accent tint. */
+.followUpChip {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #334155 !important;
+}
+
+.followUpChip:hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Spinner/loading card should stay pale and calm. */
+.responseBox[aria-live="polite"] {
+  background: #f8fafc !important;
+}
+
+/* Let accent colour work only where it feels intentional. */
+.textarea:focus {
+  border-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+/* Buttons remain merchant-controlled. */
+.askButton,
+.buyNow {
+  background: var(--rf-color-primary, #64748B) !important;
+  color: var(--rf-button-text-color, #ffffff) !important;
+}
