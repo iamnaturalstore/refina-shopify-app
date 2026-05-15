@@ -660,3 +660,38 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* === Mobile overflow fix: prevent widget panel exceeding viewport === */
+.container {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+:global(html),
+:global(body),
+:global(#root) {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 640px) {
+  .container {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .heading,
+  .subtext {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .textarea {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
