@@ -700,3 +700,30 @@
 .heading {
   color: var(--rf-color-text, #111827) !important;
 }
+
+/* === Theme Appearance refinement: keep results clean, use accent sparingly === */
+
+.response,
+.responseBox {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-left-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+.responseBox h2,
+.response h2 {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+.responseBox p,
+.response p,
+.responseBox li,
+.response li {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* Keep product cards clean too; accent should not tint large surfaces */
+.card {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+}
