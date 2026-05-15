@@ -14,12 +14,23 @@ Refina Theme App Embed (Launcher, production)
 <style>
   :root{
     --rf-color-primary: {{ block.settings.primary_color }};
-    --rf-accent-color:  {{ block.settings.accent_color }};
+    --rf-primary-color: {{ block.settings.primary_color }};
+    --rf-accent-color: {{ block.settings.accent_color }};
+    --rf-color-accent: {{ block.settings.accent_color }};
+    --rf-button-text-color: {{ block.settings.button_text_color }};
+    --rf-on-primary: {{ block.settings.button_text_color }};
+    --rf-widget-background-color: {{ block.settings.widget_background_color }};
+    --rf-widget-bg: {{ block.settings.widget_background_color }};
+    --rf-page-bg: {{ block.settings.widget_background_color }};
+    --rf-widget-text-color: {{ block.settings.widget_text_color }};
+    --rf-color-text: {{ block.settings.widget_text_color }};
+    --rf-input-background-color: {{ block.settings.input_background_color }};
+    --rf-input-bg: {{ block.settings.input_background_color }};
   }
 </style>
 
 <div class="refina-widget"
-  style="--rf-color-primary: {{ block.settings.primary_color }}; --rf-accent-color: {{ block.settings.accent_color }};"
+  style="--rf-color-primary: {{ block.settings.primary_color }}; --rf-primary-color: {{ block.settings.primary_color }}; --rf-accent-color: {{ block.settings.accent_color }}; --rf-color-accent: {{ block.settings.accent_color }}; --rf-button-text-color: {{ block.settings.button_text_color }}; --rf-on-primary: {{ block.settings.button_text_color }}; --rf-widget-background-color: {{ block.settings.widget_background_color }}; --rf-widget-bg: {{ block.settings.widget_background_color }}; --rf-page-bg: {{ block.settings.widget_background_color }}; --rf-widget-text-color: {{ block.settings.widget_text_color }}; --rf-color-text: {{ block.settings.widget_text_color }}; --rf-input-background-color: {{ block.settings.input_background_color }}; --rf-input-bg: {{ block.settings.input_background_color }};"
   data-refina-launcher
   data-heading="{{ block.settings.heading }}"
   data-subheading="{{ block.settings.subheading }}"
@@ -32,6 +43,10 @@ Refina Theme App Embed (Launcher, production)
   {# Appearance #}
   data-primary-color="{{ block.settings.primary_color }}"
   data-accent-color="{{ block.settings.accent_color }}"
+  data-button-text-color="{{ block.settings.button_text_color }}"
+  data-widget-background-color="{{ block.settings.widget_background_color }}"
+  data-widget-text-color="{{ block.settings.widget_text_color }}"
+  data-input-background-color="{{ block.settings.input_background_color }}"
   data-border-radius="{{ block.settings.border_radius }}"
   data-button-style="{{ block.settings.button_style }}"
   data-grid-columns="{{ block.settings.grid_columns }}"
@@ -84,7 +99,11 @@ Refina Theme App Embed (Launcher, production)
 
     { "type": "header", "content": "Appearance" },
     { "type": "color", "id": "primary_color", "label": "Primary Color (Buttons)", "default": "#111827" },
+    { "type": "color", "id": "button_text_color", "label": "Button Text Color", "default": "#FFFFFF" },
     { "type": "color", "id": "accent_color", "label": "Accent Color (Highlights)", "default": "#10B981" },
+    { "type": "color", "id": "widget_background_color", "label": "Widget Background Color", "default": "#FFFFFF" },
+    { "type": "color", "id": "widget_text_color", "label": "Widget Text Color", "default": "#111827" },
+    { "type": "color", "id": "input_background_color", "label": "Input Background Color", "default": "#FFFFFF" },
     { "type": "select", "id": "border_radius", "label": "Launcher Border Radius", "options": [
         { "value": "none", "label": "None" },
         { "value": "sm", "label": "Small" },

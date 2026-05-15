@@ -133,7 +133,19 @@
       "";
     const openOnLoad   = String(settings.openOnLoad).toLowerCase() === "true";
 
-    const primaryColor = settings.primaryColor || "#111827";
+    const cssColor = (value, fallback) => {
+      const v = String(value || "").trim();
+      return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
+        ? v
+        : fallback;
+    };
+
+    const primaryColor = cssColor(settings.primaryColor, "#111827");
+    const accentColor = cssColor(settings.accentColor, "#10B981");
+    const buttonTextColor = cssColor(settings.buttonTextColor, "#FFFFFF");
+    const widgetBackgroundColor = cssColor(settings.widgetBackgroundColor, "#FFFFFF");
+    const widgetTextColor = cssColor(settings.widgetTextColor, "#111827");
+    const inputBackgroundColor = cssColor(settings.inputBackgroundColor, "#FFFFFF");
     const zIndex = 2147483646;
 
     // Button-only guards; keep deeplinks working even if button hidden
@@ -191,32 +203,137 @@
     if (!$("#refina-launcher-style")) {
       const style = document.createElement("style");
       style.id = "refina-launcher-style";
-      style.textContent = `
+            style.textContent = `
         :root {
           --refina-safe-bottom: env(safe-area-inset-bottom, 0px);
           --refina-safe-top: env(safe-area-inset-top, 0px);
+
           --rf-primary-color: ${primaryColor};
+          --rf-color-primary: ${primaryColor};
+          --rf-accent-color: ${accentColor};
+          --rf-color-accent: ${accentColor};
+
+          --rf-button-text-color: ${buttonTextColor};
+          --rf-on-primary: ${buttonTextColor};
+
+          --rf-widget-background-color: ${widgetBackgroundColor};
+          --rf-widget-bg: ${widgetBackgroundColor};
+          --rf-page-bg: ${widgetBackgroundColor};
+
+          --rf-widget-text-color: ${widgetTextColor};
+          --rf-color-text: ${widgetTextColor};
+
+          --rf-input-background-color: ${inputBackgroundColor};
+          --rf-input-bg: ${inputBackgroundColor};
         }
+
         .refina-launcher-btn {
           position: fixed;
-          display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-          padding: 10px 14px; border-radius: 9999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 14px;
+          border-radius: 9999px;
           font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, sans-serif;
-          font-weight: 600; font-size: 14px; color: #fff; background: var(--rf-primary-color);
-          border: 0; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: ${zIndex};
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--rf-button-text-color);
+          background: var(--rf-color-primary);
+          border: 0;
+          cursor: pointer;
+          box-shadow: 0 8px 24px rgba(0,0,0,.18);
+          z-index: ${zIndex};
         }
-        .refina-launcher-btn:focus { outline: 2px solid var(--rf-primary-color); outline-offset: 2px; }
-        .refina-launcher-btn--vertical { width: 48px; padding: 0; min-height: 120px; max-height: 260px; writing-mode: horizontal-tb; }
-        .refina-launcher-btn--vertical > span { display: inline-block; transform: rotate(-90deg); white-space: nowrap; }
-        .refina-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: ${zIndex}; display: flex; align-items: center; justify-content: center; }
-        .refina-modal { position: relative; width: min(92vw, 980px); height: min(92vh, 720px); background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
-        .refina-modal iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
-        .refina-modal-close { position: absolute; top: calc(10px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 10px; background: rgba(17,17,17,.75); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+
+        .refina-launcher-btn:focus {
+          outline: 2px solid var(--rf-color-accent);
+          outline-offset: 2px;
+        }
+
+        .refina-launcher-btn--vertical {
+          width: 48px;
+          padding: 0;
+          min-height: 120px;
+          max-height: 260px;
+          writing-mode: horizontal-tb;
+        }
+
+        .refina-launcher-btn--vertical > span {
+          display: inline-block;
+          transform: rotate(-90deg);
+          white-space: nowrap;
+        }
+
+        .refina-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,.6);
+          z-index: ${zIndex};
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .refina-modal {
+          position: relative;
+          width: min(92vw, 980px);
+          height: min(92vh, 720px);
+          background: var(--rf-widget-background-color);
+          border-radius: 16px;
+          overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0,0,0,.35);
+        }
+
+        .refina-modal iframe {
+          width: 100%;
+          height: 100%;
+          border: 0;
+          display: block;
+          background: var(--rf-widget-background-color);
+        }
+
+        .refina-modal-close {
+          position: absolute;
+          top: calc(10px + var(--refina-safe-top));
+          ${side === "left" ? "right" : "left"}: 10px;
+          background: rgba(17,17,17,.75);
+          color: #fff;
+          border: 0;
+          border-radius: 8px;
+          padding: 6px 10px;
+          font-size: 13px;
+          cursor: pointer;
+          z-index: 2;
+        }
+
         @media (max-width: 640px) {
-          .refina-launcher-btn { padding: 10px 12px; }
-          .refina-launcher-btn--vertical { width: 48px; }
-          .refina-modal { width: 100vw; height: 100vh; border-radius: 0; }
-          .refina-modal-close { top: calc(12px + var(--refina-safe-top)); ${side === "left" ? "right" : "left"}: 12px; }
+          .refina-launcher-btn {
+            padding: 10px 12px;
+          }
+
+          .refina-launcher-btn--vertical {
+            width: 48px;
+          }
+
+          .refina-modal-overlay {
+            align-items: flex-start;
+            justify-content: center;
+            padding: calc(54px + var(--refina-safe-top)) 10px calc(16px + var(--refina-safe-bottom));
+            box-sizing: border-box;
+          }
+
+          .refina-modal {
+            width: 100%;
+            height: min(82dvh, 720px);
+            max-height: calc(100dvh - 76px - var(--refina-safe-bottom));
+            border-radius: 24px;
+          }
+
+          .refina-modal-close {
+            top: calc(12px + var(--refina-safe-top));
+            ${side === "left" ? "right" : "left"}: 12px;
+          }
         }
       `;
       document.head.appendChild(style);

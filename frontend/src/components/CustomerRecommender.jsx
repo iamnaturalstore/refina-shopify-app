@@ -718,20 +718,56 @@ const handleFollowUp = useCallback(
     return () => document.removeEventListener("refina:seed", onSeed);
   }, [handleRecommend]);
 
-  // useEffect to apply theme settings from URL
+    // useEffect to apply Theme Editor appearance settings from URL
   useEffect(() => {
     const root = document.documentElement;
     if (!root || !settings) return;
 
-    // Map URL settings to CSS variables
+    const cssColor = (value, fallback = "") => {
+      const v = String(value || "").trim();
+      return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
+        ? v
+        : fallback;
+    };
+
+    const radiusMap = {
+      none: "0px",
+      sm: "8px",
+      md: "12px",
+      lg: "16px",
+      "2xl": "24px",
+    };
+
+    const primaryColor = cssColor(settings.primaryColor);
+    const accentColor = cssColor(settings.accentColor);
+    const buttonTextColor = cssColor(settings.buttonTextColor);
+    const widgetBackgroundColor = cssColor(settings.widgetBackgroundColor);
+    const widgetTextColor = cssColor(settings.widgetTextColor);
+    const inputBackgroundColor = cssColor(settings.inputBackgroundColor);
+
     const stylesToApply = {
-      "--rf-primary-color": settings.primaryColor,
-      "--rf-accent-color": settings.accentColor,
-      // Simple mapping for border-radius. Assumes you have CSS classes/vars for sm, md, lg, 2xl.
-      "--rf-border-radius": settings.borderRadius?.replace(
-        /^(sm|md|lg|2xl)$/,
-        "var(--rf-radius-$1)"
-      ),
+      // Keep both legacy and current names because older inline styles still reference --rf-primary-color.
+      "--rf-primary-color": primaryColor,
+      "--rf-color-primary": primaryColor,
+
+      "--rf-accent-color": accentColor,
+      "--rf-color-accent": accentColor,
+
+      "--rf-button-text-color": buttonTextColor,
+      "--rf-on-primary": buttonTextColor,
+
+      "--rf-widget-background-color": widgetBackgroundColor,
+      "--rf-widget-bg": widgetBackgroundColor,
+      "--rf-page-bg": widgetBackgroundColor,
+      "--rf-surface": widgetBackgroundColor,
+
+      "--rf-widget-text-color": widgetTextColor,
+      "--rf-color-text": widgetTextColor,
+
+      "--rf-input-background-color": inputBackgroundColor,
+      "--rf-input-bg": inputBackgroundColor,
+
+      "--rf-border-radius": radiusMap[settings.borderRadius] || "",
     };
 
     for (const [key, value] of Object.entries(stylesToApply)) {
