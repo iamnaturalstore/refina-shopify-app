@@ -1158,11 +1158,31 @@ const renderRationale = (text) => {
     className={styles.modalOverlay}
     onClick={() => setSelectedProduct(null)}
   >
-    <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-      <h2>{selectedProduct.name}</h2>
-      <div style={{ marginTop: 4, opacity: 0.7, fontSize: 13 }}>
-        Why this fits <span style={{ opacity: 0.6 }}>— “{lastQuery}”</span>
+    <div
+      className={styles.modal}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="refina-product-modal-title"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className={styles.productModalHeader}>
+        <div className={styles.productModalHeadingGroup}>
+          <h2 id="refina-product-modal-title">{selectedProduct.name}</h2>
+          <p className={styles.productModalContext}>
+            Why this fits <span>— “{lastQuery}”</span>
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className={styles.productModalClose}
+          aria-label="Close product details"
+          onClick={() => setSelectedProduct(null)}
+        >
+          ✕
+        </button>
       </div>
+
       <img
         src={selectedProduct.image}
         alt={selectedProduct.name}
@@ -1170,9 +1190,10 @@ const renderRationale = (text) => {
           e.currentTarget.src =
             "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
         }}
-        style={{ marginTop: 12 }}
+        className={styles.productModalImage}
       />
-      <div style={{ marginTop: 12, lineHeight: 1.5 }}>
+
+      <div className={styles.productModalBody}>
         {(() => {
           const raw =
             (selectedProduct &&
@@ -1197,28 +1218,27 @@ const renderRationale = (text) => {
 
           return (
             <div
-              style={{ marginBottom: 8 }}
               dangerouslySetInnerHTML={{ __html: short }}
             />
           );
         })()}
 
-  {/* No LLM reasons or extras in the modal */}
-</div>
+        {/* No LLM reasons or extras in the modal */}
+      </div>
 
-
-
-            <a
-              href={selectedProduct.url || selectedProduct.link || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.buyNow}
-            >
-              Buy Now
-            </a>
-          </div>
-        </div>
-      )}
+      <div className={styles.productModalActions}>
+        <a
+          href={selectedProduct.url || selectedProduct.link || "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={styles.buyNow}
+        >
+          Buy Now
+        </a>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
