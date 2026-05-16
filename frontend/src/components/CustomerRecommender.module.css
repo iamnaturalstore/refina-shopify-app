@@ -1015,7 +1015,8 @@
     background: rgba(15, 18, 34, 0.22) !important;
     padding: 14px 10px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
     box-sizing: border-box;
-    overflow: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
 
   .modal {
