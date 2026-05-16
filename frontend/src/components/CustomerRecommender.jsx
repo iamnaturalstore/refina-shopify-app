@@ -230,6 +230,7 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [reasonsById, setReasonsById] = useState({});
 
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const productModalRef = useRef(null);
   const didAutoStartRef = useRef(false);      // auto-start once guard
   const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
 
@@ -286,6 +287,17 @@ const FOLLOWUP_PROGRESS_PHASES = [
   useEffect(() => {
     return () => progressTimers.current.forEach(clearTimeout);
   }, []);
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+
+    requestAnimationFrame(() => {
+      if (productModalRef.current) {
+        productModalRef.current.scrollTop = 0;
+      }
+    });
+  }, [selectedProduct]);
+
   // ===== end staged progress =====
 
  const buildCurrentRecommendationState = () => ({
@@ -1159,10 +1171,12 @@ const renderRationale = (text) => {
     onClick={() => setSelectedProduct(null)}
   >
     <div
+      ref={productModalRef}
       className={styles.modal}
       role="dialog"
       aria-modal="true"
       aria-labelledby="refina-product-modal-title"
+      tabIndex={-1}
       onClick={(e) => e.stopPropagation()}
     >
       <div className={styles.productModalHeader}>
@@ -1216,11 +1230,7 @@ const renderRationale = (text) => {
             );
           }
 
-          return (
-            <div
-              dangerouslySetInnerHTML={{ __html: short }}
-            />
-          );
+          return <div dangerouslySetInnerHTML={{ __html: short }} />;
         })()}
 
         {/* No LLM reasons or extras in the modal */}
