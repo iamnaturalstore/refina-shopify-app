@@ -696,6 +696,332 @@
     }
 
     // ─────────────────────────────────────
+    // Product Modal (parent-level)
+    // ─────────────────────────────────────
+    let productModal = null;
+
+    // Listen for product open requests from iframe
+    window.addEventListener("message", (e) => {
+      try {
+        if (!e.data || e.data.type !== "refina:product:open") return;
+        
+        const { product, context } = e.data;
+        if (!product || !product.id) return;
+
+        openProductModal(product, context);
+      } catch (err) {
+        console.error("[Refina] Product modal error:", err);
+      }
+    });
+
+    function openProductModal(product, context = {}) {
+      // Close existing modal if any
+      if (productModal) closeProductModal();
+
+      // Inject styles once
+      if (!document.getElementById("refina-product-modal-style")) {
+        const s = document.createElement("style");
+        s.id = "refina-product-modal-style";
+        s.textContent = `
+          .rf-product-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 18, 34, 0.4);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: ${zIndex + 1};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: rfProductFadeIn 0.2s ease;
+          }
+
+          .rf-product-modal {
+            background: #fff;
+            border-radius: 20px;
+            width: min(92%, 560px);
+            max-height: 85vh;
+            overflow-y: auto;
+            position: relative;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: rfProductSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+          }
+
+          .rf-product-header {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: #fff;
+            padding: 20px 20px 16px;
+            border-bottom: 1px solid rgba(15, 18, 34, 0.06);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+          }
+
+          .rf-product-heading-group {
+            flex: 1;
+            min-width: 0;
+          }
+
+          .rf-product-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #111827;
+            margin: 0;
+            line-height: 1.3;
+          }
+
+          .rf-product-context {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin: 6px 0 0;
+          }
+
+          .rf-product-close {
+            flex-shrink: 0;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid rgba(15, 18, 34, 0.08);
+            background: #f8fafc;
+            color: #334155;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+          }
+
+          .rf-product-close:hover {
+            background: #f1f5f9;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+          }
+
+          .rf-product-image {
+            width: 100%;
+            max-height: 50vh;
+            object-fit: contain;
+            display: block;
+            padding: 0 20px;
+            margin: 16px 0;
+          }
+
+          .rf-product-body {
+            padding: 0 20px 20px;
+            color: #111827;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+          }
+
+          .rf-product-price {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 16px;
+          }
+
+          .rf-product-actions {
+            position: sticky;
+            bottom: 0;
+            padding: 16px 20px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.8), #fff 40%);
+            border-top: 1px solid rgba(15, 18, 34, 0.06);
+          }
+
+          .rf-product-buy {
+            display: block;
+            width: 100%;
+            padding: 14px 20px;
+            border-radius: 12px;
+            border: none;
+            background: ${primaryColor};
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+          }
+
+          .rf-product-buy:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+          }
+
+          @keyframes rfProductFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+
+          @keyframes rfProductSlideUp {
+            from {
+              opacity: 0;
+              transform: translateY(20px) scale(0.98);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0) scale(1);
+            }
+          }
+
+          /* Mobile: bottom sheet */
+          @media (max-width: 640px) {
+            .rf-product-modal {
+              width: 100%;
+              max-width: none;
+              max-height: 85dvh;
+              border-radius: 24px 24px 0 0;
+              position: fixed;
+              bottom: 0;
+              left: 0;
+              right: 0;
+              animation: rfProductSlideUpMobile 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+
+            @keyframes rfProductSlideUpMobile {
+              from { transform: translateY(100%); }
+              to { transform: translateY(0); }
+            }
+
+            .rf-product-overlay {
+              align-items: flex-end;
+            }
+
+            .rf-product-image {
+              max-height: 40vh;
+            }
+          }
+        `;
+        document.head.appendChild(s);
+      }
+
+      // Build modal
+      const overlay = document.createElement("div");
+      overlay.className = "rf-product-overlay";
+
+      const modal = document.createElement("div");
+      modal.className = "rf-product-modal";
+
+      const header = document.createElement("div");
+      header.className = "rf-product-header";
+
+      const headingGroup = document.createElement("div");
+      headingGroup.className = "rf-product-heading-group";
+
+      const title = document.createElement("h2");
+      title.className = "rf-product-title";
+      title.textContent = product.name || product.title || "Product";
+
+      const contextText = document.createElement("p");
+      contextText.className = "rf-product-context";
+      contextText.textContent = context.query
+        ? `Why this fits — "${context.query}"`
+        : "Product details";
+
+      const closeBtn = document.createElement("button");
+      closeBtn.className = "rf-product-close";
+      closeBtn.innerHTML = "✕";
+      closeBtn.setAttribute("aria-label", "Close");
+      closeBtn.addEventListener("click", closeProductModal);
+
+      headingGroup.appendChild(title);
+      headingGroup.appendChild(contextText);
+      header.appendChild(headingGroup);
+      header.appendChild(closeBtn);
+
+      const img = document.createElement("img");
+      img.className = "rf-product-image";
+      img.src = product.image;
+      img.alt = product.name || product.title || "";
+      img.onerror = () => {
+        img.src = "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
+      };
+
+      const body = document.createElement("div");
+      body.className = "rf-product-body";
+
+      if (product.price) {
+        const price = document.createElement("div");
+        price.className = "rf-product-price";
+        price.textContent = `$${Number(product.price).toFixed(2)}`;
+        body.appendChild(price);
+      }
+
+      if (product.description) {
+        const desc = document.createElement("div");
+        desc.innerHTML = sanitizeHtml(product.description);
+        body.appendChild(desc);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "rf-product-actions";
+
+      const buyBtn = document.createElement("a");
+      buyBtn.className = "rf-product-buy";
+      buyBtn.href = product.url || product.link || "#";
+      buyBtn.target = "_blank";
+      buyBtn.rel = "noopener noreferrer";
+      buyBtn.textContent = "Buy Now";
+
+      actions.appendChild(buyBtn);
+
+      modal.appendChild(header);
+      modal.appendChild(img);
+      modal.appendChild(body);
+      modal.appendChild(actions);
+      overlay.appendChild(modal);
+
+      // Close on overlay click
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) closeProductModal();
+      });
+
+      // Close on Escape
+      const handleEscape = (e) => {
+        if (e.key === "Escape") closeProductModal();
+      };
+      document.addEventListener("keydown", handleEscape);
+      overlay.__escapeHandler = handleEscape;
+
+      document.body.appendChild(overlay);
+      productModal = overlay;
+
+      // Focus close button
+      setTimeout(() => closeBtn.focus(), 100);
+    }
+
+    function closeProductModal() {
+      if (!productModal) return;
+
+      // Fade out animation
+      productModal.style.opacity = "0";
+      productModal.style.transition = "opacity 0.2s ease";
+
+      // Remove escape listener
+      if (productModal.__escapeHandler) {
+        document.removeEventListener("keydown", productModal.__escapeHandler);
+      }
+
+      setTimeout(() => {
+        productModal.remove();
+        productModal = null;
+      }, 200);
+    }
+
+    // Simple HTML sanitizer
+    function sanitizeHtml(html) {
+      const div = document.createElement("div");
+      div.innerHTML = html;
+      div.querySelectorAll("script, style, iframe").forEach(el => el.remove());
+      return div.innerHTML;
+    }
+
+    // ─────────────────────────────────────
     root.dataset.initialized = "true";
   }
 

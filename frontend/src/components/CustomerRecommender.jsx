@@ -229,8 +229,6 @@ export default function CustomerRecommender({ initialPrompt = "" }) {
   const [copy, setCopy] = useState({ why: "", rationale: "", extras: "" });
   const [reasonsById, setReasonsById] = useState({});
 
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const productModalRef = useRef(null);
   const didAutoStartRef = useRef(false);      // auto-start once guard
   const seededFromPrefillRef = useRef(false); // track if we seeded from prefill
 
@@ -287,16 +285,6 @@ const FOLLOWUP_PROGRESS_PHASES = [
   useEffect(() => {
     return () => progressTimers.current.forEach(clearTimeout);
   }, []);
-
-  useEffect(() => {
-    if (!selectedProduct) return;
-
-    requestAnimationFrame(() => {
-      if (productModalRef.current) {
-        productModalRef.current.scrollTop = 0;
-      }
-    });
-  }, [selectedProduct]);
 
   // ===== end staged progress =====
 
@@ -1096,7 +1084,20 @@ const renderRationale = (text) => {
             key={product.id || product.name}
             className={styles.card}
             role="listitem"
-            onClick={() => setSelectedProduct(product)}
+            onClick={() => {
+              window.parent.postMessage({
+                type: 'refina:product:open',
+                product: {
+                  id: product.id,
+                  name: product.name,
+                  image: product.image,
+                  price: product.price,
+                  description: product.description,
+                  url: product.url
+                },
+                context: { query: lastQuery }
+              }, '*');
+            }}
           >
             <img
               src={product.image}
@@ -1161,91 +1162,6 @@ const renderRationale = (text) => {
           {pill.label}
         </button>
       ))}
-    </div>
-  </div>
-)}
-
-{selectedProduct && !loading && (
-  <div
-    className={styles.modalOverlay}
-    onClick={() => setSelectedProduct(null)}
-  >
-    <div
-      ref={productModalRef}
-      className={styles.modal}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="refina-product-modal-title"
-      tabIndex={-1}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className={styles.productModalHeader}>
-        <div className={styles.productModalHeadingGroup}>
-          <h2 id="refina-product-modal-title">{selectedProduct.name}</h2>
-          <p className={styles.productModalContext}>
-            Why this fits <span>— “{lastQuery}”</span>
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className={styles.productModalClose}
-          aria-label="Close product details"
-          onClick={() => setSelectedProduct(null)}
-        >
-          ✕
-        </button>
-      </div>
-
-      <img
-        src={selectedProduct.image}
-        alt={selectedProduct.name}
-        onError={(e) => {
-          e.currentTarget.src =
-            "https://cdn.shopify.com/s/images/admin/no-image-compact.gif";
-        }}
-        className={styles.productModalImage}
-      />
-
-      <div className={styles.productModalBody}>
-        {(() => {
-          const raw =
-            (selectedProduct &&
-              (selectedProduct.description ||
-                selectedProduct.body_html ||
-                selectedProduct.bodyHtml ||
-                selectedProduct.body ||
-                "")) ||
-            "";
-
-          const safe = sanitizeCatalogHtml(raw);
-          const short = firstParagraphsOrWords(safe, 2, 200);
-
-          if (!short || short.trim() === "") {
-            return (
-              <p>
-                {teaserFromHtml(selectedProduct?.description || "") ||
-                  "A solid match for your request."}
-              </p>
-            );
-          }
-
-          return <div dangerouslySetInnerHTML={{ __html: short }} />;
-        })()}
-
-        {/* No LLM reasons or extras in the modal */}
-      </div>
-
-      <div className={styles.productModalActions}>
-        <a
-          href={selectedProduct.url || selectedProduct.link || "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={styles.buyNow}
-        >
-          Buy Now
-        </a>
-      </div>
     </div>
   </div>
 )}
