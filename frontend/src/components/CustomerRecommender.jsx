@@ -504,7 +504,6 @@ const handleFollowUp = useCallback(
         setReturnState(buildCurrentRecommendationState());
     }
 
-      setSelectedProduct(null);
       setLastQuery(String(pill.label || ""));
       setLoading(true);
       startProgressCycle("followup");
@@ -1085,6 +1084,7 @@ const renderRationale = (text) => {
             className={styles.card}
             role="listitem"
             onClick={() => {
+                console.log('[Refina] Sending product:', product.name);
               window.parent.postMessage({
                 type: 'refina:product:open',
                 product: {

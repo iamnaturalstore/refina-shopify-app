@@ -192,6 +192,7 @@
 
     // Cross-frame ACK from the iframe (/apps/refina) via postMessage
     window.addEventListener("message", (e) => {
+      console.log('[Concierge] Message received:', e.data);
       try {
         if (e && e.data && e.data.type === "refina:prefill:ack") {
           clearRefinaPrefill();
