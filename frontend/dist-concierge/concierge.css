@@ -1,0 +1,1117 @@
+/* =============== */
+/* Refina Widget — Modern Glass UI (drop-in) */
+/* Keeps all existing class names intact     */
+/* =============== */
+
+/* --- Design tokens (safe defaults; override via inline CSS vars) --- */
+:root {
+  /* Theme Editor fallbacks; overridden by URL-driven inline CSS vars */
+  --rf-color-primary: #64748B;
+  --rf-primary-color: var(--rf-color-primary);
+  --rf-color-primary-hover: color-mix(in oklab, var(--rf-color-primary) 80%, black);
+
+  --rf-color-accent: #10B981;
+  --rf-accent-color: var(--rf-color-accent);
+
+  --rf-button-text-color: #ffffff;
+  --rf-on-primary: var(--rf-button-text-color);
+
+  --rf-page-bg: #ffffff;
+  --rf-widget-background-color: var(--rf-page-bg);
+  --rf-widget-bg: var(--rf-widget-background-color);
+
+  --rf-color-text: #0f1222;
+  --rf-widget-text-color: var(--rf-color-text);
+  --rf-text-muted: color-mix(in oklab, var(--rf-color-text) 68%, transparent);
+  --rf-text-subtle: color-mix(in oklab, var(--rf-color-text) 58%, transparent);
+
+  --rf-input-background-color: #ffffff;
+  --rf-input-bg: var(--rf-input-background-color);
+
+  --rf-surface: var(--rf-widget-bg);
+  --rf-surface-alt: color-mix(in oklab, var(--rf-widget-bg) 92%, var(--rf-color-primary) 8%);
+  --rf-border: color-mix(in oklab, var(--rf-color-text) 12%, transparent);
+  --rf-muted: color-mix(in oklab, var(--rf-widget-bg) 88%, var(--rf-color-text) 12%);
+  --rf-muted-hover: color-mix(in oklab, var(--rf-widget-bg) 82%, var(--rf-color-accent) 18%);
+  --rf-overlay: rgba(9, 12, 20, 0.6);
+
+  --rf-badge-bg: color-mix(in oklab, var(--rf-widget-bg) 86%, var(--rf-color-accent) 14%);
+  --rf-badge-fg: var(--rf-color-text);
+  --rf-badge-strong-bg: var(--rf-color-primary);
+  --rf-on-badge-strong: var(--rf-button-text-color);
+
+  --rf-shadow: 0 10px 30px rgba(15,18,34,0.12);
+  --rf-radius: 16px;
+  --rf-spacing: 12px;
+  --rf-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+  background: var(--rf-page-bg);
+  color: var(--rf-color-text);
+}
+
+/* Dark mode polish */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --rf-color-text: #eef1f8;
+    --rf-text-muted: #aab3c2;
+    --rf-text-subtle: #9aa3b4;
+
+    --rf-surface: rgba(20,22,34,0.62);
+    --rf-surface-alt: rgba(27,30,44,0.6);
+    --rf-border: rgba(255,255,255,0.12);
+    --rf-muted: rgba(255,255,255,0.06);
+    --rf-muted-hover: rgba(255,255,255,0.1);
+    --rf-overlay: rgba(3, 6, 12, 0.7);
+
+    --rf-badge-bg: rgba(255,255,255,0.08);
+    --rf-badge-fg: #d6d9e0;
+    --rf-badge-strong-bg: #e5e7eb;
+    --rf-on-badge-strong: #0b0d14;
+  }
+}
+
+/* ===== Layout Container ===== */
+._container_1095v_80 {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: var(--rf-spacing);
+  font-family: var(--rf-font-family);
+  color: var(--rf-color-text);
+
+  /* glass card feel */
+  background: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-radius: 20px;
+  box-shadow: var(--rf-shadow), inset 0 1px 0 rgba(255,255,255,0.35);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+/* ===== Heading & Subtext ===== */
+._heading_1095v_97 {
+  text-align: center;
+  font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2rem);
+  font-weight: 500;
+  color: var(--rf-color-primary);
+  letter-spacing: 0.2px;
+  margin-top: calc(var(--rf-spacing) * 1.5);
+  margin-bottom: calc(var(--rf-spacing) * 0.75);
+}
+._subtext_1095v_106 {
+  text-align: center;
+  font-size: 1rem;
+  margin-bottom: calc(var(--rf-spacing) * 1.25);
+  color: var(--rf-text-muted);
+  max-width: 65ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ===== Suggestion chips (unchanged class; refined style) ===== */
+._concernButtons_1095v_117 {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: calc(var(--rf-spacing) * 0.5);
+  margin-bottom: calc(var(--rf-spacing) * 1.25);
+}
+._concernButtons_1095v_117 button,
+._chip_1095v_125 {
+  padding: calc(var(--rf-spacing) * 0.5) var(--rf-spacing);
+  background-color: var(--rf-muted);
+  border: 1px solid var(--rf-border);
+  border-radius: 999px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color .18s ease, transform .06s ease, box-shadow .18s ease;
+  color: var(--rf-color-text);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
+}
+._concernButtons_1095v_117 button:hover,
+._chip_1095v_125:hover { background-color: var(--rf-muted-hover); }
+._chip_1095v_125:active,
+._concernButtons_1095v_117 button:active { transform: translateY(1px); }
+
+/* ===== Textarea (pill + focus ring) ===== */
+._textarea_1095v_142 {
+  width: 100%;
+  min-height: 84px;
+  padding: calc(var(--rf-spacing) * 0.9) calc(var(--rf-spacing) * 1.1);
+  font-size: 1rem;
+  border: 1px solid var(--rf-border);
+  border-radius: 999px; /* pill */
+  margin-bottom: var(--rf-spacing);
+  resize: vertical;
+  color: var(--rf-color-text);
+  background: #fff; /* readable on glass */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+  transition: box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
+._textarea_1095v_142:focus {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--rf-color-primary) 70%, white),
+              inset 0 1px 0 rgba(255,255,255,0.9);
+  background: #fff;
+}
+
+/* ===== Primary CTA (modern gradient pill) ===== */
+._askButton_1095v_165 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 auto calc(var(--rf-spacing) * 1.6) auto;
+  padding: calc(var(--rf-spacing) * 0.9) calc(var(--rf-spacing) * 1.65);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 1rem;
+  color: var(--rf-on-primary);
+  background: linear-gradient(180deg, var(--rf-color-primary), color-mix(in oklab, var(--rf-color-primary) 70%, black));
+  box-shadow: 0 10px 22px color-mix(in oklab, var(--rf-color-primary) 30%, transparent),
+              inset 0 1px 0 rgba(255,255,255,0.28);
+  transform: translateY(0);
+  transition: transform .18s cubic-bezier(.2,.7,.2,1), box-shadow .18s ease;
+}
+._askButton_1095v_165:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px color-mix(in oklab, var(--rf-color-primary) 36%, transparent),
+              inset 0 1px 0 rgba(255,255,255,0.32);
+}
+._askButton_1095v_165:active { transform: translateY(0); }
+._askButton_1095v_165:disabled {
+  background: #9aa3b4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ===== AI Response (keeps structure, polishes style) ===== */
+._response_1095v_197,
+._responseBox_1095v_198 {
+  background-color: var(--rf-surface-alt);
+  padding: var(--rf-spacing);
+  border-radius: var(--rf-radius);
+  margin: calc(var(--rf-spacing) * 1.25) 0;
+  border-left: 4px solid var(--rf-color-primary);
+  color: var(--rf-color-text);
+}
+._responseBox_1095v_198 h2 {
+  font-size: 1.15rem;
+  font-weight: 500;
+  margin-bottom: calc(var(--rf-spacing) * 0.5);
+  color: var(--rf-color-primary);
+}
+._responseBox_1095v_198 p { font-size: 1rem; line-height: 1.55; color: var(--rf-color-text); }
+
+/* ===== Product Grid & Cards (Top-3 looks premium) ===== */
+._grid_1095v_215 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: calc(var(--rf-spacing) * 1);
+}
+._card_1095v_220 {
+  background-color: var(--rf-surface);
+  border: 1px solid var(--rf-border);
+  border-radius: var(--rf-radius);
+  padding: calc(var(--rf-spacing) * 1);
+  cursor: pointer;
+  position: relative;
+  color: var(--rf-color-text);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.4);
+  transition: box-shadow .18s ease, transform .18s ease, border-color .18s ease;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+._card_1095v_220:hover {
+  box-shadow: var(--rf-shadow);
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--rf-color-primary) 30%, var(--rf-border));
+}
+._image_1095v_238 {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: calc(var(--rf-radius) - 4px);
+  margin-bottom: calc(var(--rf-spacing) * 0.5);
+}
+
+/* Product badges + price */
+._badges_1095v_247 { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+._badge_1095v_247 {
+  font-size: 12px;
+  background: var(--rf-badge-bg);
+  border: 1px solid var(--rf-border);
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--rf-badge-fg);
+}
+._price_1095v_256 { margin-top: 6px; font-weight: 700; }
+
+._productTitle_1095v_258 { font-size: 1.06rem; font-weight: 700; margin: 0.5rem 0 0.25rem; }
+._productDescription_1095v_259 { font-size: 0.95rem; color: var(--rf-text-muted); line-height: 1.45; }
+._teaser_1095v_260 { font-size: 0.92rem; color: var(--rf-text-subtle); margin: 4px 0 6px; }
+
+/* “Top pick” ribbon — unchanged semantics, higher contrast */
+._topPickBadge_1095v_263 {
+  position: absolute;
+  top: 8px; left: 8px;
+  background: var(--rf-color-primary);
+  color: var(--rf-on-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--rf-color-primary) 28%, transparent);
+}
+
+/* ===== Modal Overlay + Modal (glassy) ===== */
+._modalOverlay_1095v_275 {
+  position: fixed;
+  inset: 0;
+
+  /* ✅ remove grey wash */
+  background: rgba(255, 255, 255, 0);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  z-index: 999;
+
+  /* ✅ no blur haze */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+._modal_1095v_275 {
+  background-color: var(--rf-surface);
+  padding: calc(var(--rf-spacing) * 2);
+  border-radius: 20px;
+  max-width: 560px;
+  width: min(92%, 560px);
+  text-align: center;
+  height: auto;
+  max-height: 96dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  color: var(--rf-color-text);
+  border: 1px solid var(--rf-border);
+  box-shadow: var(--rf-shadow), inset 0 1px 0 rgba(255,255,255,0.35);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+._modal_1095v_275 img {
+  width: 100%;
+  height: auto;
+  margin-bottom: var(--rf-spacing);
+  border-radius: calc(var(--rf-radius) - 4px);
+  max-height: 50vh;
+  object-fit: contain;
+}
+._modalSubtitle_1095v_318 {
+  text-align: left;
+  margin: 0.25rem 0 1rem;
+  color: var(--rf-text-subtle);
+  font-size: 0.96rem;
+}
+._reasonsList_1095v_324 { text-align: left; margin: .75rem 0 1rem; padding-left: 1.1rem; }
+._reasonsList_1095v_324 li { margin: .2rem 0; line-height: 1.35; font-size: .96rem; text-align: left; }
+
+/* Buy Now button → gradient pill */
+._buyNow_1095v_328 {
+  display: inline-block;
+  margin-top: var(--rf-spacing);
+  padding: calc(var(--rf-spacing) * 0.85) calc(var(--rf-spacing) * 1.6);
+  background: linear-gradient(180deg, var(--rf-color-primary), color-mix(in oklab, var(--rf-color-primary) 68%, black));
+  color: var(--rf-on-primary);
+  font-weight: 800;
+  text-decoration: none;
+  border-radius: 999px;
+  box-shadow: 0 10px 22px color-mix(in oklab, var(--rf-color-primary) 30%, transparent),
+              inset 0 1px 0 rgba(255,255,255,0.28);
+  transition: transform .18s, box-shadow .18s, background .18s;
+}
+._buyNow_1095v_328:hover {
+  background: linear-gradient(180deg, var(--rf-color-primary-hover), color-mix(in oklab, var(--rf-color-primary) 78%, black));
+  transform: translateY(-1px);
+}
+
+/* ===== Micro-interactions ===== */
+._dots_1095v_347 { display:inline-block; overflow:hidden; vertical-align:bottom; width:0; animation: _revealDots_1095v_1 1.2s steps(3,end) infinite; }
+._dots_1095v_347::after { content: '...'; }
+@keyframes _revealDots_1095v_1 { 0%{width:0} 100%{width:1.2em} }
+
+/* ===== Accessibility ===== */
+._textarea_1095v_142:focus,
+._askButton_1095v_165:focus,
+._buyNow_1095v_328:focus,
+._concernButtons_1095v_117 button:focus,
+._chip_1095v_125:focus {
+  outline: 2px solid color-mix(in oklab, var(--rf-color-primary) 70%, white);
+  outline-offset: 2px;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  ._askButton_1095v_165, ._card_1095v_220, ._buyNow_1095v_328 { transition: none; }
+  ._card_1095v_220:hover { transform: none; }
+}
+
+/* ——— Refina hot-fix overrides (append at end of file) ——— */
+
+/* Prevent theme bleed */
+._container_1095v_80 * { box-sizing: border-box; }
+
+/* Textarea: normalize radius, borders, and spacing */
+._textarea_1095v_142 {
+  border-radius: 14px !important;          /* undo theme’s pill radius */
+  border: 1px solid var(--rf-border, #d1d5db) !important;
+  background: var(--rf-surface, #fff) !important;
+  padding: 14px 16px !important;
+  line-height: 1.35;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.04);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Make sure the ask button is always visible and clickable */
+._askButton_1095v_165 {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 18px;
+  border-radius: 999px;                     /* keep the pill look */
+  font-weight: 500;
+  letter-spacing: .2px;
+  margin: 0 auto 28px auto;                 /* stay centered */
+  position: sticky;                         /* stick within the modal body */
+  bottom: 8px;                              /* hugs the bottom while scrolling */
+  z-index: 3;                               /* above response panels */
+  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+}
+
+/* When disabled, keep layout stable (don’t collapse) */
+._askButton_1095v_165:disabled {
+  opacity: .7;
+  filter: saturate(.85);
+}
+
+/* Response block: a hair more separation from the input */
+._responseBox_1095v_198,
+._response_1095v_197 {
+  margin-top: 18px !important;
+}
+
+/* Card corners consistent with the new glassy panel */
+._card_1095v_220, ._image_1095v_238, ._modal_1095v_275, ._modal_1095v_275 img {
+  border-radius: 14px !important;
+}
+
+/* === Ask button: light-mode defaults (CSS-only override) === */
+._askButton_1095v_165 {
+  /* neutral pill so it’s never white-on-white */
+  --rf-btn-bg: var(--rf-btn-bg, #e7eaee);
+  --rf-btn-text: var(--rf-btn-text, #0b0f19);
+  --rf-btn-bg-hover: var(--rf-btn-bg-hover, #dfe3e9);
+  --rf-btn-bg-active: var(--rf-btn-bg-active, #d6dbe3);
+  --rf-btn-ring: var(--rf-btn-ring, rgba(59,130,246,0.45)); /* visible focus */
+
+  background: var(--rf-btn-bg);
+  color: var(--rf-btn-text);
+  border: 0;
+  box-shadow: 0 6px 18px rgba(16,24,40,0.08);
+  transition: background-color .15s ease, transform .05s ease, box-shadow .15s ease;
+  min-width: 140px; /* keeps width stable while text swaps */
+}
+
+._askButton_1095v_165:hover:not(:disabled) {
+  background: var(--rf-btn-bg-hover);
+  box-shadow: 0 8px 22px rgba(16,24,40,0.10);
+}
+
+._askButton_1095v_165:active:not(:disabled) {
+  background: var(--rf-btn-bg-active);
+  transform: translateY(1px);
+  box-shadow: 0 4px 12px rgba(16,24,40,0.12);
+}
+
+._askButton_1095v_165:focus-visible {
+  outline: 0;
+  box-shadow:
+    0 6px 18px rgba(16,24,40,0.08),
+    0 0 0 3px var(--rf-btn-ring);
+}
+
+/* Disabled stays readable (no “invisible” button) */
+._askButton_1095v_165:disabled {
+  background: #eceff3;
+  color: #6b7280;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+._followUpWrapper_1095v_462 {
+  margin-top: 24px;
+  padding: 16px 0;
+  border-top: 1px solid #eee; /* Light separation from the grid */
+  text-align: center;
+}
+
+._followUpLabel_1095v_469 {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 12px;
+}
+
+._followUpContainer_1095v_475 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+._followUpChip_1095v_482 {
+  background: white;
+  border: 1px solid #e91e63; /* Your brand pink */
+  color: #e91e63;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+._followUpChip_1095v_482:hover {
+  background: #fff5f8;
+  transform: translateY(-1px);
+}
+
+@keyframes _rfSpin_1095v_1 {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* === Theme Appearance wiring: final overrides === */
+
+/* Keep the visible iframe/widget background aligned with Theme Editor. */
+html,
+body,
+#root {
+  background: var(--rf-page-bg, var(--rf-widget-bg, #ffffff)) !important;
+  color: var(--rf-color-text, #111827);
+}
+
+/* Main widget shell */
+._container_1095v_80 {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-color: var(--rf-border, rgba(15,18,34,0.08));
+  border-radius: var(--rf-border-radius, 20px);
+}
+
+/* Text surfaces */
+._heading_1095v_97 {
+  color: var(--rf-color-primary, #64748B) !important;
+}
+
+._subtext_1095v_106,
+._productDescription_1095v_259,
+._teaser_1095v_260,
+._modalSubtitle_1095v_318,
+._followUpLabel_1095v_469 {
+  color: var(--rf-text-muted, #677089) !important;
+}
+
+._responseBox_1095v_198,
+._response_1095v_197,
+._card_1095v_220,
+._modal_1095v_275 {
+  background: var(--rf-surface-alt, var(--rf-widget-bg, #ffffff)) !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-color: var(--rf-border, rgba(15,18,34,0.08));
+}
+
+._card_1095v_220 {
+  background: var(--rf-surface, var(--rf-widget-bg, #ffffff)) !important;
+}
+
+/* Input */
+._textarea_1095v_142 {
+  background: var(--rf-input-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-color: var(--rf-border, rgba(15,18,34,0.12)) !important;
+}
+
+._textarea_1095v_142::placeholder {
+  color: color-mix(in oklab, var(--rf-color-text, #111827) 46%, transparent);
+}
+
+._textarea_1095v_142:focus {
+  border-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--rf-color-accent, var(--rf-color-primary, #64748B)) 50%, transparent),
+    inset 0 1px 2px rgba(0,0,0,.04) !important;
+}
+
+/* Primary CTA buttons */
+._askButton_1095v_165,
+._buyNow_1095v_328 {
+  background: var(--rf-color-primary, #64748B) !important;
+  color: var(--rf-button-text-color, #ffffff) !important;
+  border: 0 !important;
+  box-shadow:
+    0 10px 22px color-mix(in oklab, var(--rf-color-primary, #64748B) 28%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.22) !important;
+}
+
+._askButton_1095v_165:hover:not(:disabled),
+._buyNow_1095v_328:hover {
+  background: color-mix(in oklab, var(--rf-color-primary, #64748B) 86%, black) !important;
+}
+
+._askButton_1095v_165:disabled {
+  background: color-mix(in oklab, var(--rf-color-primary, #64748B) 35%, #eceff3) !important;
+  color: color-mix(in oklab, var(--rf-button-text-color, #ffffff) 65%, #6b7280) !important;
+  opacity: .72;
+}
+
+/* Accent colour now has visible, subtle work */
+._responseBox_1095v_198,
+._response_1095v_197 {
+  border-left-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+._topPickBadge_1095v_263 {
+  background: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+  color: var(--rf-button-text-color, #ffffff) !important;
+}
+
+._followUpChip_1095v_482 {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  border-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+  color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+._followUpChip_1095v_482:hover {
+  background: color-mix(in oklab, var(--rf-widget-bg, #ffffff) 84%, var(--rf-color-accent, #10B981) 16%) !important;
+}
+
+/* Mobile: reduce the “giant white slab” feel */
+@media (max-width: 640px) {
+  html,
+  body,
+  #root {
+    background: var(--rf-page-bg, var(--rf-widget-bg, #ffffff)) !important;
+  }
+
+  ._container_1095v_80 {
+    width: 100%;
+    max-width: none;
+    min-height: auto;
+    margin: 0;
+    padding: 28px 16px 18px;
+    border-radius: 22px;
+    box-shadow: none;
+    border: 1px solid var(--rf-border, rgba(15,18,34,0.08));
+  }
+
+  ._heading_1095v_97 {
+    font-size: clamp(1.75rem, 9vw, 2.35rem);
+    line-height: 1.16;
+    margin-top: 8px;
+    margin-bottom: 18px;
+  }
+
+  ._subtext_1095v_106 {
+    font-size: 1rem;
+    line-height: 1.48;
+    margin-bottom: 22px;
+  }
+
+  ._textarea_1095v_142 {
+    min-height: 92px;
+    border-radius: 18px !important;
+    margin-bottom: 16px;
+  }
+
+  ._askButton_1095v_165 {
+    width: auto;
+    min-width: 180px;
+    min-height: 48px;
+    margin-bottom: 12px;
+    position: static;
+  }
+
+  ._responseBox_1095v_198,
+  ._response_1095v_197 {
+    border-radius: 18px;
+  }
+
+  ._grid_1095v_215 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* === Mobile overflow fix: prevent widget panel exceeding viewport === */
+._container_1095v_80 {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 640px) {
+  ._container_1095v_80 {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  ._heading_1095v_97,
+  ._subtext_1095v_106 {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  ._textarea_1095v_142 {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+/* === Theme Appearance refinement: heading follows widget text colour === */
+._heading_1095v_97 {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* === Theme Appearance refinement: keep results clean, use accent sparingly === */
+
+._response_1095v_197,
+._responseBox_1095v_198 {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-left-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+._responseBox_1095v_198 h2,
+._response_1095v_197 h2 {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+._responseBox_1095v_198 p,
+._response_1095v_197 p,
+._responseBox_1095v_198 li,
+._response_1095v_197 li {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* Keep product cards clean too; accent should not tint large surfaces */
+._card_1095v_220 {
+  background: var(--rf-widget-bg, #ffffff) !important;
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* === Theme Appearance restraint pass: keep surfaces neutral === */
+
+/* Keep the large widget shell customisable, but don't tint every inner card. */
+._response_1095v_197,
+._responseBox_1095v_198,
+._card_1095v_220,
+._modal_1095v_275 {
+  background: #f8fafc !important;
+  color: var(--rf-color-text, #111827) !important;
+  border-color: rgba(15, 18, 34, 0.08) !important;
+}
+
+/* Results should read like clean content, not a brand-colour panel. */
+._response_1095v_197,
+._responseBox_1095v_198 {
+  border-left: 4px solid rgba(15, 18, 34, 0.10) !important;
+}
+
+._responseBox_1095v_198 h2,
+._response_1095v_197 h2 {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+._responseBox_1095v_198 p,
+._response_1095v_197 p,
+._responseBox_1095v_198 li,
+._response_1095v_197 li {
+  color: var(--rf-color-text, #111827) !important;
+}
+
+/* Keep product detail popup neutral/premium. */
+._modal_1095v_275 {
+  background: #ffffff !important;
+}
+
+._modalSubtitle_1095v_318,
+._productDescription_1095v_259,
+._teaser_1095v_260,
+._followUpLabel_1095v_469 {
+  color: #677089 !important;
+}
+
+/* Restore neutral follow-up/product chips instead of strong accent tint. */
+._followUpChip_1095v_482 {
+  background: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #334155 !important;
+}
+
+._followUpChip_1095v_482:hover {
+  background: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* Spinner/loading card should stay pale and calm. */
+._responseBox_1095v_198[aria-live="polite"] {
+  background: #f8fafc !important;
+}
+
+/* Let accent colour work only where it feels intentional. */
+._textarea_1095v_142:focus {
+  border-color: var(--rf-color-accent, var(--rf-color-primary, #64748B)) !important;
+}
+
+/* Buttons remain merchant-controlled. */
+._askButton_1095v_165,
+._buyNow_1095v_328 {
+  background: var(--rf-color-primary, #64748B) !important;
+  color: var(--rf-button-text-color, #ffffff) !important;
+}
+
+/* === Product detail modal: premium mobile UX pass === */
+
+._productModalHeader_1095v_804 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+._productModalHeadingGroup_1095v_813 {
+  min-width: 0;
+  flex: 1;
+}
+
+._productModalHeader_1095v_804 h2 {
+  margin: 0;
+  color: var(--rf-color-text, #111827);
+  font-size: clamp(1.18rem, 1rem + 0.8vw, 1.55rem);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+}
+
+._productModalContext_1095v_826 {
+  margin: 6px 0 0;
+  color: #677089;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+._productModalContext_1095v_826 span {
+  opacity: 0.72;
+}
+
+._productModalClose_1095v_837 {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(15, 18, 34, 0.08);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(15, 18, 34, 0.06);
+  transition: background-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+._productModalClose_1095v_837:hover {
+  background: #f1f5f9;
+  box-shadow: 0 4px 12px rgba(15, 18, 34, 0.08);
+}
+
+._productModalClose_1095v_837:active {
+  transform: translateY(1px);
+}
+
+._productModalClose_1095v_837:focus-visible {
+  outline: 2px solid var(--rf-color-accent, var(--rf-color-primary, #64748B));
+  outline-offset: 2px;
+}
+
+._productModalImage_1095v_869 {
+  width: 100%;
+  height: auto;
+  max-height: 46vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 0 16px;
+  border-radius: 16px !important;
+  background: #f8fafc;
+}
+
+._productModalBody_1095v_880 {
+  text-align: left;
+  color: var(--rf-color-text, #111827);
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+._productModalBody_1095v_880 p {
+  margin: 0 0 0.85rem;
+}
+
+._productModalBody_1095v_880 p:last-child {
+  margin-bottom: 0;
+}
+
+._productModalBody_1095v_880 ul,
+._productModalBody_1095v_880 ol {
+  margin: 0.75rem 0 0.9rem;
+  padding-left: 1.2rem;
+}
+
+._productModalActions_1095v_901 {
+  margin-top: 18px;
+  text-align: center;
+}
+
+/* === Product detail modal: view-level premium UX pass === */
+
+._productModalHeader_1095v_804 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+._productModalHeadingGroup_1095v_813 {
+  min-width: 0;
+  flex: 1;
+}
+
+._productModalHeader_1095v_804 h2 {
+  margin: 0;
+  color: var(--rf-color-text, #111827);
+  font-size: clamp(1.18rem, 1rem + 0.8vw, 1.55rem);
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+}
+
+._productModalContext_1095v_826 {
+  margin: 6px 0 0;
+  color: #677089;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+._productModalContext_1095v_826 span {
+  opacity: 0.72;
+}
+
+._productModalClose_1095v_837 {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(15, 18, 34, 0.08);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 2px rgba(15, 18, 34, 0.06);
+  transition: background-color 0.15s ease, transform 0.08s ease, box-shadow 0.15s ease;
+}
+
+._productModalClose_1095v_837:hover {
+  background: #f1f5f9;
+  box-shadow: 0 4px 12px rgba(15, 18, 34, 0.08);
+}
+
+._productModalClose_1095v_837:active {
+  transform: translateY(1px);
+}
+
+._productModalClose_1095v_837:focus-visible {
+  outline: 2px solid var(--rf-color-accent, var(--rf-color-primary, #64748b));
+  outline-offset: 2px;
+}
+
+._productModalImage_1095v_869 {
+  width: 100%;
+  height: auto;
+  max-height: 42vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 0 16px;
+  border-radius: 16px !important;
+  background: #f8fafc;
+}
+
+._productModalBody_1095v_880 {
+  text-align: left;
+  color: var(--rf-color-text, #111827);
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
+._productModalBody_1095v_880 p {
+  margin: 0 0 0.85rem;
+}
+
+._productModalBody_1095v_880 p:last-child {
+  margin-bottom: 0;
+}
+
+._productModalBody_1095v_880 ul,
+._productModalBody_1095v_880 ol {
+  margin: 0.75rem 0 0.9rem;
+  padding-left: 1.2rem;
+}
+
+._productModalActions_1095v_901 {
+  margin-top: 18px;
+  text-align: center;
+}
+
+/* Mobile: centered in the visible iframe view, not top-anchored or bottom-sheet. */
+@media (max-width: 640px) {
+  ._modalOverlay_1095v_275 {
+    align-items: center !important;
+    justify-content: center !important;
+    background: rgba(15, 18, 34, 0.22) !important;
+    padding: 14px 10px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+    box-sizing: border-box;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  ._modal_1095v_275 {
+    width: min(100%, 520px) !important;
+    max-width: calc(100vw - 20px) !important;
+    max-height: min(78dvh, 680px) !important;
+    min-height: auto;
+    margin: auto !important;
+    padding: 0 !important;
+    border-radius: 24px !important;
+    text-align: left;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    background: #ffffff !important;
+    box-shadow: 0 18px 54px rgba(15, 18, 34, 0.28) !important;
+    animation: _refinaProductViewIn_1095v_1 0.2s cubic-bezier(0.2, 0.85, 0.25, 1);
+  }
+
+  ._productModalHeader_1095v_804 {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #ffffff;
+    margin: 0;
+    padding: 16px 16px 13px;
+    border-bottom: 1px solid rgba(15, 18, 34, 0.06);
+    border-radius: 24px 24px 0 0;
+  }
+
+  ._productModalHeader_1095v_804 h2 {
+    font-size: 1.06rem;
+    line-height: 1.18;
+    padding-right: 2px;
+  }
+
+  ._productModalContext_1095v_826 {
+    font-size: 0.8rem;
+    margin-top: 5px;
+  }
+
+  ._productModalClose_1095v_837 {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+
+  ._productModalImage_1095v_869 {
+    width: calc(100% - 28px);
+    max-height: 30dvh;
+    margin: 14px auto 14px;
+    border-radius: 18px !important;
+  }
+
+  ._productModalBody_1095v_880 {
+    padding: 0 16px;
+    font-size: 0.94rem;
+    line-height: 1.52;
+  }
+
+  ._productModalActions_1095v_901 {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 16px 0 0;
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(
+      180deg,
+      rgba(255,255,255,0.72),
+      rgba(255,255,255,0.98) 34%,
+      #ffffff
+    );
+    border-top: 1px solid rgba(15, 18, 34, 0.06);
+    border-radius: 0 0 24px 24px;
+    text-align: center;
+  }
+
+  ._productModalActions_1095v_901 ._buyNow_1095v_328 {
+    width: 100%;
+    max-width: 360px;
+    margin-top: 0;
+    text-align: center;
+    padding: 13px 18px;
+    min-height: 46px;
+  }
+}
+
+@keyframes _refinaProductViewIn_1095v_1 {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

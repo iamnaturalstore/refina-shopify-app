@@ -1,0 +1,8 @@
+/concierge.js
+  Access-Control-Allow-Origin: *
+
+/concierge.css
+  Access-Control-Allow-Origin: *
+
+/chunks/*
+  Access-Control-Allow-Origin: *
