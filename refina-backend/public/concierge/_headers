@@ -1,8 +1,11 @@
 /concierge.js
+  Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
 
 /concierge.css
+  Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
 
 /chunks/*
+  Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
