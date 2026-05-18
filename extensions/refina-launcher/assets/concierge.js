@@ -884,22 +884,30 @@
     }
   }
 
-  /* Exit animations */
-  @keyframes rfProductBackdropFadeOut {
-    from { opacity: 1; }
-    to { opacity: 0; }
-  }
+  /* Exit animations - ensure they override entrance */
+.rf-product-overlay.closing {
+  animation: rfProductBackdropFadeOut 0.25s cubic-bezier(0.4, 0, 1, 1) forwards !important;
+}
 
-  @keyframes rfProductSlideDown {
-    from {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    to {
-      opacity: 0;
-      transform: translateY(16px) scale(0.98);
-    }
+.rf-product-overlay.closing .rf-product-modal {
+  animation: rfProductSlideDown 0.3s cubic-bezier(0.4, 0, 1, 1) forwards !important;
+}
+
+@keyframes rfProductBackdropFadeOut {
+  from { opacity: 1; backdrop-filter: blur(8px); }
+  to { opacity: 0; backdrop-filter: blur(0px); }
+}
+
+@keyframes rfProductSlideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
+  to {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+}
 
   /* Mobile: bottom sheet */
   @media (max-width: 640px) {
@@ -1047,19 +1055,24 @@
     function closeProductModal() {
       if (!productModal) return;
 
-      // Add closing class to trigger exit animations
+      // Trigger exit animation
       productModal.classList.add('closing');
 
-      // Remove escape listener
+      // Remove escape listener immediately
       if (productModal.__escapeHandler) {
         document.removeEventListener("keydown", productModal.__escapeHandler);
       }
 
-      // Wait for exit animations to complete (300ms - matches longest animation)
-      setTimeout(() => {
-        productModal.remove();
-        productModal = null;
-      }, 300);
+      // Wait for animation to complete before removing
+      // Use requestAnimationFrame to ensure class is applied before removal
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (productModal) {
+            productModal.remove();
+            productModal = null;
+          }
+        }, 350); // Slightly longer to ensure animation completes
+      });
     }
 
     // Simple HTML sanitizer
