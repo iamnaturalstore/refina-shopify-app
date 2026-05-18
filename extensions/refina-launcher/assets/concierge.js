@@ -1031,6 +1031,85 @@
       modal.appendChild(img);
       modal.appendChild(body);
       modal.appendChild(actions);
+      // ─────────────────────────────────────
+      // Touch gestures for mobile dismiss
+      // ─────────────────────────────────────
+      if (window.matchMedia("(max-width: 640px)").matches) {
+        let startY = 0;
+        let currentY = 0;
+        let isDragging = false;
+        let startTime = 0;
+
+        const handleTouchStart = (e) => {
+          // Only allow drag from header area
+          if (!e.target.closest('.rf-product-header')) return;
+
+          startY = e.touches[0].clientY;
+          currentY = startY;
+          startTime = Date.now();
+          isDragging = false;
+          modal.style.transition = 'none';
+        };
+
+        const handleTouchMove = (e) => {
+          if (startY === 0) return;
+
+          currentY = e.touches[0].clientY;
+          const deltaY = currentY - startY;
+
+          // Only allow dragging down, not up
+          if (deltaY > 0) {
+            isDragging = true;
+            e.preventDefault(); // Prevent scroll while dragging
+
+            // Apply transform with slight resistance
+            const resistance = Math.min(deltaY / 3, 200); // Max 200px drag
+            modal.style.transform = `translateY(${resistance}px)`;
+
+            // Fade backdrop as user drags
+            const fadeAmount = Math.max(0, 1 - (resistance / 200));
+            overlay.style.opacity = fadeAmount;
+          }
+        };
+
+        const handleTouchEnd = () => {
+          if (!isDragging) {
+            startY = 0;
+            return;
+          }
+
+          const deltaY = currentY - startY;
+          const deltaTime = Date.now() - startTime;
+          const velocity = deltaY / deltaTime; // px per ms
+
+          // Dismiss if dragged >100px or fast swipe (velocity > 0.5)
+          const shouldDismiss = deltaY > 100 || velocity > 0.5;
+
+          if (shouldDismiss) {
+            // Animate out
+            modal.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 1, 1)';
+            modal.style.transform = 'translateY(100%)';
+            overlay.style.transition = 'opacity 0.2s ease';
+            overlay.style.opacity = '0';
+
+            setTimeout(() => closeProductModal(), 300);
+          } else {
+            // Spring back
+            modal.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            modal.style.transform = 'translateY(0)';
+            overlay.style.transition = 'opacity 0.2s ease';
+            overlay.style.opacity = '1';
+          }
+
+          startY = 0;
+          isDragging = false;
+        };
+
+        modal.addEventListener('touchstart', handleTouchStart, { passive: false });
+        modal.addEventListener('touchmove', handleTouchMove, { passive: false });
+        modal.addEventListener('touchend', handleTouchEnd);
+        modal.addEventListener('touchcancel', handleTouchEnd);
+      }
       overlay.appendChild(modal);
 
       // Close on overlay click
