@@ -1092,7 +1092,17 @@
             overlay.style.transition = 'opacity 0.2s ease';
             overlay.style.opacity = '0';
 
-            setTimeout(() => closeProductModal(), 300);
+            // Clean up directly (don't call closeProductModal - it conflicts)
+            if (productModal && productModal.__escapeHandler) {
+              document.removeEventListener("keydown", productModal.__escapeHandler);
+            }
+
+            setTimeout(() => {
+              if (productModal) {
+                productModal.remove();
+                productModal = null;
+              }
+            }, 300);
           } else {
             // Spring back
             modal.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
