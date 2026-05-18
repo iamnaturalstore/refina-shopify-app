@@ -6962,21 +6962,21 @@ var m = reactDomExports;
   createRoot = m.createRoot;
   m.hydrateRoot;
 }
-const container = "_container_hphks_80";
-const heading = "_heading_hphks_97";
-const subtext = "_subtext_hphks_106";
-const concernButtons = "_concernButtons_hphks_117";
-const chip = "_chip_hphks_125";
-const textarea = "_textarea_hphks_142";
-const askButton = "_askButton_hphks_166";
-const responseBox = "_responseBox_hphks_199";
-const grid = "_grid_hphks_216";
-const card = "_card_hphks_221";
-const image = "_image_hphks_239";
-const price = "_price_hphks_257";
-const productTitle = "_productTitle_hphks_259";
-const productDescription = "_productDescription_hphks_260";
-const topPickBadge = "_topPickBadge_hphks_264";
+const container = "_container_7dx1o_80";
+const heading = "_heading_7dx1o_97";
+const subtext = "_subtext_7dx1o_106";
+const concernButtons = "_concernButtons_7dx1o_117";
+const chip = "_chip_7dx1o_125";
+const textarea = "_textarea_7dx1o_142";
+const askButton = "_askButton_7dx1o_166";
+const responseBox = "_responseBox_7dx1o_199";
+const grid = "_grid_7dx1o_216";
+const card = "_card_7dx1o_221";
+const image = "_image_7dx1o_239";
+const price = "_price_7dx1o_257";
+const productTitle = "_productTitle_7dx1o_259";
+const productDescription = "_productDescription_7dx1o_260";
+const topPickBadge = "_topPickBadge_7dx1o_264";
 const styles = {
   container,
   heading,
