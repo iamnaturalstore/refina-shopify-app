@@ -141,6 +141,7 @@
 /* ===== Textarea (pill + focus ring) ===== */
 .textarea {
   width: 100%;
+  max-width: 100%;
   min-height: 84px;
   padding: calc(var(--rf-spacing) * 0.9) calc(var(--rf-spacing) * 1.1);
   font-size: 1rem;
@@ -780,7 +781,7 @@
 @media (min-width: 641px) {
   /* Constrain interactive elements to comfortable conversation width */
   .textarea {
-    max-width: 520px;
+    width: 520px;
     margin-left: auto;
     margin-right: auto;
     padding: 18px 22px;
@@ -791,6 +792,7 @@
   
   .askButton {
     max-width: 520px;
+    display: flex !important;
     margin-left: auto;
     margin-right: auto;
   }
