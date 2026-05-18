@@ -295,18 +295,36 @@
         }
 
         .refina-modal-close {
-          position: absolute;
-          top: calc(10px + var(--refina-safe-top));
-          ${side === "left" ? "right" : "left"}: 10px;
-          background: rgba(17,17,17,.75);
-          color: #fff;
-          border: 0;
-          border-radius: 8px;
-          padding: 6px 10px;
-          font-size: 13px;
-          cursor: pointer;
-          z-index: 2;
-        }
+  position: absolute;
+  top: calc(12px + var(--refina-safe-top));
+  ${side === "left" ? "right" : "left"}: 12px;
+  width: 36px;
+  height: 36px;
+  background: rgba(248, 250, 252, 0.95);
+  color: #334155;
+  border: 1px solid rgba(15, 18, 34, 0.08);
+  border-radius: 50%;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.refina-modal-close:hover {
+  background: #f1f5f9;
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+
+.refina-modal-close:active {
+  transform: scale(1.02);
+}
 
         @media (max-width: 640px) {
           .refina-launcher-btn {
@@ -461,7 +479,7 @@
       const close = document.createElement("button");
       close.className = "refina-modal-close";
       close.type = "button";
-      close.textContent = "Close ✕";
+      close.textContent = "✕";
       close.setAttribute("aria-label", "Close concierge");
       close.addEventListener("click", closeModal);
 
