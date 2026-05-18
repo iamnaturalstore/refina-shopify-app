@@ -6962,21 +6962,21 @@ var m = reactDomExports;
   createRoot = m.createRoot;
   m.hydrateRoot;
 }
-const container = "_container_1095v_80";
-const heading = "_heading_1095v_97";
-const subtext = "_subtext_1095v_106";
-const concernButtons = "_concernButtons_1095v_117";
-const chip = "_chip_1095v_125";
-const textarea = "_textarea_1095v_142";
-const askButton = "_askButton_1095v_165";
-const responseBox = "_responseBox_1095v_198";
-const grid = "_grid_1095v_215";
-const card = "_card_1095v_220";
-const image = "_image_1095v_238";
-const price = "_price_1095v_256";
-const productTitle = "_productTitle_1095v_258";
-const productDescription = "_productDescription_1095v_259";
-const topPickBadge = "_topPickBadge_1095v_263";
+const container = "_container_2u3ol_80";
+const heading = "_heading_2u3ol_97";
+const subtext = "_subtext_2u3ol_106";
+const concernButtons = "_concernButtons_2u3ol_117";
+const chip = "_chip_2u3ol_125";
+const textarea = "_textarea_2u3ol_142";
+const askButton = "_askButton_2u3ol_165";
+const responseBox = "_responseBox_2u3ol_198";
+const grid = "_grid_2u3ol_215";
+const card = "_card_2u3ol_220";
+const image = "_image_2u3ol_238";
+const price = "_price_2u3ol_256";
+const productTitle = "_productTitle_2u3ol_258";
+const productDescription = "_productDescription_2u3ol_259";
+const topPickBadge = "_topPickBadge_2u3ol_263";
 const styles = {
   container,
   heading,
