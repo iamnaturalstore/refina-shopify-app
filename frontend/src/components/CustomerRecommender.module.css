@@ -592,7 +592,7 @@
   }
 
   .heading {
-    font-size: clamp(1.5rem, 6.5vw, 1.9rem);
+    font-size: clamp(1.55rem, 7vw, 2.0rem);
     line-height: 1.16;
     margin-top: 12px;
     margin-bottom: 18px;
