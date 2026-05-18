@@ -593,7 +593,7 @@
   .heading {
     font-size: clamp(1.35rem, 5vw, 1.65rem);
     line-height: 1.16;
-    margin-top: 8px;
+    margin-top: 12px;
     margin-bottom: 18px;
   }
 

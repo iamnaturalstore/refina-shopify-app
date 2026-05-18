@@ -297,7 +297,7 @@
         .refina-modal-close {
   position: absolute;
   top: calc(12px + var(--refina-safe-top));
-  ${side === "left" ? "right" : "left"}: 12px;
+  right: 12px;
   width: 36px;
   height: 36px;
   background: rgba(248, 250, 252, 0.95);
@@ -350,9 +350,9 @@
           }
 
           .refina-modal-close {
-            top: calc(12px + var(--refina-safe-top));
-            ${side === "left" ? "right" : "left"}: 12px;
-          }
+  top: calc(12px + var(--refina-safe-top));
+  right: 12px;  /* Force top-right on mobile too */
+}
         }
       `;
       document.head.appendChild(style);
