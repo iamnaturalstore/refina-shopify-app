@@ -16,7 +16,7 @@ export default defineConfig({
     outDir: 'dist-concierge',
     emptyOutDir: true,
     sourcemap: true,
-    minify: false,            // ← TEMP: prevents TDZ (“L before init”) crash
+    minify: true,  // Uses esbuild (default, built-in)
     cssCodeSplit: false,      // Emit a single CSS file we can link predictably
     rollupOptions: {
       input: path.resolve(__dirname, 'src/concierge/main.jsx'),
