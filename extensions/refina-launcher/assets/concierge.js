@@ -26,7 +26,7 @@
   window.__RefinaDeeplinkPending = window.__RefinaDeeplinkPending || false;
   window.__RefinaOpenSource = "launcher";                    // default attribution
 
-  const $  = (s, r = document) => r.querySelector(s);
+  const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const isMobile = () => window.matchMedia("(max-width: 640px)").matches;
 
@@ -44,7 +44,7 @@
   }
   // Clear only after iframe ACK or on modal close (fallback)
   function clearRefinaPrefill() {
-    try { sessionStorage.removeItem("refina_prefill"); } catch {}
+    try { sessionStorage.removeItem("refina_prefill"); } catch { }
   }
 
   const kebab = (s) => String(s || "").replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
@@ -68,7 +68,7 @@
       if (Object.keys(payload).length) {
         sessionStorage.setItem("refina_prefill", JSON.stringify(payload));
       }
-    } catch {}
+    } catch { }
 
     window.__RefinaDeeplinkPending = true;
     window.__RefinaOpenSource = "deeplink";
@@ -77,7 +77,7 @@
     document.dispatchEvent(new Event("refina:open"));
 
     // Clean hash so refresh/back doesn't re-open
-    try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+    try { history.replaceState(null, "", location.pathname + location.search); } catch { }
   }
 
   if (document.readyState === "loading") {
@@ -116,22 +116,22 @@
     const side = settings.side === "left" ? "left" : "right";
 
     // Behaviour & positioning
-    const triggerMethod       = (settings.triggerMethod || "launcher").toLowerCase();
+    const triggerMethod = (settings.triggerMethod || "launcher").toLowerCase();
     const launcherOrientation = (settings.launcherOrientation || "horizontal").toLowerCase();
-    const bottomOffset = Math.max(0, parseInt(settings.offset      || "24", 10));
-    const leftOffset   = Math.max(0, parseInt(settings.leftOffset  || "16", 10));
-    const rightOffset  = Math.max(0, parseInt(settings.rightOffset || "16", 10));
-    const sideOffset   = side === "left" ? leftOffset : rightOffset;
+    const bottomOffset = Math.max(0, parseInt(settings.offset || "24", 10));
+    const leftOffset = Math.max(0, parseInt(settings.leftOffset || "16", 10));
+    const rightOffset = Math.max(0, parseInt(settings.rightOffset || "16", 10));
+    const sideOffset = side === "left" ? leftOffset : rightOffset;
 
-    const showMobile   = String(settings.showMobile).toLowerCase() !== "false";
-    const pageType     = String(settings.pageType || "").toLowerCase();
-    const hideOnProduct= String(settings.hideOnProduct).toLowerCase() === "true";
-    const hideOnCart   = String(settings.hideOnCart).toLowerCase() === "true";
-    const shopDomain   =
+    const showMobile = String(settings.showMobile).toLowerCase() !== "false";
+    const pageType = String(settings.pageType || "").toLowerCase();
+    const hideOnProduct = String(settings.hideOnProduct).toLowerCase() === "true";
+    const hideOnCart = String(settings.hideOnCart).toLowerCase() === "true";
+    const shopDomain =
       settings.shop ||
       (window.Shopify && (window.Shopify.shop || window.Shopify.permanent_domain)) ||
       "";
-    const openOnLoad   = String(settings.openOnLoad).toLowerCase() === "true";
+    const openOnLoad = String(settings.openOnLoad).toLowerCase() === "true";
 
     const cssColor = (value, fallback) => {
       const v = String(value || "").trim();
@@ -197,14 +197,14 @@
         if (e && e.data && e.data.type === "refina:prefill:ack") {
           clearRefinaPrefill();
         }
-      } catch {}
+      } catch { }
     });
 
     // One-time styles
     if (!$("#refina-launcher-style")) {
       const style = document.createElement("style");
       style.id = "refina-launcher-style";
-            style.textContent = `
+      style.textContent = `
         :root {
           --refina-safe-bottom: env(safe-area-inset-bottom, 0px);
           --refina-safe-top: env(safe-area-inset-top, 0px);
@@ -414,16 +414,16 @@
       }
       try {
         if (shopDomain) base.searchParams.set("shop", String(shopDomain));
-      } catch {}
+      } catch { }
 
       const p = readRefinaPrefill();
       if (p) {
         if (p.source && /pdp/i.test(p.source)) p.source = "pdp";
         const fields = [
-          "prefill","productId","productTitle","productType",
-          "variantId","variantTitle","available",
-          "price","compareAtPrice","currency","priceCap",
-          "intent","source","contextId","chips"
+          "prefill", "productId", "productTitle", "productType",
+          "variantId", "variantTitle", "available",
+          "price", "compareAtPrice", "currency", "priceCap",
+          "intent", "source", "contextId", "chips"
         ];
         for (const k of fields) {
           const v = p[k];
@@ -442,7 +442,7 @@
 
       base.searchParams.set("source", (p && p.source) || window.__RefinaOpenSource || "launcher");
 
-      try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch {}
+      try { if (localStorage.getItem("refinaDev") === "1") base.searchParams.set("dev", "1"); } catch { }
       return base.toString();
     }
 
@@ -500,7 +500,7 @@
       window.__RefinaOpenSource = "deeplink";
       openModal();
       window.__RefinaDeeplinkPending = false;
-      try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+      try { history.replaceState(null, "", location.pathname + location.search); } catch { }
     }
 
     if (openOnLoad && !(IN_THEME_EDITOR || IN_ADMIN)) {
@@ -514,13 +514,13 @@
     // ─────────────────────────────────────
     // Smart Popup
     // ─────────────────────────────────────
-    const popupEnabled   = String(settings.popupEnabled).toLowerCase() === "true";
-    const popupDelay     = Math.max(0, parseInt(settings.popupDelay || "5", 10)) * 1000;
-    const popupHeadline  = settings.popupHeadline  || "Need a hand choosing?";
-    const popupSubhead   = settings.popupSubheading || "I can find your perfect match in seconds — just tell me what you're looking for.";
-    const popupYesText   = settings.popupYesText   || "Yes please";
-    const popupNoText    = settings.popupNoText    || "No, I'm good thanks";
-    const popupFooter    = settings.popupFooter    || "I'm here whenever you need me — tap the button at the bottom right, or the helper on any product page.";
+    const popupEnabled = String(settings.popupEnabled).toLowerCase() === "true";
+    const popupDelay = Math.max(0, parseInt(settings.popupDelay || "5", 10)) * 1000;
+    const popupHeadline = settings.popupHeadline || "Need a hand choosing?";
+    const popupSubhead = settings.popupSubheading || "I can find your perfect match in seconds — just tell me what you're looking for.";
+    const popupYesText = settings.popupYesText || "Yes please";
+    const popupNoText = settings.popupNoText || "No, I'm good thanks";
+    const popupFooter = settings.popupFooter || "I'm here whenever you need me — tap the button at the bottom right, or the helper on any product page.";
     const popupFrequency = settings.popupFrequency || "session";
 
     const POPUP_KEY = `refina_popup_dismissed_${shopDomain}`;
@@ -536,7 +536,7 @@
           if (!ts) return false;
           return Date.now() - Number(ts) < 86400000; // 24h
         }
-      } catch {}
+      } catch { }
       return false;
     }
 
@@ -544,7 +544,7 @@
       try {
         if (popupFrequency === "session") sessionStorage.setItem(POPUP_KEY, "1");
         if (popupFrequency === "day") localStorage.setItem(POPUP_KEY, String(Date.now()));
-      } catch {}
+      } catch { }
     }
 
     function showPopup() {
@@ -684,8 +684,8 @@
       `;
 
       popup.querySelector(".rf-popup-close").addEventListener("click", () => closePopup(false));
-      popup.querySelector(".rf-popup-yes").addEventListener("click",   () => closePopup(true));
-      popup.querySelector(".rf-popup-no").addEventListener("click",    () => closePopup(false));
+      popup.querySelector(".rf-popup-yes").addEventListener("click", () => closePopup(true));
+      popup.querySelector(".rf-popup-no").addEventListener("click", () => closePopup(false));
       popupOverlay.addEventListener("click", (e) => { if (e.target === popupOverlay) closePopup(false); });
 
       popupOverlay.appendChild(popup);
@@ -705,7 +705,7 @@
     window.addEventListener("message", (e) => {
       try {
         if (!e.data || e.data.type !== "refina:product:open") return;
-        
+
         const { product, context } = e.data;
         if (!product || !product.id) return;
 
@@ -724,180 +724,228 @@
         const s = document.createElement("style");
         s.id = "refina-product-modal-style";
         s.textContent = `
-          .rf-product-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 18, 34, 0.4);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            z-index: ${zIndex + 1};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            animation: rfProductFadeIn 0.2s ease;
-          }
+  .rf-product-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 18, 34, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: ${zIndex + 1};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: rfProductBackdropFade 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
 
-          .rf-product-modal {
-            background: #fff;
-            border-radius: 20px;
-            width: min(92%, 560px);
-            max-height: 85vh;
-            overflow-y: auto;
-            position: relative;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            animation: rfProductSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-          }
+  .rf-product-overlay.closing {
+    animation: rfProductBackdropFadeOut 0.2s cubic-bezier(0.4, 0, 1, 1);
+  }
 
-          .rf-product-header {
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            background: #fff;
-            padding: 20px 20px 16px;
-            border-bottom: 1px solid rgba(15, 18, 34, 0.06);
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 16px;
-          }
+  .rf-product-modal {
+    background: #fff;
+    border-radius: 20px;
+    width: min(92%, 560px);
+    max-height: 85vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    animation: rfProductSlideUp 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 
-          .rf-product-heading-group {
-            flex: 1;
-            min-width: 0;
-          }
+  .rf-product-overlay.closing .rf-product-modal {
+    animation: rfProductSlideDown 0.25s cubic-bezier(0.4, 0, 1, 1);
+  }
 
-          .rf-product-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #111827;
-            margin: 0;
-            line-height: 1.3;
-          }
+  .rf-product-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #fff;
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid rgba(15, 18, 34, 0.06);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
 
-          .rf-product-context {
-            font-size: 0.875rem;
-            color: #6b7280;
-            margin: 6px 0 0;
-          }
+  .rf-product-heading-group {
+    flex: 1;
+    min-width: 0;
+  }
 
-          .rf-product-close {
-            flex-shrink: 0;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            border: 1px solid rgba(15, 18, 34, 0.08);
-            background: #f8fafc;
-            color: #334155;
-            font-size: 18px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.15s ease;
-          }
+  .rf-product-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+    line-height: 1.3;
+  }
 
-          .rf-product-close:hover {
-            background: #f1f5f9;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-          }
+  .rf-product-context {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin: 6px 0 0;
+  }
 
-          .rf-product-image {
-            width: 100%;
-            max-height: 50vh;
-            object-fit: contain;
-            display: block;
-            padding: 0 20px;
-            margin: 16px 0;
-          }
+  .rf-product-close {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid rgba(15, 18, 34, 0.08);
+    background: #f8fafc;
+    color: #334155;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
 
-          .rf-product-body {
-            padding: 0 20px 20px;
-            color: #111827;
-            font-size: 0.9375rem;
-            line-height: 1.6;
-          }
+  .rf-product-close:hover {
+    background: #f1f5f9;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transform: scale(1.05);
+  }
 
-          .rf-product-price {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #111827;
-            margin-bottom: 16px;
-          }
+  .rf-product-image {
+    width: 100%;
+    max-height: 50vh;
+    object-fit: contain;
+    display: block;
+    padding: 0 20px;
+    margin: 16px 0;
+  }
 
-          .rf-product-actions {
-            position: sticky;
-            bottom: 0;
-            padding: 16px 20px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.8), #fff 40%);
-            border-top: 1px solid rgba(15, 18, 34, 0.06);
-          }
+  .rf-product-body {
+    padding: 0 20px 20px;
+    color: #111827;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+  }
 
-          .rf-product-buy {
-            display: block;
-            width: 100%;
-            padding: 14px 20px;
-            border-radius: 12px;
-            border: none;
-            background: ${primaryColor};
-            color: #fff;
-            font-size: 1rem;
-            font-weight: 600;
-            text-align: center;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.15);
-          }
+  .rf-product-price {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 16px;
+  }
 
-          .rf-product-buy:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
-          }
+  .rf-product-actions {
+    position: sticky;
+    bottom: 0;
+    padding: 16px 20px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.8), #fff 40%);
+    border-top: 1px solid rgba(15, 18, 34, 0.06);
+  }
 
-          @keyframes rfProductFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
+  .rf-product-buy {
+    display: block;
+    width: 100%;
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: none;
+    background: ${primaryColor};
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+  }
 
-          @keyframes rfProductSlideUp {
-            from {
-              opacity: 0;
-              transform: translateY(20px) scale(0.98);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
+  .rf-product-buy:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  }
 
-          /* Mobile: bottom sheet */
-          @media (max-width: 640px) {
-            .rf-product-modal {
-              width: 100%;
-              max-width: none;
-              max-height: 85dvh;
-              border-radius: 24px 24px 0 0;
-              position: fixed;
-              bottom: 0;
-              left: 0;
-              right: 0;
-              animation: rfProductSlideUpMobile 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-            }
+  .rf-product-buy:active {
+    transform: translateY(0);
+  }
 
-            @keyframes rfProductSlideUpMobile {
-              from { transform: translateY(100%); }
-              to { transform: translateY(0); }
-            }
+  /* Entrance animations */
+  @keyframes rfProductBackdropFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 
-            .rf-product-overlay {
-              align-items: flex-end;
-            }
+  @keyframes rfProductSlideUp {
+    from {
+      opacity: 0;
+      transform: translateY(32px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
 
-            .rf-product-image {
-              max-height: 40vh;
-            }
-          }
-        `;
+  /* Exit animations */
+  @keyframes rfProductBackdropFadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes rfProductSlideDown {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(16px) scale(0.98);
+    }
+  }
+
+  /* Mobile: bottom sheet */
+  @media (max-width: 640px) {
+    .rf-product-modal {
+      width: 100%;
+      max-width: none;
+      max-height: 85dvh;
+      border-radius: 24px 24px 0 0;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      animation: rfProductSlideUpMobile 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .rf-product-overlay.closing .rf-product-modal {
+      animation: rfProductSlideDownMobile 0.3s cubic-bezier(0.4, 0, 1, 1);
+    }
+
+    @keyframes rfProductSlideUpMobile {
+      from {
+        transform: translateY(100%);
+      }
+      to {
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes rfProductSlideDownMobile {
+      from {
+        transform: translateY(0);
+      }
+      to {
+        transform: translateY(100%);
+      }
+    }
+
+    .rf-product-overlay {
+      align-items: flex-end;
+    }
+
+    .rf-product-image {
+      max-height: 40vh;
+    }
+  }
+`;
         document.head.appendChild(s);
       }
 
@@ -999,19 +1047,19 @@
     function closeProductModal() {
       if (!productModal) return;
 
-      // Fade out animation
-      productModal.style.opacity = "0";
-      productModal.style.transition = "opacity 0.2s ease";
+      // Add closing class to trigger exit animations
+      productModal.classList.add('closing');
 
       // Remove escape listener
       if (productModal.__escapeHandler) {
         document.removeEventListener("keydown", productModal.__escapeHandler);
       }
 
+      // Wait for exit animations to complete (300ms - matches longest animation)
       setTimeout(() => {
         productModal.remove();
         productModal = null;
-      }, 200);
+      }, 300);
     }
 
     // Simple HTML sanitizer
