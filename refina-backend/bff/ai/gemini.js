@@ -13,9 +13,13 @@ const API_KEY =
   process.env.GOOGLE_API_KEY ||
   "";
 
-const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-3.5-flash").trim();
+const MODEL_PRIMARY = (process.env.GEMINI_MODEL || process.env.GEMINI_MODEL_NAME || "gemini-3-flash-preview").trim();
 
-const MODEL_FALLBACKS = [MODEL_PRIMARY].filter(Boolean);
+const MODEL_FALLBACKS = [
+  MODEL_PRIMARY,          // prefer flash for latency
+  "gemini-2.5-flash", // Better performance/intelligence than 2.0
+  "gemini-1.5-flash", // The ultimate "reliable old truck" fallback,
+];
 
 // Prefer a dedicated indexer model if provided; otherwise fall back to current primary
 const INDEXER_MODEL = (process.env.REFINA_INDEXER_MODEL || MODEL_PRIMARY).trim();
