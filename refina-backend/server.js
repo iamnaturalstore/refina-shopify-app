@@ -1334,7 +1334,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_EXPLAIN_MODEL_RAW =
   process.env.GEMINI_EXPLAIN_MODEL ||
   process.env.GEMINI_MODEL ||
-  "gemini-3-flash-preview";
+  "gemini-3.5-flash";
 
 const GEMINI_EXPLAIN_MODEL = GEMINI_EXPLAIN_MODEL_RAW.startsWith("models/")
   ? GEMINI_EXPLAIN_MODEL_RAW
