@@ -122,111 +122,94 @@ export async function callGeminiStructured({
     responseMimeType,
   };
 
-  // 2–4. Build generation config per candidate model.
-// Important: this must use `mdl`, not the optional `model` argument,
-// because production usually resolves the model from Render env via MODEL_PRIMARY.
-const userContents = [{ role: "user", parts: [{ text: String(prompt || "") }] }];
-const systemInstr = (system && String(system).trim())
-  ? { role: "system", parts: [{ text: String(system).trim() }] }
-  : null;
-
-for (const mdl of candidates) {
-  try {
-    const isGemini3 = String(mdl || "").includes("gemini-3");
-
-    const generationConfig = {
-      responseMimeType,
+  // 2. Gemini 3 Logic: Only apply thinkingConfig to models that support it
+  // This prevents 400 errors if the code falls back to a 1.5 or 2.5 model
+  const isGemini3 = String(model || "").includes("gemini-3");
+  
+  if (isGemini3) {
+    baseConfig.thinkingConfig = {
+      includeThoughts: false, // Keeps your JSON output clean for parsing
+      thinkingLevel: "low"    // Forces the ~3s "Concierge" speed
     };
-
-    // Gemini 3 Logic: Only apply thinkingConfig to models that support it.
-    // This prevents 400 errors if the code falls back to a 1.5 or 2.5 model.
-    if (isGemini3) {
-      generationConfig.thinkingConfig = {
-        includeThoughts: false, // Keeps your JSON output clean for parsing
-        thinkingLevel: "low",   // Forces the low-latency Refina concierge path
-      };
-    }
-
-    // Map standard params
-    if (Number.isFinite(temperature)) generationConfig.temperature = temperature;
-    if (Number.isFinite(topP)) generationConfig.topP = topP;
-
-    // Smart Max Tokens: Ensure enough room for the "Awesome" schema.
-    // Gemini 3 uses a single budget for thoughts + output.
-    // If set too low, the JSON can get truncated.
-    generationConfig.maxOutputTokens = Number.isFinite(maxOutputTokens)
-      ? maxOutputTokens
-      : (isGemini3 ? 4096 : 2048);
-
-    if (responseSchema) generationConfig.responseSchema = responseSchema;
-
-    const modelClient = genAI.getGenerativeModel({
-      model: mdl,
-      ...(systemInstr ? { systemInstruction: systemInstr } : {}),
-    });
-
-    let delay = 250;
-    const attempts = 3; // 1 try + 2 retries
-
-    for (let i = 0; i < attempts; i++) {
-      const ctrl = new AbortController();
-      const to = setTimeout(() => ctrl.abort(), timeoutMs);
-
-      try {
-        const tStart = Date.now();
-
-        const res = await modelClient.generateContent({
-          contents: userContents,
-          generationConfig,
-        });
-
-        console.warn(`[Gemini SDK] ${mdl} ok in ${Date.now() - tStart}ms`);
-        clearTimeout(to);
-
-        // ---- dual extractor: Studio .text() or Vertex-like nested shape ----
-        let text;
-        if (typeof res?.response?.text === "function") {
-          // Google AI Studio response
-          text = res.response.text();
-        } else {
-          // Vertex-like nested structure
-          text = res?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
-        }
-
-        if (typeof text === "string" && text.trim()) return text.trim();
-
-        // Empty output → try next model
-        break;
-      } catch (err) {
-        clearTimeout(to);
-
-        const name = err?.name || "";
-        const msg = err?.message || "";
-        const status = err?.status ?? err?.code ?? 0;
-
-        const transient =
-          name === "AbortError" ||
-          status === 429 ||
-          status === 503 ||
-          /deadline|timeout|temporar|overload|retry|unavailable/i.test(msg);
-
-        if (transient && i < attempts - 1) {
-          console.warn(`[Gemini SDK] ${mdl} transient: ${msg || name}; retrying in ${delay}ms`);
-          await sleep(delay);
-          delay = Math.min(delay * 2, 2000);
-          continue;
-        }
-
-        // Non-transient: stop retrying this model, move to the next candidate.
-        break;
-      }
-    }
-  } catch {
-    // If constructing/using the model fails immediately, fall through to next.
   }
-}
 
-return null;
+  // 3. Map standard params
+  if (Number.isFinite(temperature)) baseConfig.temperature = temperature;
+  if (Number.isFinite(topP)) baseConfig.topP = topP;
+  
+  // 4. Smart Max Tokens: Ensure enough room for the "Awesome" schema
+  // Gemini 3 uses a single budget for thoughts + output. 
+  // If set too low (like 1024), the JSON often gets truncated.
+  baseConfig.maxOutputTokens = Number.isFinite(maxOutputTokens) 
+    ? maxOutputTokens 
+    : (isGemini3 ? 4096 : 2048);
+
+  if (responseSchema) baseConfig.responseSchema = responseSchema;
+
+  const userContents = [{ role: "user", parts: [{ text: String(prompt || "") }] }];
+  const systemInstr = (system && String(system).trim())
+    ? { role: "system", parts: [{ text: String(system).trim() }] }
+    : null;
+
+  for (const mdl of candidates) {
+    try {
+      const modelClient = genAI.getGenerativeModel({
+        model: mdl,
+        ...(systemInstr ? { systemInstruction: systemInstr } : {}),
+      });
+
+      let delay = 250;
+      const attempts = 3; // 1 try + 2 retries
+      for (let i = 0; i < attempts; i++) {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+          const tStart = Date.now();
+          const res = await modelClient.generateContent({
+            contents: userContents,
+            generationConfig: baseConfig,
+          });
+          console.warn(`[Gemini SDK] ${mdl} ok in ${Date.now() - tStart}ms`);
+          clearTimeout(to);
+
+          // ---- dual extractor: Studio .text() or Vertex-like nested shape ----
+          let text;
+          if (typeof res?.response?.text === 'function') {
+            // Google AI Studio response
+            text = res.response.text();
+          } else {
+            // Vertex-like nested structure
+            text = res?.response?.candidates?.[0]?.content?.parts?.[0]?.text;
+          }
+          if (typeof text === "string" && text.trim()) return text.trim();
+
+          // Empty output → try next model
+          break;
+        } catch (err) {
+          clearTimeout(to);
+          const name = err?.name || "";
+          const msg = err?.message || "";
+          const status = err?.status ?? err?.code ?? 0;
+          const transient =
+            name === "AbortError" ||
+            status === 429 || status === 503 ||
+            /deadline|timeout|temporar|overload|retry|unavailable/i.test(msg);
+          if (transient && i < attempts - 1) {
+            console.warn(`[Gemini SDK] ${mdl} transient: ${msg || name}; retrying in ${delay}ms`);
+            await sleep(delay);
+            delay = Math.min(delay * 2, 2000);
+            continue;
+          }
+          // Non-transient: stop retrying this model, move to the next candidate.
+          break;
+        }
+      }
+    } catch {
+      // If constructing/using the model fails immediately, fall through to next.
+    }
+  }
+
+  return null;
 }
 
 // Thin convenience wrapper used by the rest of the codebase.
