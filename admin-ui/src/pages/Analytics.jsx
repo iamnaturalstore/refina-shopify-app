@@ -60,7 +60,9 @@ function normalizeSummary(sum) {
       sum.totals.interactions ?? sum.totals.events ?? sum.totals.queries ?? 0
     ) || 0;
     const productClicks = Number(sum.totals.productClicks ?? sum.totals.clicks ?? 0) || 0;
-    return { ...sum, totals: { ...sum.totals, interactions, productClicks } };
+    const uniqueConcerns = Number(sum.totals.uniqueConcerns ?? 0) || 0;
+    const topConcerns = Array.isArray(sum.totals.topConcerns) ? sum.totals.topConcerns : [];
+    return { ...sum, totals: { ...sum.totals, interactions, productClicks, uniqueConcerns, topConcerns } };
   }
   const interactions = Number(sum.totalEvents ?? 0) || 0;
   const productClicks = 0; // do not infer
@@ -327,8 +329,9 @@ setErr(e?.message || "Failed to load analytics data.");
     }
   }
 
-  const totals           = summary?.totals || { interactions: 0, productClicks: 0 };
-  const maxConcernCount  = aggs.topConcerns.length > 0 ? aggs.topConcerns[0].count : 0;
+  const totals           = summary?.totals || { interactions: 0, productClicks: 0, uniqueConcerns: 0, topConcerns: [] };
+  const topConcerns      = totals.topConcerns?.length ? totals.topConcerns : aggs.topConcerns;
+  const maxConcernCount  = topConcerns.length > 0 ? topConcerns[0].count : 0;
   const aiSessions = Number(
   rawPlan?.plan?.usage?.requestsThisPeriod ?? 0
 );
@@ -435,7 +438,7 @@ setErr(e?.message || "Failed to load analytics data.");
                 <Card>
                   <BlockStack gap="200">
                     <Text as="h2" variant="headingSm" tone="subdued">Unique Concerns</Text>
-                    <p className={styles.metricNumber}>{aggs.uniqueConcerns}</p>
+                    <p className={styles.metricNumber}>{totals.uniqueConcerns || aggs.uniqueConcerns}</p>
                   </BlockStack>
                 </Card>
               </Layout.Section>
@@ -454,9 +457,9 @@ setErr(e?.message || "Failed to load analytics data.");
                 <Card>
                   <BlockStack gap="300">
                     <Text as="h3" variant="headingMd">Top 5 Concerns</Text>
-                    {aggs.topConcerns.length > 0 ? (
+                    {topConcerns.length > 0 ? (
                       <BlockStack gap="200">
-                        {aggs.topConcerns.slice(0, 5).map((row) => (
+                        {topConcerns.slice(0, 5).map((row) => (
                           <div key={row.label}>
                             <InlineStack align="space-between">
                               <Text>{titleCase(row.label)}</Text>

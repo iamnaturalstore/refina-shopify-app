@@ -60,6 +60,14 @@ function groupByDayUTC(items, getDate) {
   return Array.from(out.entries()).map(([date, count]) => ({ date, count }))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
+/** Bucket raw event names into the channel a merchant actually recognizes. */
+function channelForEvent(eventName) {
+  const e = String(eventName || "").toLowerCase();
+  if (e === "recommendation_received") return "Widget";
+  if (e === "drawer_open" || e === "drawer_confirm") return "PDP Drawer";
+  return "Other";
+}
+
 function coerceDateMaybe(v) {
   try {
     if (v && typeof v.toDate === "function") return v.toDate();
@@ -165,6 +173,8 @@ async function handleOverview(req, res) {
           model: (data.model ?? data.meta?.model) ?? null,
           source: data.source ?? null,
           surface: data.surface ?? null,
+          event: data.event ?? null,
+          concern: data.concern ?? null,
           sessionId: data.sessionId ?? null,
           hadAi: data.source !== "cache",
         };
@@ -176,22 +186,32 @@ async function handleOverview(req, res) {
     const series = groupByDayUTC(entries, (e) => e.ts);
     const surfaceCounts = {};
     const hourCounts = {};
+    const concernCounts = new Map();
     for (const e of entries) {
-      if (e.surface) surfaceCounts[e.surface] = (surfaceCounts[e.surface] || 0) + 1;
+      const channel = channelForEvent(e.event);
+      surfaceCounts[channel] = (surfaceCounts[channel] || 0) + 1;
       if (e.ts) {
         const hour = e.ts.getUTCHours();
         hourCounts[hour] = (hourCounts[hour] || 0) + 1;
       }
+      const concern = String(e.concern || "").trim().toLowerCase();
+      if (concern) concernCounts.set(concern, (concernCounts.get(concern) || 0) + 1);
     }
     const peakHour = Object.keys(hourCounts).length
       ? Number(Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0][0])
       : null;
+    const topConcerns = Array.from(concernCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([label, count]) => ({ label, count }));
     const totals = {
       events: entries.length,
       aiEvents: entries.filter((e) => e.hadAi).length,
       sessions: new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
       surfaceCounts,
       peakHour,
+      uniqueConcerns: concernCounts.size,
+      topConcerns,
     };
 
     return res.json({
