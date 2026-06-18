@@ -601,6 +601,19 @@ export default function Home() {
                 {label}
               </button>
             ))}
+            <button
+              onClick={() =>
+                window.open("https://apps.shopify.com/refina#adp-reviews", "_blank", "noopener,noreferrer")
+              }
+              style={{
+                padding: "6px 12px", borderRadius: "8px",
+                fontSize: "12px", fontWeight: "600",
+                background: "transparent", border: "1px solid #CDD2DE", color: "#64748B",
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              ★ Rate Refina
+            </button>
           </div>
         </div>
 
