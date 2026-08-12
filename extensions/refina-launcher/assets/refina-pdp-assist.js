@@ -826,7 +826,20 @@
       btn.appendChild(price);
 
       if (p.url) {
-        btn.onclick = () => { try { window.location.href = p.url; } catch {} };
+        btn.onclick = () => {
+          try {
+            navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
+              new Blob([JSON.stringify({
+                storeId: payload.shop || payload.storeId || "",
+                type: "concern",
+                event: "product_click",
+                productId: (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null,
+                contextId: payload.contextId || null
+              })], { type: "application/json" })
+            );
+          } catch {}
+          try { window.location.href = p.url; } catch {}
+        };
       }
 
       list.appendChild(btn);

@@ -58,6 +58,8 @@ function sanitizeEventBody(body = {}) {
   if (typeof body.uid === "string") out.uid = body.uid.slice(0, 128);
 
   if (typeof body.topProductTitle === "string") out.topProductTitle = body.topProductTitle.slice(0, 256);
+  if (typeof body.productId === "string") out.productId = body.productId.slice(0, 128);
+  if (typeof body.contextId === "string") out.contextId = body.contextId.slice(0, 128);
 
   if (body.meta && typeof body.meta === "object") {
     const sanitizedMeta = {};

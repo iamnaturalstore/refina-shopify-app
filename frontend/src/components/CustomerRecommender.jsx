@@ -1085,6 +1085,28 @@ const renderRationale = (text) => {
             role="listitem"
             onClick={() => {
                 console.log('[Refina] Sending product:', product.name);
+
+              try {
+                const storeIdClick =
+                  new URLSearchParams(location.search).get("shop") ||
+                  document.getElementById("root")?.dataset.shop ||
+                  "";
+                fetch(`${API_PREFIX}/analytics/ingest`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    storeId: storeIdClick,
+                    type: "concern",
+                    event: "product_click",
+                    productId: String(product.id || ""),
+                    concern: lastQuery,
+                  }),
+                  keepalive: true,
+                });
+              } catch (clickAnalyticsError) {
+                console.warn("[Refina] Click analytics failed:", clickAnalyticsError);
+              }
+
               window.parent.postMessage({
                 type: 'refina:product:open',
                 product: {

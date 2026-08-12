@@ -968,6 +968,19 @@
       buyBtn.target = "_blank";
       buyBtn.rel = "noopener noreferrer";
       buyBtn.textContent = "Buy Now";
+      buyBtn.addEventListener("click", () => {
+        try {
+          navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
+            new Blob([JSON.stringify({
+              storeId: shopDomain,
+              type: "concern",
+              event: "product_click",
+              productId: String(product.id),
+              concern: context.query || null
+            })], { type: "application/json" })
+          );
+        } catch {}
+      });
 
       actions.appendChild(buyBtn);
 

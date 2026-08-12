@@ -450,6 +450,19 @@ setErr(e?.message || "Failed to load analytics data.");
                   </BlockStack>
                 </Card>
               </Layout.Section>
+              <Layout.Section variant="oneThird">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h2" variant="headingSm" tone="subdued">Product Clicks (30 Days)</Text>
+                    <p className={styles.metricNumber}>{totals.productClicks}</p>
+                    <Text tone="subdued">
+                      {totals.interactions
+                        ? `${Math.round((totals.productClicks / totals.interactions) * 100)}% click-through rate`
+                        : "No queries yet"}
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
             </Layout>
 
             <Layout>

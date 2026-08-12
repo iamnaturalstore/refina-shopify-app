@@ -183,11 +183,16 @@ async function handleOverview(req, res) {
       .sort((a, b) => b.ts - a.ts)
       .slice(0, limit);
 
-    const series = groupByDayUTC(entries, (e) => e.ts);
+    // product_click is a click-through signal, not a query — keep it out of the
+    // query-oriented aggregates (Total Queries, concerns, peak hour) and count it separately.
+    const productClicks = entries.filter((e) => e.event === "product_click").length;
+    const queryEntries = entries.filter((e) => e.event !== "product_click");
+
+    const series = groupByDayUTC(queryEntries, (e) => e.ts);
     const surfaceCounts = {};
     const hourCounts = {};
     const concernCounts = new Map();
-    for (const e of entries) {
+    for (const e of queryEntries) {
       const channel = channelForEvent(e.event);
       surfaceCounts[channel] = (surfaceCounts[channel] || 0) + 1;
       if (e.ts) {
@@ -205,13 +210,15 @@ async function handleOverview(req, res) {
       .slice(0, 10)
       .map(([label, count]) => ({ label, count }));
     const totals = {
-      events: entries.length,
-      aiEvents: entries.filter((e) => e.hadAi).length,
-      sessions: new Set(entries.map((e) => e.sessionId).filter(Boolean)).size || null,
+      events: queryEntries.length,
+      aiEvents: queryEntries.filter((e) => e.hadAi).length,
+      sessions: new Set(queryEntries.map((e) => e.sessionId).filter(Boolean)).size || null,
       surfaceCounts,
       peakHour,
       uniqueConcerns: concernCounts.size,
       topConcerns,
+      productClicks,
+      clickThroughRate: queryEntries.length ? productClicks / queryEntries.length : 0,
     };
 
     return res.json({
