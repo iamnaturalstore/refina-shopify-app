@@ -1,0 +1,17 @@
+{
+  "name": "split-ship-discount",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@shopify/shopify_function": "^2.0.1"
+  },
+  "codegen": {
+    "schema": "./schema.graphql",
+    "documents": "./src/index.graphql",
+    "generates": {
+      "src/types.generated.ts": {
+        "plugins": ["typescript", "typescript-operations"]
+      }
+    }
+  }
+}

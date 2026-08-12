@@ -39,7 +39,7 @@ compliance_topics = ["shop/redact"]
   topics = ["products/delete"]
 
 [access_scopes]
-scopes = "read_products"
+scopes = "read_products,write_discounts"
 
 
 [auth]

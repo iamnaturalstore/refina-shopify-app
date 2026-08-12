@@ -1,0 +1,55 @@
+type Query {
+  cart: Cart!
+  discountNode: DiscountNode!
+}
+
+type Cart {
+  deliveryGroups: [CartDeliveryGroup!]!
+}
+
+type CartDeliveryGroup {
+  id: ID!
+  deliveryOptions: [CartDeliveryOption!]!
+  cartLines: [CartLine!]!
+}
+
+type CartDeliveryOption {
+  handle: String!
+  title: String!
+  cost: MoneyV2!
+}
+
+type CartLine {
+  cost: CartLineCost!
+  merchandise: CartLineMerchandise!
+}
+
+type CartLineCost {
+  subtotalAmount: MoneyV2!
+}
+
+type MoneyV2 {
+  amount: Decimal!
+  currencyCode: CurrencyCode!
+}
+
+union CartLineMerchandise = ProductVariant
+
+type ProductVariant {
+  product: Product!
+}
+
+type Product {
+  vendor: String!
+}
+
+type DiscountNode {
+  metafield(namespace: String!, key: String!): Metafield
+}
+
+type Metafield {
+  value: String!
+}
+
+scalar Decimal
+scalar CurrencyCode

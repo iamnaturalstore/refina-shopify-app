@@ -1,0 +1,14 @@
+api_version = "2025-10"
+name = "SplitShip Delivery Discount"
+handle = "split-ship-discount"
+uid = "7332f251-35b2-5ca2-f155-7cd4baad25a66d244b58"
+type = "function"
+
+[[targeting]]
+module = "./src/index.js"
+target = "purchase.shipping-discount.run"
+export = "run"
+input_query = "./src/index.graphql"
+
+[build]
+watch_paths = ["src/**"]
