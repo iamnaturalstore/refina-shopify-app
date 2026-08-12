@@ -1099,6 +1099,7 @@ const renderRationale = (text) => {
                     type: "concern",
                     event: "product_click",
                     productId: String(product.id || ""),
+                    topProductTitle: product.name || product.title || "",
                     concern: lastQuery,
                   }),
                   keepalive: true,

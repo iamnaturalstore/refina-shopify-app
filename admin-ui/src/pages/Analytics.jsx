@@ -79,13 +79,22 @@ function pickArray(ev) {
   return [];
 }
 
+/** Map the raw stored event name to what a merchant should see in the Type column. */
+const EVENT_TYPE_LABELS = {
+  recommendation_received: "Query",
+  product_click: "Product Click",
+  drawer_open: "PDP Drawer Opened",
+  drawer_confirm: "PDP Drawer Confirmed",
+  mapping_applied: "Query",
+};
+
 /** Normalize a single event, deriving common fields we want to render/aggregate. */
 function normalizeEvent(e) {
   const id = e.id || e.eventId || e.tsServer || e.createdAt || Math.random().toString(36).slice(2);
   const tsServerIso = e.tsServerIso || (typeof e.ts === "string" ? e.ts : null) || (typeof e.createdAt === "string" ? e.createdAt : null) || (typeof e.tsServer === "number" ? new Date(e.tsServer).toISOString() : null) || null;
-  const type = e.type || e.eventType || "event";
+  const type = EVENT_TYPE_LABELS[e.event] || e.type || e.eventType || "event";
   const concern = e.concern || e.query || e.question || e.note || "";
-  const productTitle = e.topProduct?.title || e.productTitle || e.topProductTitle || (Array.isArray(e.products) ? (e.products[0]?.title || e.products[0]?.name) : "") || "";
+  const productTitle = e.topProduct?.title || e.productTitle || e.topProductTitle || (Array.isArray(e.products) ? (e.products[0]?.title || e.products[0]?.name) : "") || (e.productId ? String(e.productId) : "");
   const planRaw = (e.plan || e.userPlan || e.meta?.plan || "").toString().toLowerCase();
   const plan = /premium|pro\+|pro plus/.test(planRaw) ? "premium" : /pro/.test(planRaw) ? "pro" : /free/.test(planRaw) ? "free" : planRaw || "unknown";
   const productIds = new Set();

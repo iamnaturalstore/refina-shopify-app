@@ -125,8 +125,10 @@ async function handleLogs(req, res) {
       .slice(0, limit)
       .map(({ id, data }) => ({
         id,
+        event: data.event ?? null,
         concern: data.concern ?? null,
         productIds: Array.isArray(data.productIds) ? data.productIds : null,
+        productId: data.productId ?? null,
         topProductTitle: data.topProductTitle ?? null,
         plan: data.planLevel ?? null,
         model: (data.model ?? data.meta?.model) ?? null,
