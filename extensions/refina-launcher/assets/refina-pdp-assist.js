@@ -29,6 +29,89 @@
     } catch {}
   }
 
+  // Remember recent Refina engagement per-product so a later add-to-cart can be
+  // attributed to Refina (vs. counting every unrelated cart add on the page).
+  const ENGAGEMENT_KEY = "refina_recent_engagement";
+  const ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
+  const ENGAGEMENT_MAX_ENTRIES = 10;
+
+  function recordEngagement(productId) {
+    if (!productId) return;
+    try {
+      const now = Date.now();
+      let list = [];
+      try { list = JSON.parse(sessionStorage.getItem(ENGAGEMENT_KEY) || "[]"); } catch {}
+      if (!Array.isArray(list)) list = [];
+      list = list.filter((e) => e && e.ts && now - e.ts < ENGAGEMENT_WINDOW_MS);
+      list.push({ productId: String(productId), ts: now });
+      if (list.length > ENGAGEMENT_MAX_ENTRIES) list = list.slice(-ENGAGEMENT_MAX_ENTRIES);
+      sessionStorage.setItem(ENGAGEMENT_KEY, JSON.stringify(list));
+    } catch {}
+  }
+
+  function findRecentEngagement(productId) {
+    if (!productId) return false;
+    try {
+      const now = Date.now();
+      const list = JSON.parse(sessionStorage.getItem(ENGAGEMENT_KEY) || "[]");
+      if (!Array.isArray(list)) return false;
+      return list.some((e) => e && e.productId === String(productId) && e.ts && now - e.ts < ENGAGEMENT_WINDOW_MS);
+    } catch {
+      return false;
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Add-to-cart detection — only reported when this page's product has recent
+  // Refina engagement (avoids counting every unrelated cart add on the site).
+  // Watches the standard Ajax Cart API (/cart/add.js) plus classic form POSTs,
+  // for coverage across theme implementations. Never alters fetch/form behavior.
+  // ─────────────────────────────────────────────
+  function installCartWatcher() {
+    const CART_ADD_RE = /\/cart\/add(\.js)?(\?|$)/;
+
+    function currentPagePayload() {
+      const root = document.querySelector("[data-refina-pdp-assist]");
+      return root ? getPayload(root) : null;
+    }
+
+    function reportAddToCart() {
+      const payload = currentPagePayload();
+      if (!payload || !payload.productId) return;
+      if (!findRecentEngagement(payload.productId)) return;
+      sendAnalyticsBeacon({
+        storeId: payload.shop || "",
+        type: "concern",
+        event: "add_to_cart",
+        productId: payload.productId,
+        topProductTitle: payload.productTitle || ""
+      });
+    }
+
+    const origFetch = window.fetch;
+    if (typeof origFetch === "function") {
+      window.fetch = function (...args) {
+        const result = origFetch.apply(this, args);
+        try {
+          const urlArg = args[0];
+          const url = typeof urlArg === "string" ? urlArg : (urlArg && urlArg.url) || "";
+          if (CART_ADD_RE.test(url)) {
+            result.then((res) => { if (res && res.ok) reportAddToCart(); }).catch(() => {});
+          }
+        } catch {}
+        return result;
+      };
+    }
+
+    document.addEventListener("submit", (ev) => {
+      try {
+        const form = ev.target;
+        if (form && form.action && CART_ADD_RE.test(form.action)) reportAddToCart();
+      } catch {}
+    }, { passive: true });
+  }
+  installCartWatcher();
+
   // Detect Theme Editor/Admin (open in new tab)
   const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
   let IN_ADMIN = false;
@@ -845,14 +928,16 @@
 
       if (p.url) {
         btn.onclick = () => {
+          const clickedId = (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null;
           sendAnalyticsBeacon({
             storeId: payload.shop || payload.storeId || "",
             type: "concern",
             event: "product_click",
-            productId: (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null,
+            productId: clickedId,
             topProductTitle: p.title || "",
             contextId: payload.contextId || null
           });
+          recordEngagement(clickedId);
           try { window.location.href = p.url; } catch {}
         };
       }
@@ -1212,6 +1297,7 @@
         contextId: refreshed.contextId || null,
         intent: refreshed.intent || null
       });
+      recordEngagement(refreshed.productId);
 
       openConcierge(refreshed);
       close();
@@ -1225,6 +1311,7 @@
       topProductTitle: basePayload.productTitle || "",
       contextId: basePayload.contextId || null
     });
+    recordEngagement(basePayload.productId);
   }
 
   // ─────────────────────────────────────────────

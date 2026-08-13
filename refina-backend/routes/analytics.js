@@ -185,10 +185,11 @@ async function handleOverview(req, res) {
       .sort((a, b) => b.ts - a.ts)
       .slice(0, limit);
 
-    // product_click is a click-through signal, not a query — keep it out of the
-    // query-oriented aggregates (Total Queries, concerns, peak hour) and count it separately.
+    // product_click/add_to_cart are funnel signals, not queries — keep them out of the
+    // query-oriented aggregates (Total Queries, concerns, peak hour) and count separately.
     const productClicks = entries.filter((e) => e.event === "product_click").length;
-    const queryEntries = entries.filter((e) => e.event !== "product_click");
+    const cartAdds = entries.filter((e) => e.event === "add_to_cart").length;
+    const queryEntries = entries.filter((e) => e.event !== "product_click" && e.event !== "add_to_cart");
 
     const series = groupByDayUTC(queryEntries, (e) => e.ts);
     const surfaceCounts = {};
@@ -221,6 +222,8 @@ async function handleOverview(req, res) {
       topConcerns,
       productClicks,
       clickThroughRate: queryEntries.length ? productClicks / queryEntries.length : 0,
+      cartAdds,
+      addToCartRate: productClicks ? cartAdds / productClicks : 0,
     };
 
     return res.json({

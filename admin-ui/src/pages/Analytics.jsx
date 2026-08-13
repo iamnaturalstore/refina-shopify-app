@@ -54,19 +54,21 @@ function toMyshopifyDomain(raw) {
 
 /** Normalize the overview summary so totals.interactions is always present. */
 function normalizeSummary(sum) {
-  if (!sum || typeof sum !== "object") return { totals: { interactions: 0, productClicks: 0 } };
+  if (!sum || typeof sum !== "object") return { totals: { interactions: 0, productClicks: 0, cartAdds: 0 } };
   if (sum.totals && typeof sum.totals === "object") {
     const interactions = Number(
       sum.totals.interactions ?? sum.totals.events ?? sum.totals.queries ?? 0
     ) || 0;
     const productClicks = Number(sum.totals.productClicks ?? sum.totals.clicks ?? 0) || 0;
+    const cartAdds = Number(sum.totals.cartAdds ?? 0) || 0;
     const uniqueConcerns = Number(sum.totals.uniqueConcerns ?? 0) || 0;
     const topConcerns = Array.isArray(sum.totals.topConcerns) ? sum.totals.topConcerns : [];
-    return { ...sum, totals: { ...sum.totals, interactions, productClicks, uniqueConcerns, topConcerns } };
+    return { ...sum, totals: { ...sum.totals, interactions, productClicks, cartAdds, uniqueConcerns, topConcerns } };
   }
   const interactions = Number(sum.totalEvents ?? 0) || 0;
   const productClicks = 0; // do not infer
-  return { ...sum, totals: { interactions, productClicks } };
+  const cartAdds = 0; // do not infer
+  return { ...sum, totals: { interactions, productClicks, cartAdds } };
 }
 
 /** Pick the array of events from various server shapes. */
@@ -469,6 +471,19 @@ setErr(e?.message || "Failed to load analytics data.");
                       {totals.interactions
                         ? `${Math.round((totals.productClicks / totals.interactions) * 100)}% click-through rate`
                         : "No queries yet"}
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+              <Layout.Section variant="oneThird">
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h2" variant="headingSm" tone="subdued">Add to Cart (30 Days)</Text>
+                    <p className={styles.metricNumber}>{totals.cartAdds}</p>
+                    <Text tone="subdued">
+                      {totals.productClicks
+                        ? `${Math.round((totals.cartAdds / totals.productClicks) * 100)}% of clicks converted to cart`
+                        : "No clicks yet"}
                     </Text>
                   </BlockStack>
                 </Card>
