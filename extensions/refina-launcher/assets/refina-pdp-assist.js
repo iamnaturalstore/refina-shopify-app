@@ -850,6 +850,7 @@
             type: "concern",
             event: "product_click",
             productId: (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null,
+            topProductTitle: p.title || "",
             contextId: payload.contextId || null
           });
           try { window.location.href = p.url; } catch {}

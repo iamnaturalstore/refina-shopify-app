@@ -500,7 +500,7 @@ export default function Home() {
               <div>
                 {logs.map((row, i) => {
                   const query   = row?.concern || row?.query || "Customer asked…";
-                  const product = row?.topProductTitle || row?.topProduct?.title || "";
+                  const product = row?.topProductTitle || row?.topProduct?.title || (row?.productId ? String(row.productId) : "");
                   const when    = row?.createdAt || row?.ts || "";
                   const isLast  = i === logs.length - 1;
                   return (
