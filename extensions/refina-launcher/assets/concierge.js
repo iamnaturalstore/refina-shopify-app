@@ -1044,15 +1044,18 @@
       buyBtn.textContent = "Buy Now";
       buyBtn.addEventListener("click", () => {
         try {
-          navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
-            new Blob([JSON.stringify({
+          fetch("/apps/refina/v1/analytics/ingest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
               storeId: shopDomain,
               type: "concern",
               event: "product_click",
               productId: String(product.id),
               concern: context.query || null
-            })], { type: "application/json" })
-          );
+            }),
+            keepalive: true,
+          });
         } catch {}
       });
 

@@ -344,10 +344,11 @@ setErr(e?.message || "Failed to load analytics data.");
   const aiSessions = Number(
   rawPlan?.plan?.usage?.requestsThisPeriod ?? 0
 );
+  const truncate = (s, max) => (s && s.length > max ? `${s.slice(0, max).trim()}…` : s);
   const recentEventsRows = events.map(e => [
     e.tsServerIso ? new Date(e.tsServerIso).toLocaleString() : "—",
     e.type || "—",
-    e.concern || "—",
+    truncate(e.concern, 60) || "—",
     e.productTitle || "—",
   ]);
 

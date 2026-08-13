@@ -11,6 +11,21 @@
 
   const STORAGE_KEY = "refina_prefill";
 
+  // sendBeacon doesn't reliably follow the App Proxy's cross-origin redirect
+  // chain (myshopify.com -> custom domain -> onrender.com) — fails with a
+  // silent CORS error. fetch+keepalive follows it fine and still survives
+  // page navigation, so use that for all analytics pings instead.
+  function sendAnalyticsBeacon(payload) {
+    try {
+      fetch("/apps/refina/v1/analytics/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch {}
+  }
+
   // Detect Theme Editor/Admin (open in new tab)
   const IN_THEME_EDITOR = !!(window.Shopify && window.Shopify.designMode);
   let IN_ADMIN = false;
@@ -827,17 +842,13 @@
 
       if (p.url) {
         btn.onclick = () => {
-          try {
-            navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
-              new Blob([JSON.stringify({
-                storeId: payload.shop || payload.storeId || "",
-                type: "concern",
-                event: "product_click",
-                productId: (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null,
-                contextId: payload.contextId || null
-              })], { type: "application/json" })
-            );
-          } catch {}
+          sendAnalyticsBeacon({
+            storeId: payload.shop || payload.storeId || "",
+            type: "concern",
+            event: "product_click",
+            productId: (p.id || p.productId || p.shopifyId) != null ? String(p.id || p.productId || p.shopifyId) : null,
+            contextId: payload.contextId || null
+          });
           try { window.location.href = p.url; } catch {}
         };
       }
@@ -1187,35 +1198,27 @@
         intent: basePayload.intent || null,
       };
 
-      try {
-        navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
-          new Blob([JSON.stringify({
-            storeId: refreshed.shop,
-            type: "concern",
-            event: "drawer_confirm",
-            concern: finalPrefill,
-            productId: refreshed.productId || null,
-            contextId: refreshed.contextId || null,
-            intent: refreshed.intent || null
-          })], { type: "application/json" })
-        );
-      } catch {}
+      sendAnalyticsBeacon({
+        storeId: refreshed.shop,
+        type: "concern",
+        event: "drawer_confirm",
+        concern: finalPrefill,
+        productId: refreshed.productId || null,
+        contextId: refreshed.contextId || null,
+        intent: refreshed.intent || null
+      });
 
       openConcierge(refreshed);
       close();
     }, { once: true });
 
-    try {
-      navigator.sendBeacon?.("/apps/refina/v1/analytics/ingest",
-        new Blob([JSON.stringify({
-          storeId: basePayload.shop,
-          type: "concern",
-          event: "drawer_open",
-          productId: basePayload.productId || null,
-          contextId: basePayload.contextId || null
-        })], { type: "application/json" })
-      );
-    } catch {}
+    sendAnalyticsBeacon({
+      storeId: basePayload.shop,
+      type: "concern",
+      event: "drawer_open",
+      productId: basePayload.productId || null,
+      contextId: basePayload.contextId || null
+    });
   }
 
   // ─────────────────────────────────────────────
