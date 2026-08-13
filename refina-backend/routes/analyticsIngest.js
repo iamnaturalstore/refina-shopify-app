@@ -100,7 +100,10 @@ async function handleIngest(req, res, surfaceHint) {
   if (!shop) return res.status(400).json({ error: "missing_or_invalid_shop" });
 
   try {
-    const clean = sanitizeEventBody(req.body || {});
+    // The App Proxy hop can 302 the request, which drops the POST body (standard
+    // HTTP redirect behavior) — so accept these fields from the query string too,
+    // letting body values win when both are present.
+    const clean = sanitizeEventBody({ ...(req.query || {}), ...(req.body || {}) });
     const planDoc = await getDocSafe(db.collection("plans").doc(shop)); // read-only; Billing owns writes
     const planLevel = (planDoc && planDoc.level) || "free";
 

@@ -11,16 +11,19 @@
 
   const STORAGE_KEY = "refina_prefill";
 
-  // sendBeacon doesn't reliably follow the App Proxy's cross-origin redirect
-  // chain (myshopify.com -> custom domain -> onrender.com) — fails with a
-  // silent CORS error. fetch+keepalive follows it fine and still survives
-  // page navigation, so use that for all analytics pings instead.
+  // The App Proxy path 302-redirects to the backend (myshopify.com -> custom
+  // domain -> onrender.com). sendBeacon fails that redirect with a CORS error,
+  // and even a plain POST loses its JSON body on a 302 (standard HTTP redirect
+  // behavior). Query params survive the redirect though — same as how Shopify's
+  // own shop/timestamp/signature params make it through — so send fields that way.
   function sendAnalyticsBeacon(payload) {
     try {
-      fetch("/apps/refina/v1/analytics/ingest", {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(payload)) {
+        if (v != null) qs.set(k, String(v));
+      }
+      fetch(`/apps/refina/v1/analytics/ingest?${qs.toString()}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
         keepalive: true,
       });
     } catch {}

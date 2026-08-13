@@ -1044,16 +1044,15 @@
       buyBtn.textContent = "Buy Now";
       buyBtn.addEventListener("click", () => {
         try {
-          fetch("/apps/refina/v1/analytics/ingest", {
+          const qs = new URLSearchParams({
+            storeId: shopDomain || "",
+            type: "concern",
+            event: "product_click",
+            productId: String(product.id),
+          });
+          if (context.query) qs.set("concern", context.query);
+          fetch(`/apps/refina/v1/analytics/ingest?${qs.toString()}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              storeId: shopDomain,
-              type: "concern",
-              event: "product_click",
-              productId: String(product.id),
-              concern: context.query || null
-            }),
             keepalive: true,
           });
         } catch {}
