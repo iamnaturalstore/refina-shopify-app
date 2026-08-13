@@ -1208,6 +1208,7 @@
         event: "drawer_confirm",
         concern: finalPrefill,
         productId: refreshed.productId || null,
+        topProductTitle: refreshed.productTitle || "",
         contextId: refreshed.contextId || null,
         intent: refreshed.intent || null
       });
@@ -1221,6 +1222,7 @@
       type: "concern",
       event: "drawer_open",
       productId: basePayload.productId || null,
+      topProductTitle: basePayload.productTitle || "",
       contextId: basePayload.contextId || null
     });
   }
