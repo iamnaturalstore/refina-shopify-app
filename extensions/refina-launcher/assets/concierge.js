@@ -1067,6 +1067,7 @@
             type: "concern",
             event: "product_click",
             productId: String(product.id),
+            topProductTitle: product.name || product.title || "",
           });
           if (context.query) qs.set("concern", context.query);
           fetch(`/apps/refina/v1/analytics/ingest?${qs.toString()}`, {
