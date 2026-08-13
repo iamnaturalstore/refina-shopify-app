@@ -28,7 +28,12 @@ router.use((req, _res, next) => {
 });
 
 // If mounted exactly at /apps/refina/v1/analytics/ingest, this catches GET/POST to that base URL.
-router.get("/", (_req, res) => res.status(200).json({ ok: true, handler: "analytics-ingest-v3" }));
+// A bare diagnostic ping (no event data) gets the health-check response; a real
+// tracking ping (image-pixel GET, carrying event data via query string) gets ingested.
+router.get("/", (req, res) => {
+  if (req.query && req.query.event) return handleIngest(req, res, "storefront");
+  return res.status(200).json({ ok: true, handler: "analytics-ingest-v3" });
+});
 router.post("/", (req, res) => handleIngest(req, res, "storefront"));
 
 
@@ -140,6 +145,12 @@ async function handleIngest(req, res, surfaceHint) {
 router.post("/analytics/ingest", (req, res) => handleIngest(req, res, "storefront")); // A
 router.post("/ingest",           (req, res) => handleIngest(req, res, "storefront")); // B
 router.post("/",                 (req, res) => handleIngest(req, res, "storefront")); // C
+
+// GET variants — some storefront callers fire an image-pixel GET (survives page
+// navigation more reliably than fetch/sendBeacon); all event data travels via
+// query string in that case, which handleIngest already reads.
+router.get("/analytics/ingest", (req, res) => handleIngest(req, res, "storefront")); // A
+router.get("/ingest",           (req, res) => handleIngest(req, res, "storefront")); // B
 
 // Optional diagnostics for A/B:
 //   GET /apps/refina/v1/analytics/selftest?shop=refina-demo.myshopify.com

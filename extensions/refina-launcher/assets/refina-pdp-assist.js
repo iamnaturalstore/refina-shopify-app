@@ -12,20 +12,20 @@
   const STORAGE_KEY = "refina_prefill";
 
   // The App Proxy path 302-redirects to the backend (myshopify.com -> custom
-  // domain -> onrender.com). sendBeacon fails that redirect with a CORS error,
-  // and even a plain POST loses its JSON body on a 302 (standard HTTP redirect
-  // behavior). Query params survive the redirect though — same as how Shopify's
-  // own shop/timestamp/signature params make it through — so send fields that way.
+  // domain -> onrender.com). sendBeacon fails that redirect with a CORS error;
+  // a fetch's own follow-up request across that redirect can get cancelled by
+  // the browser when navigation (window.location.href) fires in the same tick,
+  // keepalive or not. An image-pixel GET has none of these issues — it's the
+  // classic pattern for exactly "fire a tracking ping right before navigating
+  // away" — and query params survive the redirect the same way Shopify's own
+  // shop/timestamp/signature params do.
   function sendAnalyticsBeacon(payload) {
     try {
       const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(payload)) {
         if (v != null) qs.set(k, String(v));
       }
-      fetch(`/apps/refina/v1/analytics/ingest?${qs.toString()}`, {
-        method: "POST",
-        keepalive: true,
-      });
+      new Image().src = `/apps/refina/v1/analytics/ingest?${qs.toString()}`;
     } catch {}
   }
 
