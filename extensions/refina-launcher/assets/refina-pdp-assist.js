@@ -31,6 +31,9 @@
 
   // Remember recent Refina engagement per-product so a later add-to-cart can be
   // attributed to Refina (vs. counting every unrelated cart add on the page).
+  // localStorage (not sessionStorage) — "Buy Now" from the main widget opens
+  // the PDP in a new tab, and sessionStorage doesn't carry over to a new tab
+  // even on the same site, so the signal would never be seen there otherwise.
   const ENGAGEMENT_KEY = "refina_recent_engagement";
   const ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
   const ENGAGEMENT_MAX_ENTRIES = 10;
@@ -40,12 +43,12 @@
     try {
       const now = Date.now();
       let list = [];
-      try { list = JSON.parse(sessionStorage.getItem(ENGAGEMENT_KEY) || "[]"); } catch {}
+      try { list = JSON.parse(localStorage.getItem(ENGAGEMENT_KEY) || "[]"); } catch {}
       if (!Array.isArray(list)) list = [];
       list = list.filter((e) => e && e.ts && now - e.ts < ENGAGEMENT_WINDOW_MS);
       list.push({ productId: String(productId), ts: now });
       if (list.length > ENGAGEMENT_MAX_ENTRIES) list = list.slice(-ENGAGEMENT_MAX_ENTRIES);
-      sessionStorage.setItem(ENGAGEMENT_KEY, JSON.stringify(list));
+      localStorage.setItem(ENGAGEMENT_KEY, JSON.stringify(list));
     } catch {}
   }
 
@@ -53,7 +56,7 @@
     if (!productId) return false;
     try {
       const now = Date.now();
-      const list = JSON.parse(sessionStorage.getItem(ENGAGEMENT_KEY) || "[]");
+      const list = JSON.parse(localStorage.getItem(ENGAGEMENT_KEY) || "[]");
       if (!Array.isArray(list)) return false;
       return list.some((e) => e && e.productId === String(productId) && e.ts && now - e.ts < ENGAGEMENT_WINDOW_MS);
     } catch {

@@ -133,6 +133,24 @@
       "";
     const openOnLoad = String(settings.openOnLoad).toLowerCase() === "true";
 
+    // Shared with refina-pdp-assist.js's add-to-cart watcher: same key/shape,
+    // localStorage so it survives "Buy Now" opening the PDP in a new tab.
+    const REFINA_ENGAGEMENT_KEY = "refina_recent_engagement";
+    const REFINA_ENGAGEMENT_WINDOW_MS = 30 * 60 * 1000;
+    function recordRefinaEngagement(productId) {
+      if (!productId) return;
+      try {
+        const now = Date.now();
+        let list = [];
+        try { list = JSON.parse(localStorage.getItem(REFINA_ENGAGEMENT_KEY) || "[]"); } catch {}
+        if (!Array.isArray(list)) list = [];
+        list = list.filter((e) => e && e.ts && now - e.ts < REFINA_ENGAGEMENT_WINDOW_MS);
+        list.push({ productId: String(productId), ts: now });
+        if (list.length > 10) list = list.slice(-10);
+        localStorage.setItem(REFINA_ENGAGEMENT_KEY, JSON.stringify(list));
+      } catch {}
+    }
+
     const cssColor = (value, fallback) => {
       const v = String(value || "").trim();
       return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v)
@@ -1056,6 +1074,7 @@
             keepalive: true,
           });
         } catch {}
+        recordRefinaEngagement(product.id);
       });
 
       actions.appendChild(buyBtn);
