@@ -85,6 +85,7 @@ function pickArray(ev) {
 const EVENT_TYPE_LABELS = {
   recommendation_received: "Query",
   product_click: "Product Click",
+  add_to_cart: "Add to Cart",
   drawer_open: "PDP Drawer Opened",
   drawer_confirm: "PDP Drawer Confirmed",
   mapping_applied: "Query",
